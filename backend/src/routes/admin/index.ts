@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireStaff } from '../../middleware/auth.js';
+import { adminAdsRouter } from './ads.js';
 import { adminAuthRouter } from './auth.js';
 import { adminBatchesRouter } from './batches.js';
 import { adminCategoriesRouter } from './categories.js';
@@ -17,6 +18,7 @@ export const adminRouter = Router();
 adminRouter.use('/auth', adminAuthRouter);
 adminRouter.use(requireStaff);
 
+adminRouter.use('/ads', adminAdsRouter);
 adminRouter.use('/products', adminProductsRouter);
 adminRouter.use('/categories', adminCategoriesRouter);
 adminRouter.use('/orders', adminOrdersRouter);

@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { AdBanner } from "@/components/AdBanner";
 import { ProductCard } from "@/components/ProductCard";
 import { Button, Card, Divider, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import type { Category, Product, Store } from "@/lib/types";
+import type { Ad, Category, Product, Store } from "@/lib/types";
 
 /** Гадуур хажуугийн зай — өргөн дэлгэцэд агуулга 1120px орчим болно. */
 const GUTTER = "px-4 sm:px-6 lg:px-10 xl:px-20";
@@ -14,6 +15,7 @@ const GUTTER = "px-4 sm:px-6 lg:px-10 xl:px-20";
 export default function HomePage() {
   const cart = useCart();
   const [store, setStore] = useState<Store | null>(null);
+  const [ads, setAds] = useState<Ad[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [orderItems, setOrderItems] = useState<Product[]>([]);
   const [readyItems, setReadyItems] = useState<Product[]>([]);
@@ -24,10 +26,11 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.store(), api.categories()])
-      .then(([s, c]) => {
+    Promise.all([api.store(), api.categories(), api.ads()])
+      .then(([s, c, a]) => {
         setStore(s);
         setCategories(c);
+        setAds(a);
       })
       .catch((e: ApiError) => setError(e.message));
   }, []);
@@ -191,7 +194,6 @@ function NavLink({ href, children }: { href: string; children: string }) {
   );
 }
 
-/** Playhouse-ийн баннерын байрлалд — бидний хувьд итгэл төрүүлэх мэдээлэл. */
 function Hero({ store }: { store: Store }) {
   return (
     <section className={`${GUTTER} pt-6`}>

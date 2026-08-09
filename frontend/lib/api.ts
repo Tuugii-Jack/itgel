@@ -1,4 +1,6 @@
 import type {
+  Ad,
+  AdminAd,
   AdminBatch,
   AdminCategory,
   AdminCustomer,
@@ -149,6 +151,8 @@ export const api = {
     request<Product>(`/products/${id}`).then((r) => r.data),
 
   store: () => request<Store>("/store").then((r) => r.data),
+
+  ads: () => request<Ad[]>("/ads").then((r) => r.data),
 
   slots: (days = 14) =>
     request<{ slots: Slot[]; districts: { district: string; fee: number }[] }>(
@@ -325,6 +329,52 @@ export const adminApi = {
     request<{ id: string }>(`/admin/categories/${id}`, {
       ...adminAuth,
       method: "DELETE",
+    }).then((r) => r.data),
+
+  ads: () => request<AdminAd[]>("/admin/ads", adminAuth).then((r) => r.data),
+
+  createAd: (body: {
+    title?: string;
+    imageUrl: string;
+    linkUrl?: string | null;
+    isActive?: boolean;
+    sortOrder?: number;
+  }) =>
+    request<AdminAd>("/admin/ads", { ...adminAuth, method: "POST", body }).then(
+      (r) => r.data,
+    ),
+
+  updateAd: (
+    id: string,
+    body: Partial<{
+      title: string;
+      imageUrl: string;
+      linkUrl: string | null;
+      isActive: boolean;
+      sortOrder: number;
+    }>,
+  ) =>
+    request<AdminAd>(`/admin/ads/${id}`, {
+      ...adminAuth,
+      method: "PATCH",
+      body,
+    }).then((r) => r.data),
+
+  deleteAd: (id: string) =>
+    request<{ id: string }>(`/admin/ads/${id}`, {
+      ...adminAuth,
+      method: "DELETE",
+    }).then((r) => r.data),
+
+  presignAdImage: (id: string, contentType: string) =>
+    request<{
+      uploadUrl: string;
+      publicUrl: string;
+      headers: Record<string, string>;
+    }>(`/admin/ads/${id}/image`, {
+      ...adminAuth,
+      method: "POST",
+      body: { contentType },
     }).then((r) => r.data),
 
   orders: (query?: Query) =>

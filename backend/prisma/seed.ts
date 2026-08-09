@@ -23,6 +23,7 @@ async function reset() {
   await prisma.productVariant.deleteMany();
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
+  await prisma.ad.deleteMany();
   await prisma.otpCode.deleteMany();
   await prisma.customer.deleteMany();
   await prisma.adminUser.deleteMany();
@@ -106,6 +107,23 @@ async function main() {
       passwordHash: await bcrypt.hash(process.env.ADMIN_PASSWORD ?? 'admin123', 10),
       role: 'ADMIN',
     },
+  });
+
+  await prisma.ad.createMany({
+    data: [
+      {
+        title: 'Захиалгын бараа',
+        imageUrl: 'https://placehold.co/1200x400/1C1917/FFFFFF?text=Захиалгын+бараа',
+        linkUrl: '/#order',
+        sortOrder: 0,
+      },
+      {
+        title: 'Бэлэн бараа',
+        imageUrl: 'https://placehold.co/1200x400/57534E/FFFFFF?text=Бэлэн+бараа',
+        linkUrl: '/#ready',
+        sortOrder: 1,
+      },
+    ],
   });
 
   const categories = await Promise.all(

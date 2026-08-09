@@ -133,5 +133,60 @@ export async function presignProductImage(
   };
 }
 
+/** Зар сурталчилгааны баннер байршуулах presigned URL. */
+export async function presignAdImage(adId: string, contentType: string): Promise<PresignedUpload> {
+  if (!ALLOWED_MIME.has(contentType)) {
+    throw badRequest(`Зөвхөн зураг байршуулна: ${[...ALLOWED_MIME].join(', ')}`);
+  }
+
+  const key = `ads/${adId}/${randomUUID()}.${EXT[contentType]}`;
+  const provider = pickProvider();
+
+  if (provider === 'r2') {
+    const expiresInSec = 600;
+    const uploadUrl = await getSignedUrl(
+      r2!,
+      new PutObjectCommand({ Bucket: env.R2_BUCKET!, Key: key, ContentType: contentType }),
+      { expiresIn: expiresInSec },
+    );
+    return {
+      uploadUrl,
+      publicUrl: r2PublicUrl(key),
+      key,
+      expiresInSec,
+      method: 'PUT',
+      headers: { 'content-type': contentType },
+      provider,
+    };
+  }
+
+  if (provider === 'supabase') {
+    const bucket = supabase!.storage.from(env.SUPABASE_STORAGE_BUCKET);
+    const { data, error } = await bucket.createSignedUploadUrl(key);
+    if (error || !data) {
+      throw new AppError(502, 'STORAGE_ERROR', `Supabase storage алдаа: ${error?.message ?? 'тодорхойгүй'}`);
+    }
+    return {
+      uploadUrl: data.signedUrl,
+      publicUrl: bucket.getPublicUrl(key).data.publicUrl,
+      key,
+      expiresInSec: 2 * 60 * 60,
+      method: 'PUT',
+      headers: { 'content-type': contentType },
+      provider,
+    };
+  }
+
+  return {
+    uploadUrl: `mock://upload/${key}`,
+    publicUrl: `https://placehold.co/1200x400?text=${encodeURIComponent('Ad')}`,
+    key,
+    expiresInSec: 600,
+    method: 'PUT',
+    headers: { 'content-type': contentType },
+    provider: 'mock',
+  };
+}
+
 export const storageConfigured = r2Configured || Boolean(supabase);
 export const activeStorageProvider = (): StorageProvider => pickProvider();

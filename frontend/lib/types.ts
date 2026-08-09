@@ -277,6 +277,20 @@ export interface AdminCategory {
   createdAt: string;
 }
 
+export interface Ad {
+  id: string;
+  title: string;
+  imageUrl: string;
+  linkUrl: string | null;
+}
+
+export interface AdminAd extends Ad {
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RevenueReport {
   period: "3m" | "6m" | "1y";
   series: {

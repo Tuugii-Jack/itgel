@@ -263,6 +263,20 @@ model Delivery {
   @@index([scheduledDay, status])
 }
 
+model Ad {
+  id        String    @id @default(cuid())
+  title     String    @default("")
+  imageUrl  String
+  linkUrl   String?
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([isActive, sortOrder])
+}
+
 model Setting {
   id                  Int      @id @default(1)
   storeName           String   @default("itgel")

@@ -12,6 +12,7 @@ const NAV = [
   { href: "/admin/batches", label: "Багц" },
   { href: "/admin/deliveries", label: "Хүргэлт" },
   { href: "/admin/products", label: "Бараа" },
+  { href: "/admin/ads", label: "Зар" },
   { href: "/admin/categories", label: "Ангилал" },
   { href: "/admin/customers", label: "Хэрэглэгчид" },
   { href: "/admin/reports", label: "Тайлан" },
