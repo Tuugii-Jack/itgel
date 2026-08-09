@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
@@ -10,15 +11,13 @@ import {
   Divider,
   Empty,
   ErrorNote,
-  Input,
   Spinner,
 } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import type { Ad, Category, Product, Store } from "@/lib/types";
 
-/** Гадуур хажуугийн зай — өргөн дэлгэцэд агуулга 1120px орчим болно. */
-const GUTTER = "px-4 sm:px-6 lg:px-10 xl:px-20";
+const GUTTER = "px-4 sm:px-6 lg:px-8 xl:px-12 2xl:px-16";
 
 export default function HomePage() {
   const cart = useCart();
@@ -90,16 +89,13 @@ export default function HomePage() {
     <div className='page pb-24 sm:pb-16'>
       <TopNav store={store} />
 
-      <div className={`${GUTTER} border-b border-line bg-bg py-3 lg:hidden`}>
-        <Input value={search} onChange={setSearch} placeholder='Бараа хайх' />
-      </div>
-
       {ads.length > 0 && !filtering && (
         <div className={`${GUTTER} pt-4 lg:pt-6`}>
           <AdBanner ads={ads} />
         </div>
       )}
 
+      {/* Category chips — soft blue active state */}
       <div
         className={`no-scrollbar flex gap-2 overflow-x-auto ${GUTTER} pt-4 lg:pt-6`}
       >
@@ -125,7 +121,7 @@ export default function HomePage() {
 
       {loading && (
         <div className='flex justify-center py-20'>
-          <Spinner className='text-muted' />
+          <Spinner className='text-primary' />
         </div>
       )}
 
@@ -149,11 +145,13 @@ export default function HomePage() {
         />
       )}
 
+      {store && <MapSection />}
+
       {store && <TrustBlock store={store} />}
 
       {cart.count > 0 && (
         <div
-          className={`sticky bottom-0 z-20 border-t border-line bg-bg p-4 sm:static sm:border-0 ${GUTTER} sm:pb-4`}
+          className={`sticky bottom-0 z-20 border-t border-line bg-bg/95 backdrop-blur-sm p-4 sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-none ${GUTTER} sm:pb-4`}
         >
           <Link href='/cart' className='no-underline'>
             <Button full size='lg' className='sm:mx-auto sm:max-w-[360px]'>
@@ -169,12 +167,17 @@ export default function HomePage() {
 function TopNav({ store }: { store: Store | null }) {
   return (
     <header
-      className={`sticky top-0 z-30 flex h-16 items-center gap-6 border-b border-line bg-bg ${GUTTER}`}
+      className={`sticky top-0 z-30 flex h-16 items-center gap-6 border-b border-line bg-bg/95 backdrop-blur-sm ${GUTTER}`}
     >
       <Link href='/' className='no-underline'>
-        <span className='text-[20px] font-medium tracking-[-0.01em]'>
-          {store?.storeName ?? "itgel"}
-        </span>
+        <Image
+          src='/logo.png'
+          alt={store?.storeName ?? "itgel"}
+          width={40}
+          height={40}
+          priority
+          className='h-10 w-auto'
+        />
       </Link>
 
       <nav className='hidden items-center gap-1 lg:flex'>
@@ -186,7 +189,7 @@ function TopNav({ store }: { store: Store | null }) {
         {store?.phone && (
           <a
             href={`tel:${store.phone.replace(/\D/g, "")}`}
-            className='tnum hidden h-10 items-center rounded-[8px] px-3 text-[14px] text-ink-2 no-underline xl:inline-flex'
+            className='tnum hidden h-10 items-center rounded-[8px] px-3 text-[14px] text-ink-2 no-underline transition-colors hover:text-primary xl:inline-flex'
           >
             {store.phone}
           </a>
@@ -203,10 +206,11 @@ function TopNav({ store }: { store: Store | null }) {
               height='16'
               viewBox='0 0 16 16'
               fill='none'
-              stroke='#57534E'
+              stroke='currentColor'
               strokeWidth='1.3'
               strokeLinecap='round'
               strokeLinejoin='round'
+              className='text-ink-2'
             >
               <path d='M1.8 5.2 8 2.2l6.2 3v5.6L8 13.8l-6.2-3z' />
               <path d='M1.8 5.2 8 8.2l6.2-3 M8 8.2v5.6' />
@@ -224,7 +228,7 @@ function NavLink({ href, children }: { href: string; children: string }) {
   return (
     <a
       href={href}
-      className='rounded-[8px] px-3 py-2 text-[14px] text-ink-2 no-underline hover:bg-surface hover:text-ink'
+      className='rounded-[8px] px-3 py-2 text-[14px] text-ink-2 no-underline transition-colors hover:bg-primary-soft hover:text-primary'
     >
       {children}
     </a>
@@ -244,8 +248,12 @@ function Chip({
     <button
       type='button'
       onClick={onClick}
-      className={`h-10 shrink-0 cursor-pointer whitespace-nowrap rounded-[8px] border px-4 text-[14px] leading-tight
-        ${active ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"}`}
+      className={`h-10 shrink-0 cursor-pointer whitespace-nowrap rounded-[8px] border px-4 text-[14px] leading-tight transition-all
+        ${
+          active
+            ? "border-primary bg-primary text-white shadow-sm shadow-primary/20"
+            : "border-line bg-bg text-ink hover:border-primary-muted hover:bg-primary-soft hover:text-primary"
+        }`}
     >
       {children}
     </button>
@@ -267,14 +275,14 @@ function Section({
     <section id={id} className='scroll-mt-20 pt-8 lg:pt-12'>
       <div className={`flex items-end justify-between gap-4 ${GUTTER}`}>
         <div>
-          <h2 className='m-0 text-[20px] font-medium leading-[1.3] lg:text-[28px]'>
+          <h2 className='m-0 text-[20px] font-medium leading-[1.3] text-ink lg:text-[28px]'>
             {title}
           </h2>
           <p className='mt-1 mb-0 text-[13px] text-ink-2 lg:text-[15px]'>
             {hint}
           </p>
         </div>
-        <span className='hidden shrink-0 whitespace-nowrap text-[13px] text-muted sm:inline lg:text-[14px]'>
+        <span className='hidden shrink-0 whitespace-nowrap rounded-full bg-primary-soft px-3 py-1 text-[13px] font-medium text-primary sm:inline lg:text-[14px]'>
           {items.length} бараа
         </span>
       </div>
@@ -291,52 +299,108 @@ function Section({
   );
 }
 
+function MapSection() {
+  return (
+    <section className={`${GUTTER} pt-10 sm:pt-12`}>
+      <div className='mb-4 sm:mb-5'>
+        <h2 className='m-0 text-[20px] font-medium leading-[1.3] text-ink lg:text-[24px]'>
+          Байршил
+        </h2>
+        <p className='mt-1 mb-0 text-[13px] text-ink-2 lg:text-[15px]'>
+          Манай дэлгүүр хаана байрладаг вэ
+        </p>
+      </div>
+
+      <div className='overflow-hidden rounded-[12px] border border-line shadow-sm'>
+        <iframe
+          src='https://www.google.com/maps/embed?pb=!1m14!1m8!1m3!1d1213.2483390526872!2d106.81671469298601!3d47.868546277165414!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x5d969586de853db9%3A0xa0feada2340ad382!2z0JTTqdC806nQsyDTqNGA0LPTqdOpIEFwYXJ0bWVudA!5e1!3m2!1sen!2smn!4v1786297975462!5m2!1sen!2smn'
+          width='600'
+          height='450'
+          style={{ border: 0 }}
+          allowFullScreen
+          loading='lazy'
+          referrerPolicy='strict-origin-when-cross-origin'
+          className='h-[260px] w-full sm:h-[320px] lg:h-[380px]'
+          title='Дэлгүүрийн байршил'
+        />
+      </div>
+    </section>
+  );
+}
+
 function TrustBlock({ store }: { store: Store }) {
   return (
-    <section className={`${GUTTER} pt-12`}>
-      <Card surface className='p-6 lg:p-8'>
-        <div className='grid gap-6 lg:grid-cols-[1fr_1.4fr] lg:gap-12'>
-          <div>
-            <div className='text-[17px] font-medium lg:text-[20px]'>
-              Бид хаана байдаг вэ
-            </div>
-            <p className='mt-2 mb-0 text-[13px] leading-[1.6] text-ink-2'>
-              Бараа гэмтэлтэй ирсэн эсвэл захиалгатай тохирохгүй бол 7 хоногийн
-              дотор буцаана.
-            </p>
-          </div>
-
-          <div className='grid gap-3 text-[14px] sm:grid-cols-2'>
-            <InfoRow label='Хаяг' value={store.address} />
-            <InfoRow label='Ажлын цаг' value={store.workHours} />
-            <InfoRow
-              label='Утас'
-              value={
-                <a
-                  href={`tel:${store.phone.replace(/\D/g, "")}`}
-                  className='tnum'
-                >
-                  {store.phone}
-                </a>
-              }
-            />
-            {store.facebookUrl && (
-              <InfoRow
-                label='Facebook'
-                value={
-                  <a href={store.facebookUrl} target='_blank' rel='noreferrer'>
-                    {store.facebookUrl.replace(/^https?:\/\//, "")}
-                  </a>
-                }
+    <section className='mt-10 sm:mt-12'>
+      {/* GUTTER байхгүй → зүүн, баруун зайгүй */}
+      <Card
+        surface
+        className='rounded-none border-x-0 border-b-0 border-t border-line p-5 shadow-none sm:p-6 lg:p-8'
+      >
+        <div className={`${GUTTER}`}>
+          <div className='flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-6'>
+            {/* Logo */}
+            <div className='shrink-0'>
+              <Image
+                src='/logo.png'
+                alt={store?.storeName ?? "itgel"}
+                width={48}
+                height={48}
+                priority
+                className='h-11 w-auto sm:h-12'
               />
-            )}
-          </div>
-        </div>
+            </div>
 
-        <Divider className='my-5' />
-        <p className='m-0 text-[13px] text-muted'>
-          © {new Date().getFullYear()} {store.storeName}
-        </p>
+            {/* Store information */}
+            <div className='min-w-0 flex-1'>
+              <div className='text-[17px] font-medium leading-snug text-ink sm:text-[18px] lg:text-[20px]'>
+                Бид хаана байдаг вэ
+              </div>
+
+              <p className='mt-1.5 mb-5 text-[13px] leading-[1.6] text-ink-2 sm:mt-2 sm:mb-6'>
+                Манай дэлгүүрийн хаяг, ажлын цаг болон холбоо барих мэдээлэл.
+              </p>
+
+              <div className='grid gap-3.5 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-4 text-[14px]'>
+                <InfoRow label='Хаяг' value={store.address} />
+                <InfoRow label='Ажлын цаг' value={store.workHours} />
+
+                <InfoRow
+                  label='Утас'
+                  value={
+                    <a
+                      href={`tel:${store.phone.replace(/\D/g, "")}`}
+                      className='tnum text-primary hover:underline'
+                    >
+                      {store.phone}
+                    </a>
+                  }
+                />
+
+                {store.facebookUrl && (
+                  <InfoRow
+                    label='Facebook'
+                    value={
+                      <a
+                        href={store.facebookUrl}
+                        target='_blank'
+                        rel='noreferrer'
+                        className='break-all text-primary hover:underline'
+                      >
+                        {store.facebookUrl.replace(/^https?:\/\//, "")}
+                      </a>
+                    }
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+
+          <Divider className='my-5 sm:my-6' />
+
+          <p className='m-0 text-[12px] text-muted sm:text-[13px]'>
+            © {new Date().getFullYear()} {store.storeName}
+          </p>
+        </div>
       </Card>
     </section>
   );
@@ -344,9 +408,11 @@ function TrustBlock({ store }: { store: Store }) {
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div>
-      <div className='text-[12px] text-muted'>{label}</div>
-      <div className='leading-[1.5] text-ink'>{value}</div>
+    <div className='min-w-0'>
+      <div className='text-[11px] font-medium uppercase tracking-wide text-muted sm:text-[12px]'>
+        {label}
+      </div>
+      <div className='mt-0.5 break-words leading-[1.5] text-ink'>{value}</div>
     </div>
   );
 }

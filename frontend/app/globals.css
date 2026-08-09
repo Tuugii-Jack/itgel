@@ -3,6 +3,7 @@
 /*
  * itgel дизайн систем — design-prompt.md-ийн токенууд.
  * Өнгийг ЗӨВХӨН статус илэрхийлэхэд. Товч, header, хүрээнд өнгө хэрэглэхгүй.
+ * Logo-ийн бүдэг/тод цэнхэртэй тааруулж primary blue нэмсэн.
  */
 @theme {
   --color-bg: #ffffff;
@@ -12,6 +13,12 @@
   --color-ink: #1c1917;
   --color-ink-2: #57534e;
   --color-muted: #a8a29e;
+
+  /* Primary blues — logo-той нийцүүлсэн */
+  --color-primary: #2563eb;        /* тод цэнхэр */
+  --color-primary-soft: #eff6ff;   /* бүдэг цэнхэр background */
+  --color-primary-muted: #93c5fd;  /* дунд зэргийн */
+  --color-primary-dark: #1d4ed8;
 
   --color-ok: #15803d;
   --color-ok-bg: #f0fdf4;
@@ -52,9 +59,6 @@ body {
 
 /*
  * Мобайл эхэлж — 390px дээр төгс. Desktop дээр өргөнөө ашиглана.
- * .screen  — уншихад чиглэсэн шугаман урсгал (сагс, хянах, профайл).
- *            Хэт өргөн болгохгүй: мөрийн урт уншихад тохиромжтой хэвээр.
- * .page    — каталог, дэлгэрэнгүй зэрэг өргөн зайг ашигладаг хуудас.
  */
 .screen,
 .page {
@@ -62,14 +66,6 @@ body {
   margin: 0 auto;
   background: var(--color-bg);
   min-height: 100dvh;
-}
-
-.screen {
-  max-width: 560px;
-}
-
-.page {
-  max-width: 1280px;
 }
 
 input,
@@ -85,10 +81,10 @@ input:focus,
 textarea:focus,
 select:focus {
   outline: none;
-  border-color: var(--color-muted);
+  border-color: var(--color-primary-muted);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
-/* Хоёр мөр болгож таслах — барааны нэр. */
 .clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
