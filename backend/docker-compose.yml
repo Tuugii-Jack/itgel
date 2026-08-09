@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: itgel-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: itgel
+      POSTGRES_PASSWORD: itgel
+      POSTGRES_DB: itgel
+    ports:
+      - "5432:5432"
+    volumes:
+      - itgel-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U itgel"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  itgel-db:

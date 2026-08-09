@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# itgel — frontend
 
-## Getting Started
+Дизайнаас (`itgel Захиалгын сайт.dc.html`, `itgel Админ.dc.html`) хийсэн Next.js апп.
+Хэрэглэгчийн 7 дэлгэц + админы 10 дэлгэц. Backend: [`../backend`](../backend).
 
-First, run the development server:
+## Эхлүүлэх
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env.local
+npm install
+npm run dev            # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Backend нь 4000 порт дээр ажиллаж байх шаардлагатай. Админ: `admin@itgel.mn` / `admin123`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Зам
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Зам | Дэлгэц |
+| --- | --- |
+| `/` | 01 Нүүр — захиалгын ба бэлэн бараа, ангилал, хайлт |
+| `/p/[id]` | 02 Барааны дэлгэрэнгүй — «Энэ бараа хэрхэн ирэх вэ» timeline |
+| `/cart` | 03 Сагс ба захиалга — нэг хуудсан дээр, зөвхөн утас + код |
+| `/success/[code]` | 04 Захиалга амжилттай — том код, QR |
+| `/t` · `/t/[code]` | 05 Хянах — 6 алхамт timeline. Бараа ирсэн үед 06 (авах арга сонгох) энд нээгдэнэ |
+| `/profile` | 07 Профайл — захиалга, төлбөр, мэдээлэл гурван таб |
+| `/admin/*` | Админ — захиалга, хүлээлгэн өгөх, багц, хүргэлт, бараа, ангилал, хэрэглэгчид, тайлан, тохиргоо |
 
-## Learn More
+## Бүтэц
 
-To learn more about Next.js, take a look at the following resources:
+```
+app/(shop)/       Хэрэглэгчийн дэлгэцүүд (мобайл эхэлж, max-width 480px)
+app/admin/        Админ панель (desktop хүснэгт, утсанд карт)
+components/       ui.tsx — дизайн системийн элементүүд, ProductCard, Qr, QrScanner
+components/admin/ Админы хуваалцсан элементүүд, ProductForm
+lib/api.ts        Backend-ийн бүх endpoint, типтэй
+lib/format.ts     Мөнгө, огноо — бүгд Asia/Ulaanbaatar цагаар
+lib/cart.tsx      Сагс (localStorage, backend дээр байхгүй)
+lib/session.tsx   Хэрэглэгчийн JWT; lib/admin-session.tsx — админых
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Дизайн систем
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Токенууд `app/globals.css` дотор Tailwind `@theme`-ээр:
 
-## Deploy on Vercel
+- Өнгө: дэвсгэр `#FFFFFF`, гадаргуу `#FAFAF9`, хүрээ `#E7E5E4`, текст `#1C1917` / `#57534E` / `#A8A29E`
+- Статусын өнгө зөвхөн badge, тэмдэглэгээнд: ногоон `#15803D`, улбар `#B45309`, цэнхэр `#1D4ED8`, улаан `#B91C1C`
+- Inter (кирилл subset), жин зөвхөн 400 ба 500, line-height 1.6
+- Радиус: карт 12px, товч/оролт 8px. Товч, оролтын өндөр ≥44px
+- Сүүдэр, градиент, emoji хэрэглэхгүй — зөвхөн 1px хүрээ
+- Мөнгөн дүн, код, огноонд `.tnum` (tabular numbers)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Тэмдэглэл
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **QR** — амжилттай дэлгэц дээр хяналтын холбоосыг агуулсан QR зурна (`qrcode`).
+  Админы хүлээлгэн өгөх дэлгэц камераар уншина (`@zxing/browser`) — камер зөвхөн
+  **HTTPS эсвэл localhost** дээр ажиллана. Ажиллахгүй бол код гараар оруулах хэсэг үлддэг.
+- **Сагс** нь зөвхөн браузерт. Захиалга үүсгэх үед л сервер рүү явна.
+- **Зураг** ачаалагдахгүй бол `ProductImage` alt текстийн оронд placeholder харуулна.
+- Барааны зураг **Cloudflare R2** руу presigned PUT-ээр шууд орно. Browser-ээс шууд
+  байршуулахад R2 bucket дээр CORS тохируулсан байх шаардлагатай.

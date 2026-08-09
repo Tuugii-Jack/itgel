@@ -1,0 +1,295 @@
+// itgel — захиалгын дэлгүүрийн өгөгдлийн сан
+// Бүх мөнгөн дүн Int (төгрөг), float хэрэглэхгүй.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Supabase дээр DATABASE_URL нь pooler (6543, pgbouncer), DIRECT_URL нь шууд холболт (5432).
+  // Локал Postgres дээр хоёулаа ижил байж болно.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum ProductStatus {
+  ACTIVE
+  HIDDEN
+  DRAFT
+  CLOSED
+  SOLD_OUT
+  ARCHIVED
+}
+
+enum VariantKind {
+  SIZE
+  COLOR
+}
+
+enum OrderStatus {
+  NEW
+  CONFIRMED
+  IN_BATCH
+  IN_TRANSIT
+  ARRIVED
+  HANDED_OVER
+  CANCELLED
+}
+
+enum Fulfilment {
+  PICKUP
+  DELIVERY
+}
+
+enum BatchStage {
+  COLLECTING
+  CLOSED
+  AT_SUPPLIER
+  IN_TRANSIT
+  AT_WAREHOUSE
+  DONE
+}
+
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  DELIVERED
+}
+
+enum AdminRole {
+  ADMIN
+  STAFF
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  isActive  Boolean   @default(true)
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  products Product[]
+
+  @@index([isActive, sortOrder])
+}
+
+model Product {
+  id           String        @id @default(cuid())
+  name         String
+  description  String?
+  categoryId   String
+  costPrice    Int // анхны үнэ — хэрэглэгчийн API-д хэзээ ч буцаахгүй
+  sellPrice    Int
+  stock        Int           @default(0)
+  closeAt      DateTime? // null бол бэлэн бараа
+  leadMinDays  Int           @default(7)
+  leadMaxDays  Int           @default(14)
+  status       ProductStatus @default(DRAFT)
+  images       String[]      @default([])
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+
+  category   Category       @relation(fields: [categoryId], references: [id])
+  variants   ProductVariant[]
+  sizeChart  SizeChartRow[]
+  orderItems OrderItem[]
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([closeAt])
+}
+
+model ProductVariant {
+  id        String      @id @default(cuid())
+  productId String
+  kind      VariantKind
+  value     String
+  sortOrder Int         @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, kind, value])
+  @@index([productId, kind, sortOrder])
+}
+
+model SizeChartRow {
+  id          String @id @default(cuid())
+  productId   String
+  size        String
+  heightRange String
+  chestCm     String
+  sortOrder   Int    @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, sortOrder])
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  /// Хадгалсан хаяг — хүргэлт сонгоход автоматаар орно.
+  district    String?
+  khoroo      String?
+  addressText String?
+
+  /// Мэдэгдлийн тохиргоо (профайл дээрх 3 сэлгүүр).
+  notifyPayment Boolean @default(true)
+  notifyArrival Boolean @default(true)
+  notifyPromo   Boolean @default(false)
+
+  orders Order[]
+}
+
+model OtpCode {
+  id        String    @id @default(cuid())
+  phone     String
+  code      String // 4 орон
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         AdminRole @default(ADMIN)
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  lastLoginAt  DateTime?
+}
+
+model Order {
+  id          String      @id @default(cuid())
+  code        String      @unique // PH-XXXXXX
+  customerId  String
+  status      OrderStatus @default(NEW)
+  subtotal    Int         @default(0)
+  paidAmount  Int         @default(0)
+  dueAmount   Int         @default(0)
+  deliveryFee Int         @default(0)
+  batchId     String?
+  fulfilment  Fulfilment? // бараа ирсний дараа хэрэглэгч сонгоно
+  note        String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  // timeline-д хэрэглэгдэх төлөв бүрийн огноо
+  confirmedAt  DateTime?
+  inBatchAt    DateTime?
+  inTransitAt  DateTime?
+  arrivedAt    DateTime?
+  handedOverAt DateTime?
+  cancelledAt  DateTime?
+
+  /// Ирсэн тухай SMS илгээсэн огноо — давхар илгээхээс сэргийлнэ.
+  arrivalNotifiedAt DateTime?
+
+  customer  Customer    @relation(fields: [customerId], references: [id])
+  batch     Batch?      @relation(fields: [batchId], references: [id])
+  items     OrderItem[]
+  delivery  Delivery?
+
+  @@index([status])
+  @@index([customerId])
+  @@index([batchId])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id                String  @id @default(cuid())
+  orderId           String
+  productId         String
+  nameSnapshot      String
+  size              String?
+  color             String?
+  qty               Int
+  unitPrice         Int
+  costPriceSnapshot Int
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+model Batch {
+  id        String     @id @default(cuid())
+  name      String
+  stage     BatchStage @default(COLLECTING)
+  closedAt  DateTime?
+  weightKg  Int? // граммаар биш, бүхэл кг
+  etaFrom   DateTime?
+  etaTo     DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  orders Order[]
+
+  @@index([stage])
+}
+
+model Delivery {
+  id           String         @id @default(cuid())
+  orderId      String         @unique
+  scheduledDay DateTime // өдрийн эхлэл (UB цагаар)
+  district     String
+  khoroo       String?
+  addressText  String?
+  fee          Int            @default(0)
+  courierName  String?
+  status       DeliveryStatus @default(PENDING)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([scheduledDay, status])
+}
+
+model Setting {
+  id                  Int      @id @default(1)
+  storeName           String   @default("itgel")
+  phone               String   @default("")
+  address             String   @default("")
+  workHours           String   @default("")
+  facebookUrl         String   @default("")
+  depositPercent      Int      @default(100)
+  defaultLeadMinDays  Int      @default(7)
+  defaultLeadMaxDays  Int      @default(14)
+  smsOnArrival        Boolean  @default(true)
+  autoCloseOnDeadline Boolean  @default(true)
+  deliveryFees        Json     @default("{}") // { "Баянзүрх": 6000, ... }
+  deliveryDailyLimit  Int      @default(20)
+  updatedAt           DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actor     String // "admin:<id>" | "customer:<id>" | "system"
+  action    String // CREATE | UPDATE | DELETE | STATUS_CHANGE ...
+  entity    String // Product | Order | Setting ...
+  entityId  String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}

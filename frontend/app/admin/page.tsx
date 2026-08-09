@@ -1,0 +1,301 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import {
+  BATCH_STAGE_LABEL,
+  Metric,
+  OrderBadge,
+  ORDER_STATUS_LABEL,
+  PageHead,
+  Select,
+  Table,
+  Td,
+  Th,
+} from "@/components/admin/shared";
+import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
+import { adminApi, ApiError } from "@/lib/api";
+import { dayLabel, money, phoneLabel } from "@/lib/format";
+import type { AdminBatch, AdminOrderRow, AdminSummary, OrderStatus } from "@/lib/types";
+
+const STATUSES: OrderStatus[] = [
+  "NEW",
+  "CONFIRMED",
+  "IN_BATCH",
+  "IN_TRANSIT",
+  "ARRIVED",
+  "HANDED_OVER",
+  "CANCELLED",
+];
+
+export default function AdminOrdersPage() {
+  const [summary, setSummary] = useState<AdminSummary | null>(null);
+  const [orders, setOrders] = useState<AdminOrderRow[]>([]);
+  const [batches, setBatches] = useState<AdminBatch[]>([]);
+  const [status, setStatus] = useState("");
+  const [batch, setBatch] = useState("");
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 350);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [s, list, b] = await Promise.all([
+        adminApi.summary(),
+        adminApi.orders({ status: status || undefined, batch: batch || undefined, q: query || undefined, pageSize: 100 }),
+        adminApi.batches({ pageSize: 100 }),
+      ]);
+      setSummary(s);
+      setOrders(list.data);
+      setBatches(b.data);
+      setSelected(new Set());
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+    } finally {
+      setLoading(false);
+    }
+  }, [status, batch, query]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /** Сонгосон захиалгуудыг дараагийн төлөв рүү нэг нэгээр нь шилжүүлнэ. */
+  const advanceSelected = async (target: OrderStatus) => {
+    setBusy(true);
+    setError(null);
+    const failed: string[] = [];
+    for (const id of selected) {
+      try {
+        await adminApi.setOrderStatus(id, target);
+      } catch (e) {
+        const order = orders.find((o) => o.id === id);
+        failed.push(`${order?.code ?? id}: ${e instanceof ApiError ? e.message : "алдаа"}`);
+      }
+    }
+    if (failed.length > 0) setError(failed.join(" · "));
+    setBusy(false);
+    await load();
+  };
+
+  const addToBatch = async (batchId: string) => {
+    setBusy(true);
+    try {
+      await adminApi.updateBatchOrders(batchId, { add: [...selected] });
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Багцад нэмж чадсангүй.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const todayHandover = orders.filter(
+    (o) => o.status === "ARRIVED" && o.fulfilment !== null,
+  ).length;
+
+  return (
+    <div>
+      <PageHead title="Захиалга" hint="Бүх захиалгын урсгал, төлөв" />
+
+      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric label="Шинэ захиалга" value={summary?.newOrders ?? "—"} />
+        <Metric label="Зам дээр" value={summary?.inTransit ?? "—"} tone="info" />
+        <Metric label="Ирсэн" value={summary?.arrived ?? "—"} tone="ok" />
+        <Metric
+          label="Өнөөдөр хүлээлгэж өгөх"
+          value={todayHandover}
+          sub="Авах аргаа сонгосон"
+        />
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Select
+          value={status}
+          onChange={setStatus}
+          placeholder="Бүх статус"
+          options={STATUSES.map((s) => ({ value: s, label: ORDER_STATUS_LABEL[s] }))}
+        />
+        <Select
+          value={batch}
+          onChange={setBatch}
+          placeholder="Бүх багц"
+          options={batches.map((b) => ({ value: b.id, label: b.name }))}
+        />
+        <div className="min-w-[200px] flex-1">
+          <Input
+            value={search}
+            onChange={setSearch}
+            placeholder="Код, нэр, утасны сүүлийн 4 орон"
+          />
+        </div>
+      </div>
+
+      {selected.size > 0 && (
+        <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
+          <span className="text-[14px]">{selected.size} захиалга сонгосон</span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => advanceSelected("CONFIRMED")} disabled={busy}>
+              Баталгаажуулах
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => advanceSelected("CANCELLED")} disabled={busy}>
+              Цуцлах
+            </Button>
+            <Select
+              value=""
+              onChange={(id) => id && addToBatch(id)}
+              placeholder="Багцад нэмэх"
+              className="h-9 text-[13px]"
+              options={batches
+                .filter((b) => b.stage === "COLLECTING" || b.stage === "CLOSED")
+                .map((b) => ({ value: b.id, label: b.name }))}
+            />
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              Болих
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {error && (
+        <div className="mb-4">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <Spinner className="text-muted" />
+        </div>
+      ) : orders.length === 0 ? (
+        <Empty>Захиалга олдсонгүй.</Empty>
+      ) : (
+        <>
+          {/* Desktop — хүснэгт */}
+          <div className="hidden md:block">
+            <Table>
+              <thead>
+                <tr>
+                  <Th className="w-10">
+                    <input
+                      type="checkbox"
+                      aria-label="Бүгдийг сонгох"
+                      checked={selected.size === orders.length && orders.length > 0}
+                      onChange={(e) =>
+                        setSelected(e.target.checked ? new Set(orders.map((o) => o.id)) : new Set())
+                      }
+                    />
+                  </Th>
+                  <Th>Код</Th>
+                  <Th>Хэрэглэгч</Th>
+                  <Th>Бараа</Th>
+                  <Th>Дүн</Th>
+                  <Th>Статус</Th>
+                  <Th>Багц</Th>
+                  <Th>Огноо</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((order) => (
+                  <tr key={order.id} className={selected.has(order.id) ? "bg-surface" : ""}>
+                    <Td>
+                      <input
+                        type="checkbox"
+                        aria-label={`${order.code} сонгох`}
+                        checked={selected.has(order.id)}
+                        onChange={() => toggle(order.id)}
+                      />
+                    </Td>
+                    <Td className="tnum whitespace-nowrap">{order.code}</Td>
+                    <Td>
+                      <div>{order.customer.name ?? "—"}</div>
+                      <div className="tnum text-[13px] text-muted">
+                        {phoneLabel(order.customer.phone)}
+                      </div>
+                    </Td>
+                    <Td className="tnum">{order.itemCount} ш</Td>
+                    <Td className="tnum whitespace-nowrap">
+                      <div>{money(order.subtotal)}</div>
+                      {order.dueAmount > 0 && (
+                        <div className="text-[13px] text-warn">
+                          үлдэгдэл {money(order.dueAmount)}
+                        </div>
+                      )}
+                    </Td>
+                    <Td>
+                      <OrderBadge status={order.status} />
+                    </Td>
+                    <Td className="text-[13px] text-ink-2">
+                      {order.batch ? (
+                        <>
+                          <div>{order.batch.name}</div>
+                          <div className="text-muted">{BATCH_STAGE_LABEL[order.batch.stage]}</div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </Td>
+                    <Td className="tnum whitespace-nowrap text-[13px] text-ink-2">
+                      {dayLabel(order.createdAt)}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </div>
+
+          {/* Утас — карт */}
+          <div className="flex flex-col gap-3 md:hidden">
+            {orders.map((order) => (
+              <Card key={order.id} className="p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`${order.code} сонгох`}
+                      checked={selected.has(order.id)}
+                      onChange={() => toggle(order.id)}
+                    />
+                    <span className="tnum text-[15px] font-medium">{order.code}</span>
+                  </label>
+                  <OrderBadge status={order.status} />
+                </div>
+                <div className="mt-2 text-[14px]">{order.customer.name ?? "Нэргүй"}</div>
+                <div className="tnum text-[13px] text-muted">
+                  {phoneLabel(order.customer.phone)} · {order.itemCount} бараа
+                </div>
+                <div className="mt-2 flex items-baseline justify-between">
+                  <span className="tnum text-[15px]">{money(order.subtotal)}</span>
+                  <span className="tnum text-[13px] text-muted">{dayLabel(order.createdAt)}</span>
+                </div>
+                {order.batch && (
+                  <div className="mt-2">
+                    <Badge tone="info">{order.batch.name}</Badge>
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,69 @@
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { env } from '../env.js';
+import { prisma } from '../prisma.js';
+import { normalizePhone, PHONE_RE } from './code.js';
+import type { AdminToken, CustomerToken, TokenPayload } from './jwt.js';
+
+/**
+ * Supabase Auth-ийн олгосон access token-ыг JWKS-ээр шалгана.
+ * Манай өөрийн OTP урсгал хэвээр ажиллана — энэ нь нэмэлт гарц.
+ */
+const jwks = env.SUPABASE_JWKS_URL ? createRemoteJWKSet(new URL(env.SUPABASE_JWKS_URL)) : null;
+
+export const supabaseAuthConfigured = jwks !== null;
+
+interface SupabaseClaims {
+  sub: string;
+  phone?: string;
+  email?: string;
+  user_metadata?: { phone?: string; name?: string };
+  app_metadata?: { role?: string };
+}
+
+async function verify(token: string): Promise<SupabaseClaims | null> {
+  if (!jwks) return null;
+  try {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: env.SUPABASE_URL ? `${env.SUPABASE_URL.replace(/\/$/, '')}/auth/v1` : undefined,
+      audience: 'authenticated',
+    });
+    return payload as unknown as SupabaseClaims;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Supabase token → манай token payload.
+ *
+ * - Утасны дугаартай хэрэглэгч → CUSTOMER (Customer мөр байхгүй бол үүснэ).
+ * - `app_metadata.role` нь admin/staff бөгөөд тухайн и-мэйлээр идэвхтэй
+ *   AdminUser бүртгэлтэй үед → ADMIN/STAFF. Бүртгэлгүй бол эрх олгохгүй.
+ */
+export async function resolveSupabaseToken(token: string): Promise<TokenPayload | null> {
+  const claims = await verify(token);
+  if (!claims) return null;
+
+  const role = claims.app_metadata?.role?.toUpperCase();
+  if ((role === 'ADMIN' || role === 'STAFF') && claims.email) {
+    const admin = await prisma.adminUser.findFirst({
+      where: { email: claims.email.toLowerCase(), isActive: true },
+    });
+    if (!admin) return null;
+    return { sub: admin.id, email: admin.email, role: admin.role } satisfies AdminToken;
+  }
+
+  const rawPhone = claims.phone ?? claims.user_metadata?.phone;
+  if (!rawPhone) return null;
+
+  const phone = normalizePhone(rawPhone);
+  if (!PHONE_RE.test(phone)) return null;
+
+  const customer = await prisma.customer.upsert({
+    where: { phone },
+    create: { phone, name: claims.user_metadata?.name ?? null },
+    update: {},
+  });
+
+  return { sub: customer.id, phone: customer.phone, role: 'CUSTOMER' } satisfies CustomerToken;
+}
