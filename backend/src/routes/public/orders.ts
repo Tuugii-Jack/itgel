@@ -6,14 +6,15 @@ import { audit } from '../../lib/audit.js';
 import { generateOrderCode, normalizePhone, PHONE_RE } from '../../lib/code.js';
 import { parseUbDay, startOfUbDay } from '../../lib/date.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
-import { splitPayment, subtotalOf } from '../../lib/money.js';
+import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel } from '../../services/serialize.js';
+import { computeTotals, paymentState, recalcOrderTotals } from '../../services/money.js';
 import { deliveryFeeFor, getSettings } from '../../services/settings.js';
 import { sms, smsTemplates } from '../../services/sms.js';
-import { remainingSlotsFor } from '../../services/delivery.js';
+import { claimDeliverySlot } from '../../services/delivery.js';
 
 export const publicOrdersRouter = Router();
 
@@ -91,8 +92,9 @@ publicOrdersRouter.post(
       };
     });
 
+    // Төлбөр 100% — захиалга өгөхөд бүтнээр шилжүүлнэ. Мөнгө хараахан
+    // ороогүй тул `paidAmount` нь 0; админ шалгаад дэвтэрт бүртгэнэ.
     const subtotal = subtotalOf(items);
-    const { paidAmount, dueAmount } = splitPayment(subtotal, settings.depositPercent);
 
     const order = await prisma.$transaction(async (tx) => {
       const customer = await tx.customer.upsert({
@@ -123,8 +125,6 @@ publicOrdersRouter.post(
       const created = await createWithUniqueCode(tx, {
         customerId: customer.id,
         subtotal,
-        paidAmount,
-        dueAmount,
         note: body.note ?? null,
         items,
       });
@@ -135,7 +135,7 @@ publicOrdersRouter.post(
           action: 'CREATE',
           entity: 'Order',
           entityId: created.id,
-          after: { code: created.code, subtotal, paidAmount, dueAmount },
+          after: { code: created.code, subtotal },
         },
         tx,
       );
@@ -143,7 +143,7 @@ publicOrdersRouter.post(
       return created;
     });
 
-    await sms.send({ phone: body.phone, text: smsTemplates.orderCreated(order.code, paidAmount) });
+    await sms.send({ phone: body.phone, text: smsTemplates.orderCreated(order.code, subtotal) });
 
     res.status(201).json({
       data: {
@@ -151,9 +151,8 @@ publicOrdersRouter.post(
         status: order.status,
         statusLabel: orderStatusLabel(order.status),
         subtotal,
-        payNow: paidAmount,
-        dueAmount,
-        depositPercent: settings.depositPercent,
+        /** Шилжүүлэх дүн — бараа бүтнээрээ. */
+        dueAmount: subtotal,
         createdAt: order.createdAt.toISOString(),
       },
     });
@@ -165,8 +164,6 @@ type TxClient = Prisma.TransactionClient;
 interface NewOrderData {
   customerId: string;
   subtotal: number;
-  paidAmount: number;
-  dueAmount: number;
   note: string | null;
   items: {
     productId: string;
@@ -188,8 +185,10 @@ async function createWithUniqueCode(tx: TxClient, data: NewOrderData) {
           code: generateOrderCode(),
           customerId: data.customerId,
           subtotal: data.subtotal,
-          paidAmount: data.paidAmount,
-          dueAmount: data.dueAmount,
+          // Мөнгө ороогүй: төлбөр нь дэвтэрт бүртгэгдэх үед л тоологдоно.
+          paidAmount: 0,
+          refundedAmount: 0,
+          dueAmount: data.subtotal,
           note: data.note,
           items: { create: data.items },
         },
@@ -227,9 +226,11 @@ publicOrdersRouter.get(
         status: order.status,
         statusLabel: orderStatusLabel(order.status),
         subtotal: order.subtotal,
-        paidAmount: order.paidAmount,
-        dueAmount: order.dueAmount,
         deliveryFee: order.deliveryFee,
+        paidAmount: order.paidAmount,
+        refundedAmount: order.refundedAmount,
+        dueAmount: order.dueAmount,
+        paymentState: paymentState(computeTotals(order)),
         fulfilment: order.fulfilment,
         createdAt: order.createdAt.toISOString(),
         customer: { name: order.customer.name, phone: maskPhone(order.customer.phone) },
@@ -283,18 +284,23 @@ publicOrdersRouter.post(
 
     const updated = await prisma.$transaction(async (tx) => {
       if (body.type === 'PICKUP') {
-        return tx.order.update({
+        await tx.order.update({
           where: { id: order.id },
-          data: { fulfilment: 'PICKUP', deliveryFee: 0, dueAmount: order.subtotal - order.paidAmount },
+          data: { fulfilment: 'PICKUP', deliveryFee: 0 },
+        });
+        // Хураамж өөрчлөгдсөн тул дүнг дахин бодуулна.
+        await recalcOrderTotals(tx, order.id);
+        return tx.order.findUniqueOrThrow({
+          where: { id: order.id },
           include: { delivery: true },
         });
       }
 
       const day = startOfUbDay(parseUbDay(body.day!));
-      const remaining = await remainingSlotsFor(day, settings, tx);
-      if (remaining <= 0) throw conflict('Тухайн өдрийн хүргэлт дүүрсэн байна. Өөр өдөр сонгоно уу.');
-
       const fee = deliveryFeeFor(settings, body.district!);
+
+      // Сул зайг атомикаар эзэлнэ — хоёр хүн сүүлийн зайг зэрэг авахаас сэргийлнэ.
+      await claimDeliverySlot(tx, day, settings.deliveryDailyLimit);
 
       await tx.delivery.create({
         data: {
@@ -307,13 +313,17 @@ publicOrdersRouter.post(
         },
       });
 
-      return tx.order.update({
+      await tx.order.update({
         where: { id: order.id },
         data: {
           fulfilment: 'DELIVERY',
           deliveryFee: fee,
-          dueAmount: order.subtotal - order.paidAmount + fee,
         },
+      });
+      await recalcOrderTotals(tx, order.id);
+
+      return tx.order.findUniqueOrThrow({
+        where: { id: order.id },
         include: { delivery: true },
       });
     });

@@ -46,9 +46,6 @@ export default function CartPage() {
   }, [cooldown]);
 
   const groups = useMemo(() => groupLines(cart.lines), [cart.lines]);
-  const deposit = store?.depositPercent ?? 100;
-  const payNow = Math.floor((cart.subtotal * deposit) / 100);
-  const due = cart.subtotal - payNow;
 
   if (!cart.ready) {
     return (
@@ -231,16 +228,10 @@ export default function CartPage() {
         <div className="mb-2 text-[15px] font-medium">Төлбөр</div>
         <Card className="flex flex-col gap-2.5 p-4">
           <SumRow label="Барааны дүн" value={money(cart.subtotal)} />
-          <SumRow label={`Урьдчилгаа (${deposit}%)`} value={money(payNow)} />
           <Divider />
-          <SumRow label="Одоо төлөх" value={money(payNow)} strong />
-          <SumRow
-            label="Бараа ирэхэд төлөх"
-            value={due === 0 ? "Үлдэгдэлгүй" : money(due)}
-            muted={due === 0}
-          />
+          <SumRow label="Одоо шилжүүлэх" value={money(cart.subtotal)} strong />
           <p className="m-0 pt-1 text-[13px] text-ink-2">
-            Хүргэлт эсвэл өөрөө авахаа бараа ирэхэд сонгоно.
+            Барааны үнийг бүтнээр төлнө. Хүргэлт сонговол хураамжийг бараа ирэхэд авна.
           </p>
         </Card>
       </div>
@@ -259,7 +250,7 @@ export default function CartPage() {
           disabled={step !== "verified"}
           loading={busy && step === "verified"}
         >
-          Захиалга өгөх · {money(payNow)}
+          Захиалга өгөх · {money(cart.subtotal)}
         </Button>
       </div>
     </div>

@@ -3,15 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
-import {
-  BATCH_STAGE_LABEL,
-  nextBatchStage,
-  orderStatusForBatchStage,
-  stepsToStatus,
-} from '../../lib/orderStatus.js';
+import { BATCH_STAGE_LABEL, nextBatchStage } from '../../lib/orderStatus.js';
 import { actorOf } from '../../middleware/auth.js';
-import { asyncHandler, query, validate } from '../../middleware/validate.js';
-import { changeOrderStatus } from '../../services/orders.js';
+import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
+import { advanceBatch } from '../../services/batches.js';
 import { batchSummary } from '../../services/serialize.js';
 
 export const adminBatchesRouter = Router();
@@ -200,54 +195,14 @@ adminBatchesRouter.post(
   '/:id/advance',
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
-    const batch = await prisma.batch.findFirst({
-      where: { id: req.params.id, deletedAt: null },
-      include: { orders: { where: { deletedAt: null }, select: { id: true, status: true } } },
-    });
-    if (!batch) throw notFound('Багц олдсонгүй.');
-
-    const next = nextBatchStage(batch.stage);
-    if (!next) throw conflict('Багц эцсийн шатанд байна.');
-
-    const updated = await prisma.batch.update({
-      where: { id: batch.id },
-      data: {
-        stage: next,
-        ...(next === 'CLOSED' && !batch.closedAt ? { closedAt: new Date() } : {}),
-      },
-    });
-
-    const targetStatus = orderStatusForBatchStage(next);
-    const actor = actorOf(req);
-    const moved: string[] = [];
-
-    if (targetStatus) {
-      for (const order of batch.orders) {
-        const steps = stepsToStatus(order.status, targetStatus);
-        for (const step of steps) {
-          await changeOrderStatus(order.id, step, {
-            actor,
-            reason: `Багц "${batch.name}" → ${BATCH_STAGE_LABEL[next]}`,
-          });
-        }
-        if (steps.length > 0) moved.push(order.id);
-      }
-    }
-
-    await audit({
-      actor,
-      action: 'ADVANCE',
-      entity: 'Batch',
-      entityId: batch.id,
-      before: { stage: batch.stage },
-      after: { stage: next, ordersMoved: moved.length },
-    });
+    const result = await advanceBatch(param(req, 'id'), actorOf(req));
 
     res.json({
       data: {
-        ...batchSummary(updated)!,
-        nextStage: nextBatchStage(next),
-        ordersMoved: moved.length,
+        ...batchSummary(result.batch)!,
+        nextStage: nextBatchStage(result.batch.stage),
+        ordersMoved: result.ordersMoved,
+        ordersSkipped: result.ordersSkipped,
       },
     });
   }),

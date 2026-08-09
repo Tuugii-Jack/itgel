@@ -27,7 +27,12 @@ adminReportsRouter.get(
 
     const orders = await prisma.order.findMany({
       where: { deletedAt: null, status: 'HANDED_OVER', handedOverAt: { gte: from } },
-      select: { handedOverAt: true, deliveryFee: true, items: true },
+      select: {
+        handedOverAt: true,
+        deliveryFee: true,
+        // Цуцлагдсан мөр борлуулалт, ашгийн аль алинд ордоггүй.
+        items: { where: { cancelledAt: null } },
+      },
     });
 
     const buckets = new Map<string, { revenue: number; profit: number; orders: number; items: number }>();
@@ -92,7 +97,10 @@ adminReportsRouter.get(
     const from = startOfUbMonth(addUbMonths(new Date(), -(PERIOD_MONTHS[period] - 1)));
 
     const items = await prisma.orderItem.findMany({
-      where: { order: { deletedAt: null, status: 'HANDED_OVER', handedOverAt: { gte: from } } },
+      where: {
+        cancelledAt: null,
+        order: { deletedAt: null, status: 'HANDED_OVER', handedOverAt: { gte: from } },
+      },
       include: {
         product: { select: { id: true, name: true, category: { select: { name: true } } } },
       },

@@ -26,6 +26,50 @@ export type BatchStage =
   | "DONE";
 
 export type Fulfilment = "PICKUP" | "DELIVERY";
+
+/** Мөнгө орсон эсэхээр тодорхойлогдоно — дэвтрээс бодогдоно. */
+export type PaymentState =
+  | "UNPAID"
+  | "PARTIAL"
+  | "PAID"
+  | "OVERPAID"
+  | "REFUNDED";
+
+export type PaymentKind = "PAYMENT" | "REFUND";
+export type PaymentMethod = "BANK_TRANSFER" | "CASH" | "CARD" | "OTHER";
+
+export interface Payment {
+  id: string;
+  kind: PaymentKind;
+  amount: number;
+  /** Дэвтэрт харагдах чиглэлтэй дүн — буцаалт сөрөг. */
+  signedAmount: number;
+  method: PaymentMethod;
+  reference: string | null;
+  note: string | null;
+  actor: string;
+  createdAt: string;
+}
+
+export interface OrderTotals {
+  subtotal: number;
+  deliveryFee: number;
+  total: number;
+  paidAmount: number;
+  refundedAmount: number;
+  /** Төлсөн − буцаасан. */
+  netPaid: number;
+  /** Сөрөг бол илүү төлсөн. */
+  dueAmount: number;
+}
+
+export interface PaymentLedger {
+  payments: Payment[];
+  totals: OrderTotals;
+  paymentState: PaymentState;
+  paymentStateLabel: string;
+  maxRefundable: number;
+}
 export type DeliveryStatus = "PENDING" | "ASSIGNED" | "DELIVERED";
 
 export interface Category {
@@ -76,6 +120,8 @@ export interface AdminProduct extends Omit<Product, "price"> {
 
 export interface OrderItem {
   id: string;
+  /** Хэсэгчилсэн цуцлалт — дүнд ордоггүй. */
+  cancelled: boolean;
   productId: string;
   name: string;
   size: string | null;
@@ -126,9 +172,11 @@ export interface PublicOrder {
   status: OrderStatus;
   statusLabel: string;
   subtotal: number;
-  paidAmount: number;
-  dueAmount: number;
   deliveryFee: number;
+  paidAmount: number;
+  refundedAmount: number;
+  dueAmount: number;
+  paymentState: PaymentState;
   fulfilment: Fulfilment | null;
   canChooseFulfilment: boolean;
   createdAt: string;
@@ -144,9 +192,11 @@ export interface MyOrder {
   status: OrderStatus;
   statusLabel: string;
   subtotal: number;
-  paidAmount: number;
-  dueAmount: number;
   deliveryFee: number;
+  paidAmount: number;
+  refundedAmount: number;
+  dueAmount: number;
+  paymentState: PaymentState;
   fulfilment: Fulfilment | null;
   canChooseFulfilment: boolean;
   itemCount: number;
@@ -176,7 +226,6 @@ export interface Store {
   address: string;
   workHours: string;
   facebookUrl: string;
-  depositPercent: number;
   deliveryFees: { district: string; fee: number }[];
 }
 
@@ -193,9 +242,8 @@ export interface CreatedOrder {
   status: OrderStatus;
   statusLabel: string;
   subtotal: number;
-  payNow: number;
+  /** Шилжүүлэх дүн — төлбөр үргэлж 100%. */
   dueAmount: number;
-  depositPercent: number;
   createdAt: string;
 }
 
@@ -216,9 +264,11 @@ export interface AdminOrderRow {
   customer: { id: string; name: string | null; phone: string };
   itemCount: number;
   subtotal: number;
-  paidAmount: number;
-  dueAmount: number;
   deliveryFee: number;
+  paidAmount: number;
+  refundedAmount: number;
+  dueAmount: number;
+  paymentState: PaymentState;
   profit: number;
   fulfilment: Fulfilment | null;
   batch: BatchSummary | null;
@@ -226,7 +276,15 @@ export interface AdminOrderRow {
 }
 
 export interface AdminOrderDetail extends Omit<AdminOrderRow, "itemCount"> {
-  items: (OrderItem & { costPriceSnapshot: number; profit: number })[];
+  items: (OrderItem & {
+    costPriceSnapshot: number;
+    profit: number;
+    cancelledAt: string | null;
+    cancelReason: string | null;
+  })[];
+  total: number;
+  netPaid: number;
+  paymentStateLabel: string;
   note: string | null;
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
@@ -329,7 +387,6 @@ export interface Settings {
   address: string;
   workHours: string;
   facebookUrl: string;
-  depositPercent: number;
   defaultLeadMinDays: number;
   defaultLeadMaxDays: number;
   smsOnArrival: boolean;

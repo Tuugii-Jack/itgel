@@ -115,21 +115,26 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
 
         <div className="flex flex-col gap-2">
           <SumRow label="Барааны дүн" value={money(order.subtotal)} />
-          <SumRow label="Төлсөн" value={money(order.paidAmount)} strong />
+          {order.paidAmount > 0 && (
+            <SumRow label="Төлсөн" value={money(order.paidAmount)} />
+          )}
           <SumRow
-            label="Үлдэгдэл"
+            label={order.paidAmount > 0 ? "Үлдэгдэл" : "Шилжүүлэх дүн"}
             value={order.dueAmount === 0 ? "Байхгүй" : money(order.dueAmount)}
+            strong
             muted={order.dueAmount === 0}
           />
         </div>
       </Card>
 
       <Card surface className="w-full p-4">
-        <div className="text-[15px] font-medium">Мэдэгдэл</div>
+        <div className="text-[15px] font-medium">Дараагийн алхам</div>
         <p className="mt-1 mb-0 text-[13px] text-ink-2">
-          Бараа агуулахад ирмэгц{" "}
-          <span className="tnum">{phoneLabel(order.customer.phone)}</span> дугаар руу SMS
-          илгээнэ. Өөр юу ч хийх шаардлагагүй.
+          Дээрх дүнг шилжүүлээд, гүйлгээний утга дээр{" "}
+          <span className="tnum">{order.code}</span> кодоо бичнэ үү. Төлбөр
+          баталгаажмагц захиалга боловсруулагдана. Бараа ирэхэд{" "}
+          <span className="tnum">{phoneLabel(order.customer.phone)}</span> дугаар руу
+          SMS илгээнэ.
         </p>
       </Card>
 

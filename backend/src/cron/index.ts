@@ -1,6 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
+import { sweepAll } from '../lib/rateLimit.js';
 import { addDays, startOfUbDay, ubDateString, UB_TZ } from '../lib/date.js';
 import { notifyArrival } from '../services/orders.js';
 import { getSettings } from '../services/settings.js';
@@ -119,6 +120,15 @@ export function startCron(): void {
 
   // Өдөрт нэг — 09:00
   tasks.push(cron.schedule('0 9 * * *', () => void reportStaleOrders().catch(console.error), options));
+
+  // Rate limiter-ийн хугацаа дууссан бичлэгүүд — эс цэвэрлэвэл санах ой өснө.
+  tasks.push(
+    cron.schedule(
+      '*/15 * * * *',
+      () => sweepAll(),
+      options,
+    ),
+  );
 
   console.info(`[cron] ${tasks.length} ажил эхэллээ (${UB_TZ}).`);
 }

@@ -5,7 +5,7 @@ import { isProd } from '../../env.js';
 import { generateOtp, normalizePhone, PHONE_RE } from '../../lib/code.js';
 import { badRequest, tooManyRequests, unauthorized } from '../../lib/errors.js';
 import { signCustomerToken } from '../../lib/jwt.js';
-import { RateLimiter } from '../../lib/rateLimit.js';
+import { ipLimiters, RateLimiter } from '../../lib/rateLimit.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 
@@ -16,7 +16,9 @@ const RESEND_COOLDOWN_MS = 60 * 1000;
 const MAX_ATTEMPTS = 5;
 
 /** Дугаар тус бүрээр — цагт 5 удаа. Секундын түвшний хязгаар нь OtpCode-оор шалгагдана. */
-const phoneHourlyLimiter = new RateLimiter(5, 60 * 60 * 1000);
+export const otpPhoneLimiter = new RateLimiter(5, 60 * 60 * 1000);
+// Cron цэвэрлэж байхаар бүртгэнэ.
+ipLimiters.push(otpPhoneLimiter);
 
 const phoneSchema = z
   .string()
@@ -41,7 +43,7 @@ publicAuthRouter.post(
       throw tooManyRequests(`${wait} секундын дараа дахин илгээнэ үү.`, { retryAfterSec: wait });
     }
 
-    const hourly = phoneHourlyLimiter.hit(phone, now.getTime());
+    const hourly = otpPhoneLimiter.hit(phone, now.getTime());
     if (!hourly.allowed) {
       throw tooManyRequests('Хэт олон код хүслээ. 1 цагийн дараа оролдоно уу.', {
         retryAfterSec: hourly.retryAfterSec,
@@ -109,7 +111,7 @@ publicAuthRouter.post(
       });
     });
 
-    phoneHourlyLimiter.reset(phone);
+    otpPhoneLimiter.reset(phone);
 
     res.json({
       data: {

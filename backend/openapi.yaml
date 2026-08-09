@@ -254,9 +254,7 @@ paths:
                       code: { type: string, example: PH-K7M2XQ }
                       status: { $ref: '#/components/schemas/OrderStatus' }
                       subtotal: { type: integer }
-                      payNow: { type: integer }
                       dueAmount: { type: integer }
-                      depositPercent: { type: integer }
         '409': { $ref: '#/components/responses/Conflict' }
 
   /api/orders/{code}:
@@ -1039,8 +1037,12 @@ components:
         statusLabel: { type: string }
         subtotal: { type: integer }
         paidAmount: { type: integer }
+        refundedAmount: { type: integer }
         dueAmount: { type: integer }
         deliveryFee: { type: integer }
+        paymentState:
+          type: string
+          enum: [UNPAID, PARTIAL, PAID, OVERPAID, REFUNDED]
         fulfilment: { type: string, enum: [PICKUP, DELIVERY], nullable: true }
         canChooseFulfilment: { type: boolean }
         items:
@@ -1076,7 +1078,6 @@ components:
         address: { type: string }
         workHours: { type: string }
         facebookUrl: { type: string }
-        depositPercent: { type: integer, minimum: 0, maximum: 100 }
         defaultLeadMinDays: { type: integer }
         defaultLeadMaxDays: { type: integer }
         smsOnArrival: { type: boolean }

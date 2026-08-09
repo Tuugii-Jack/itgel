@@ -5,6 +5,7 @@ import { notFound } from '../../lib/errors.js';
 import { toIso } from '../../lib/date.js';
 import { requireCustomer } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
+import { computeTotals, paymentState } from '../../services/money.js';
 import { buildTimeline } from '../../services/orders.js';
 import { orderStatusLabel, publicDelivery, publicOrderItem } from '../../services/serialize.js';
 
@@ -90,7 +91,7 @@ publicMeRouter.get(
       prisma.order.count({ where }),
       prisma.order.aggregate({
         where: { ...where, status: { not: 'CANCELLED' } },
-        _sum: { paidAmount: true },
+        _sum: { paidAmount: true, refundedAmount: true },
       }),
       prisma.order.count({
         where: { ...where, status: { notIn: ['HANDED_OVER', 'CANCELLED'] } },
@@ -114,9 +115,11 @@ publicMeRouter.get(
         status: order.status,
         statusLabel: orderStatusLabel(order.status),
         subtotal: order.subtotal,
-        paidAmount: order.paidAmount,
-        dueAmount: order.dueAmount,
         deliveryFee: order.deliveryFee,
+        paidAmount: order.paidAmount,
+        refundedAmount: order.refundedAmount,
+        dueAmount: order.dueAmount,
+        paymentState: paymentState(computeTotals(order)),
         fulfilment: order.fulfilment,
         canChooseFulfilment: order.status === 'ARRIVED' && order.fulfilment === null,
         itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
@@ -132,7 +135,7 @@ publicMeRouter.get(
         pageSize: q.pageSize,
         pages: Math.ceil(total / q.pageSize),
         // Төлбөрийн таб — цуцлагдаагүй захиалгын төлсөн дүнгийн нийлбэр.
-        totalSpent: spent._sum.paidAmount ?? 0,
+        totalSpent: (spent._sum.paidAmount ?? 0) - (spent._sum.refundedAmount ?? 0),
         activeCount,
       },
     });

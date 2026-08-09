@@ -1,8 +1,45 @@
 import type { Prisma, Setting } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { addDays, endOfUbDay, startOfUbDay, ubDateString } from '../lib/date.js';
+import { conflict } from '../lib/errors.js';
 
 type Client = Pick<Prisma.TransactionClient, 'delivery'>;
+
+/**
+ * Тухайн өдрийн нэг сул зайг атомикаар эзэлнэ.
+ *
+ * Зүгээр тоолоод дараа нь үүсгэх нь уралдаанд өртдөг — хоёр хэрэглэгч сүүлийн
+ * зайг зэрэг авч чадна. Мөрүүдийг түгжих нь ч хангалтгүй: шинээр нэмэгдэх мөр
+ * түгжээнд ороогүй байдаг (phantom). Тиймээс өдөр тус бүрээр advisory lock
+ * авч, тухайн өдрийн шалгалт-үүсгэлтийг цуваална. Түгжээ транзакц дуустал
+ * баригдаад өөрөө суллагдана.
+ */
+export async function claimDeliverySlot(
+  tx: Prisma.TransactionClient,
+  day: Date,
+  dailyLimit: number,
+): Promise<void> {
+  const key = ubDateString(day);
+
+  // 8421 — энэ төрлийн түгжээг бусдаас ялгах namespace.
+  // `pg_advisory_xact_lock` нь void буцаадаг тул $queryRaw биш $executeRaw.
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(8421, hashtext(${key}))`;
+
+  const used = await tx.delivery.count({
+    where: {
+      scheduledDay: { gte: startOfUbDay(day), lte: endOfUbDay(day) },
+      status: { not: 'DELIVERED' },
+    },
+  });
+
+  if (used >= dailyLimit) {
+    throw conflict('Тухайн өдрийн хүргэлт дүүрсэн байна. Өөр өдөр сонгоно уу.', {
+      day: key,
+      capacity: dailyLimit,
+      used,
+    });
+  }
+}
 
 /** Тухайн өдөрт үлдсэн хүргэлтийн сул хэмжээ. */
 export async function remainingSlotsFor(

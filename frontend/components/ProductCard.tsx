@@ -12,20 +12,12 @@ import type { Product } from "@/lib/types";
  * Дизайны хамгийн чухал элемент.
  * «Гарт очих» мөрийг хэзээ ч нуухгүй.
  */
-export function ProductCard({
-  product,
-  depositPercent,
-}: {
-  product: Product;
-  depositPercent: number;
-}) {
+export function ProductCard({ product }: { product: Product }) {
   const cart = useCart();
   const isOrder = product.type === "order";
   const soldOut = product.status === "SOLD_OUT" || (!isOrder && product.stock <= 0);
   const closed = product.status === "CLOSED";
   const needsChoice = product.sizes.length > 0 || product.colors.length > 0;
-
-  const deposit = Math.floor((product.price * depositPercent) / 100);
 
   return (
     <div className="flex flex-col overflow-hidden rounded-[12px] border border-line bg-bg">
@@ -59,10 +51,7 @@ export function ProductCard({
             tone={closed ? "danger" : "neutral"}
           />
           {isOrder ? (
-            <CardFact
-              label="Урьдчилгаа"
-              value={`${depositPercent}% · ${money(deposit)}`}
-            />
+            <CardFact label="Төлбөр" value="Захиалахад бүтнээр" />
           ) : (
             <CardFact
               label="Үлдэгдэл"

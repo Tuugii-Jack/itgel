@@ -8,6 +8,7 @@ import { notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { changeOrderStatus } from '../../services/orders.js';
+import { recordPayment } from '../../services/payments.js';
 
 export const adminDeliveriesRouter = Router();
 
@@ -106,14 +107,22 @@ adminDeliveriesRouter.patch(
 
     // Хүргэгдсэн гэж тэмдэглэвэл захиалга хүлээлгэн өгсөнд тооцогдоно.
     if (body.status === 'DELIVERED' && before.order.status === 'ARRIVED') {
+      const actor = actorOf(req);
       await changeOrderStatus(before.orderId, 'HANDED_OVER', {
-        actor: actorOf(req),
+        actor,
         reason: 'Хүргэлтээр хүлээлгэн өгсөн',
       });
-      await prisma.order.update({
-        where: { id: before.orderId },
-        data: { paidAmount: before.order.paidAmount + before.order.dueAmount, dueAmount: 0 },
-      });
+      // Жолооч гар дээрээс авсан үлдэгдлийг дэвтэрт бүртгэнэ.
+      if (before.order.dueAmount > 0) {
+        await recordPayment({
+          orderId: before.orderId,
+          kind: 'PAYMENT',
+          amount: before.order.dueAmount,
+          method: 'CASH',
+          note: `Хүргэлтээр авсан${before.courierName ? ` — ${before.courierName}` : ''}`,
+          actor,
+        });
+      }
     }
 
     await audit({

@@ -16,7 +16,6 @@ publicStoreRouter.get(
         address: settings.address,
         workHours: settings.workHours,
         facebookUrl: settings.facebookUrl,
-        depositPercent: settings.depositPercent,
         deliveryFees: districtList(settings),
       },
     });

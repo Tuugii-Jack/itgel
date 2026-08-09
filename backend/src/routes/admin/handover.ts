@@ -6,6 +6,7 @@ import { conflict, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { changeOrderStatus } from '../../services/orders.js';
+import { recordPayment } from '../../services/payments.js';
 import { adminOrderDetail } from './orders.js';
 
 export const adminHandoverRouter = Router();
@@ -80,26 +81,32 @@ adminHandoverRouter.post(
     const actor = actorOf(req);
     await changeOrderStatus(order.id, 'HANDED_OVER', { actor, reason: note });
 
-    await prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: order.id },
-        data: { paidAmount: order.paidAmount + collected, dueAmount: 0 },
+    // Хүлээн авсан мөнгө дэвтэрт бичигдэнэ — дүн эндээс бодогдоно.
+    if (collected > 0) {
+      await recordPayment({
+        orderId: order.id,
+        kind: 'PAYMENT',
+        amount: collected,
+        method: 'CASH',
+        note: note ?? 'Хүлээлгэн өгөх үед авсан',
+        actor,
       });
-      if (order.delivery) {
-        await tx.delivery.update({
-          where: { id: order.delivery.id },
-          data: { status: 'DELIVERED' },
-        });
-      }
-    });
+    }
+
+    if (order.delivery) {
+      await prisma.delivery.update({
+        where: { id: order.delivery.id },
+        data: { status: 'DELIVERED' },
+      });
+    }
 
     await audit({
       actor,
       action: 'HANDOVER',
       entity: 'Order',
       entityId: order.id,
-      before: { paidAmount: order.paidAmount, dueAmount: order.dueAmount },
-      after: { paidAmount: order.paidAmount + collected, dueAmount: 0, note },
+      before: { dueAmount: order.dueAmount },
+      after: { collected, note },
     });
 
     const updated = await prisma.order.findUniqueOrThrow({

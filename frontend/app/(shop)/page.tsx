@@ -82,7 +82,6 @@ export default function HomePage() {
     })();
   }, [load]);
 
-  const deposit = store?.depositPercent ?? 100;
   const nothing =
     !loading && orderItems.length === 0 && readyItems.length === 0;
   const filtering = category !== null || query !== "";
@@ -138,7 +137,6 @@ export default function HomePage() {
           title='Захиалгын бараа'
           hint='Одоо захиалж, 2-3 долоо хоногийн дараа авна'
           items={orderItems}
-          deposit={deposit}
         />
       )}
 
@@ -148,7 +146,6 @@ export default function HomePage() {
           title='Бэлэн бараа'
           hint='Агуулахад байгаа, шууд авах боломжтой'
           items={readyItems}
-          deposit={deposit}
         />
       )}
 
@@ -260,13 +257,11 @@ function Section({
   title,
   hint,
   items,
-  deposit,
 }: {
   id: string;
   title: string;
   hint: string;
   items: Product[];
-  deposit: number;
 }) {
   return (
     <section id={id} className='scroll-mt-20 pt-8 lg:pt-12'>
@@ -289,11 +284,7 @@ function Section({
         className={`grid grid-cols-2 gap-4 pt-5 sm:grid-cols-3 lg:grid-cols-4 ${GUTTER}`}
       >
         {items.map((product) => (
-          <ProductCard
-            key={product.id}
-            product={product}
-            depositPercent={deposit}
-          />
+          <ProductCard key={product.id} product={product} />
         ))}
       </div>
     </section>

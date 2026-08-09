@@ -87,6 +87,7 @@ export function adminProduct(product: ProductWithRelations, now = new Date()) {
 export function publicOrderItem(item: OrderItem) {
   return {
     id: item.id,
+    cancelled: item.cancelledAt !== null,
     productId: item.productId,
     name: item.nameSnapshot,
     size: item.size,
@@ -98,10 +99,15 @@ export function publicOrderItem(item: OrderItem) {
 }
 
 export function adminOrderItem(item: OrderItem) {
+  const cancelled = item.cancelledAt !== null;
   return {
     ...publicOrderItem(item),
     costPriceSnapshot: item.costPriceSnapshot,
-    profit: (item.unitPrice - item.costPriceSnapshot) * item.qty,
+    // Цуцлагдсан мөр ашиг үүсгэхгүй.
+    profit: cancelled ? 0 : (item.unitPrice - item.costPriceSnapshot) * item.qty,
+    cancelled,
+    cancelledAt: toIso(item.cancelledAt),
+    cancelReason: item.cancelReason,
   };
 }
 

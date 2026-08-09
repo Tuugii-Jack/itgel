@@ -68,7 +68,6 @@ export default function SettingsPage() {
         address: settings.address,
         workHours: settings.workHours,
         facebookUrl: settings.facebookUrl,
-        depositPercent: settings.depositPercent,
         defaultLeadMinDays: settings.defaultLeadMinDays,
         defaultLeadMaxDays: settings.defaultLeadMaxDays,
         smsOnArrival: settings.smsOnArrival,
@@ -115,17 +114,10 @@ export default function SettingsPage() {
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[15px] font-medium">Төлбөр, хугацаа</div>
-          <Field
-            label="Урьдчилгааны хувь"
-            hint="100% үед захиалга өгөхөд бүтэн төлнө, үлдэгдэл 0 болно."
-          >
-            <Input
-              value={String(settings.depositPercent)}
-              onChange={(v) => patch({ depositPercent: Number(v.replace(/\D/g, "")) || 0 })}
-              inputMode="numeric"
-            />
-          </Field>
+          <div className="text-[15px] font-medium">Хугацаа</div>
+          <p className="m-0 text-[13px] text-ink-2">
+            Төлбөр үргэлж 100% — захиалга өгөхөд барааны дүнг бүтнээр шилжүүлнэ.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Хамгийн бага хоног">
               <Input

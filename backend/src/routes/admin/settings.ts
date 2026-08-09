@@ -22,7 +22,6 @@ const patchBody = z.object({
   address: z.string().trim().max(300).optional(),
   workHours: z.string().trim().max(120).optional(),
   facebookUrl: z.string().trim().max(300).optional(),
-  depositPercent: z.coerce.number().int().min(0).max(100).optional(),
   defaultLeadMinDays: z.coerce.number().int().min(0).max(365).optional(),
   defaultLeadMaxDays: z.coerce.number().int().min(0).max(365).optional(),
   smsOnArrival: z.boolean().optional(),

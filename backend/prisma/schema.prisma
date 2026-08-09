@@ -62,6 +62,18 @@ enum AdminRole {
   STAFF
 }
 
+enum PaymentKind {
+  PAYMENT
+  REFUND
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CASH
+  CARD
+  OTHER
+}
+
 model Category {
   id        String    @id @default(cuid())
   name      String
@@ -177,10 +189,19 @@ model Order {
   code        String      @unique // PH-XXXXXX
   customerId  String
   status      OrderStatus @default(NEW)
-  subtotal    Int         @default(0)
-  paidAmount  Int         @default(0)
-  dueAmount   Int         @default(0)
-  deliveryFee Int         @default(0)
+
+  /// --- Мөнгөн дүн ---
+  /// Эх сурвалж нь Payment дэвтэр. Эдгээр багана нь хайлт, эрэмбэлэлтэд
+  /// зориулсан кэш бөгөөд recalcOrderTotals() -ээр л шинэчлэгдэнэ.
+  subtotal    Int @default(0) // идэвхтэй мөрүүдийн нийлбэр
+  deliveryFee Int @default(0)
+  /// Дэвтрийн PAYMENT мөрүүдийн нийлбэр.
+  paidAmount     Int @default(0)
+  /// Дэвтрийн REFUND мөрүүдийн нийлбэр.
+  refundedAmount Int @default(0)
+  /// subtotal + deliveryFee − (paidAmount − refundedAmount). Сөрөг байвал илүү төлсөн.
+  dueAmount      Int @default(0)
+
   batchId     String?
   fulfilment  Fulfilment? // бараа ирсний дараа хэрэглэгч сонгоно
   note        String?
@@ -199,14 +220,38 @@ model Order {
   /// Ирсэн тухай SMS илгээсэн огноо — давхар илгээхээс сэргийлнэ.
   arrivalNotifiedAt DateTime?
 
-  customer  Customer    @relation(fields: [customerId], references: [id])
-  batch     Batch?      @relation(fields: [batchId], references: [id])
-  items     OrderItem[]
-  delivery  Delivery?
+  customer Customer    @relation(fields: [customerId], references: [id])
+  batch    Batch?      @relation(fields: [batchId], references: [id])
+  items    OrderItem[]
+  delivery Delivery?
+  payments Payment[]
 
   @@index([status])
   @@index([customerId])
   @@index([batchId])
+  @@index([createdAt])
+  /// «Төлбөр дутуу захиалга» шүүхэд.
+  @@index([dueAmount])
+}
+
+/// Орлого, буцаалт бүрийн бичилт. Устгагдахгүй — залруулга нь эсрэг мөр.
+model Payment {
+  id        String        @id @default(cuid())
+  orderId   String
+  kind      PaymentKind
+  /// Үргэлж эерэг. Чиглэлийг `kind` заана.
+  amount    Int
+  method    PaymentMethod @default(BANK_TRANSFER)
+  /// Банкны гүйлгээний утга, QPay-ийн дугаар гэх мэт.
+  reference String?
+  note      String?
+  /// Хэн бүртгэсэн: "admin:<id>" | "system".
+  actor     String
+  createdAt DateTime      @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
   @@index([createdAt])
 }
 
@@ -220,6 +265,11 @@ model OrderItem {
   qty               Int
   unitPrice         Int
   costPriceSnapshot Int
+
+  /// Хэсэгчилсэн цуцлалт — мөр устгагдахгүй, тэмдэглэгдэнэ.
+  /// Цуцлагдсан мөр subtotal, тайлангийн ашгийн аль алинд ордоггүй.
+  cancelledAt  DateTime?
+  cancelReason String?
 
   order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id])
@@ -284,7 +334,6 @@ model Setting {
   address             String   @default("")
   workHours           String   @default("")
   facebookUrl         String   @default("")
-  depositPercent      Int      @default(100)
   defaultLeadMinDays  Int      @default(7)
   defaultLeadMaxDays  Int      @default(14)
   smsOnArrival        Boolean  @default(true)

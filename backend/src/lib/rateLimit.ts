@@ -48,9 +48,21 @@ export class RateLimiter {
   }
 }
 
+/**
+ * Үүсгэгдсэн бүх limiter — cron эдгээрийг тогтмол цэвэрлэнэ.
+ * Эс бөгөөс хугацаа нь дууссан bucket-ууд санах ойд хуримтлагдана.
+ */
+export const ipLimiters: RateLimiter[] = [];
+
+/** Бүх limiter-ийн хугацаа нь дууссан бичлэгийг цэвэрлэнэ. */
+export function sweepAll(now = Date.now()): void {
+  for (const limiter of ipLimiters) limiter.sweep(now);
+}
+
 /** IP-ээр хязгаарлах middleware үүсгэгч. */
 export function ipRateLimit(limit: number, windowMs: number) {
   const limiter = new RateLimiter(limit, windowMs);
+  ipLimiters.push(limiter);
   return (req: Request, res: Response, next: NextFunction) => {
     const key = req.ip ?? 'unknown';
     const result = limiter.hit(key);

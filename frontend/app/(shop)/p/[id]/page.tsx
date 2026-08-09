@@ -74,7 +74,6 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
   const missing =
     (product.sizes.length > 0 && !size) || (product.colors.length > 0 && !color);
   const total = product.price * qty;
-  const payNow = Math.floor((total * store.depositPercent) / 100);
 
   const addToCart = () => {
     if (missing) {
@@ -216,10 +215,8 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
       <div className="fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-[560px] items-center gap-3 border-t border-line bg-bg p-4
         lg:static lg:mx-8 lg:mt-8 lg:max-w-none lg:rounded-[12px] lg:border">
         <div className="min-w-0 flex-1">
-          <div className="text-[12px] text-muted">
-            {store.depositPercent === 100 ? "Нийт төлөх" : "Одоо төлөх"}
-          </div>
-          <div className="tnum text-[17px] font-medium">{money(payNow)}</div>
+          <div className="text-[12px] text-muted">Нийт төлөх</div>
+          <div className="tnum text-[17px] font-medium">{money(total)}</div>
         </div>
         <Button size="lg" onClick={addToCart} disabled={blocked} className="min-w-[160px]">
           {closed ? "Захиалга хаагдсан" : soldOut ? "Дууссан" : isOrder ? "Захиалах" : "Сагсанд хийх"}

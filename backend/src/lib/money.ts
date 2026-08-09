@@ -11,21 +11,6 @@ export function subtotalOf(items: PricedItem[]): number {
   return items.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
 }
 
-/**
- * Одоо төлөх ба үлдэгдэл.
- * `paidAmount = дүн × depositPercent / 100` (доош тойролт),
- * 100% үед `dueAmount = 0`.
- */
-export function splitPayment(
-  subtotal: number,
-  depositPercent: number,
-): { paidAmount: number; dueAmount: number } {
-  const pct = Math.min(100, Math.max(0, Math.trunc(depositPercent)));
-  if (pct === 100) return { paidAmount: subtotal, dueAmount: 0 };
-  const paidAmount = Math.floor((subtotal * pct) / 100);
-  return { paidAmount, dueAmount: subtotal - paidAmount };
-}
-
 /** Ашиг: Σ((unitPrice − costPriceSnapshot) × qty). */
 export function profitOf(items: PricedItem[]): number {
   return items.reduce((sum, i) => sum + (i.unitPrice - (i.costPriceSnapshot ?? 0)) * i.qty, 0);

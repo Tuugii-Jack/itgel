@@ -2,10 +2,18 @@ import { Router } from 'express';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { notFound } from '../../lib/errors.js';
+import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { profitOf } from '../../lib/money.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
+import { adminPaymentsRouter } from './payments.js';
+import {
+  computeTotals,
+  fullyPaid,
+  loadOrderTotals,
+  PAYMENT_STATE_LABEL,
+  paymentState,
+} from '../../services/money.js';
 import { buildTimeline, changeOrderStatus } from '../../services/orders.js';
 import {
   adminOrderItem,
@@ -15,6 +23,9 @@ import {
 } from '../../services/serialize.js';
 
 export const adminOrdersRouter = Router();
+
+// /api/admin/orders/:id/payments — төлбөр, буцаалт, мөр цуцлах
+adminOrdersRouter.use('/:id/payments', adminPaymentsRouter);
 
 const orderStatus = z.enum([
   'NEW',
@@ -79,12 +90,14 @@ adminOrdersRouter.get(
           name: order.customer.name,
           phone: order.customer.phone,
         },
-        itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
+        itemCount: order.items.filter((i) => i.cancelledAt === null).reduce((sum, i) => sum + i.qty, 0),
         subtotal: order.subtotal,
-        paidAmount: order.paidAmount,
-        dueAmount: order.dueAmount,
         deliveryFee: order.deliveryFee,
-        profit: profitOf(order.items),
+        paidAmount: order.paidAmount,
+        refundedAmount: order.refundedAmount,
+        dueAmount: order.dueAmount,
+        paymentState: paymentState(computeTotals(order)),
+        profit: profitOf(order.items.filter((i) => i.cancelledAt === null)),
         fulfilment: order.fulfilment,
         batch: batchSummary(order.batch),
         createdAt: order.createdAt.toISOString(),
@@ -117,12 +130,39 @@ adminOrdersRouter.patch(
   '/:id/status',
   validate({
     params: z.object({ id: z.string().min(1) }),
-    body: z.object({ status: orderStatus, reason: z.string().trim().max(300).optional() }),
+    body: z.object({
+      status: orderStatus,
+      reason: z.string().trim().max(300).optional(),
+      /** Төлбөрийн шалгалтыг алгасах (бэлнээр авсан гэх мэт). */
+      force: z.boolean().optional(),
+    }),
   }),
   asyncHandler(async (req, res) => {
-    const { status, reason } = req.body as { status: z.infer<typeof orderStatus>; reason?: string };
+    const { status, reason, force } = req.body as {
+      status: z.infer<typeof orderStatus>;
+      reason?: string;
+      force?: boolean;
+    };
 
     const orderId = param(req, 'id');
+
+    // Төлбөр бүрэн ороогүй захиалгыг баталгаажуулахаас сэргийлнэ.
+    // Мөнгө бэлнээр авсан гэх мэт тохиолдолд `force: true` -ээр давна.
+    if (status === 'CONFIRMED' && !force) {
+      const totals = await loadOrderTotals(orderId);
+      if (!fullyPaid(totals)) {
+        throw conflict(
+          `Төлбөр бүрэн ороогүй байна. ${totals.subtotal}₮-с ${totals.netPaid}₮ орсон. ` +
+            'Төлбөрийг эхлээд бүртгэнэ үү.',
+          {
+            subtotal: totals.subtotal,
+            netPaid: totals.netPaid,
+            missing: totals.subtotal - totals.netPaid,
+          },
+        );
+      }
+    }
+
     await changeOrderStatus(orderId, status, { actor: actorOf(req), reason });
 
     const order = await prisma.order.findUniqueOrThrow({
@@ -139,6 +179,68 @@ adminOrdersRouter.patch(
   }),
 );
 
+/**
+ * POST /orders/bulk-status — олон захиалгын төлвийг нэг хүсэлтээр солино.
+ *
+ * Захиалга бүрийг тусад нь боловсруулж, амжилттай ба алдаатайг тусад нь
+ * буцаана. Нэг захиалга дээрх алдаа бусдыг зогсоохгүй.
+ */
+adminOrdersRouter.post(
+  '/bulk-status',
+  validate({
+    body: z.object({
+      ids: z.array(z.string().min(1)).min(1).max(200),
+      status: orderStatus,
+      reason: z.string().trim().max(300).optional(),
+      force: z.boolean().optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { ids, status, reason, force } = req.body as {
+      ids: string[];
+      status: z.infer<typeof orderStatus>;
+      reason?: string;
+      force?: boolean;
+    };
+    const actor = actorOf(req);
+
+    const succeeded: string[] = [];
+    const failed: { id: string; code?: string; message: string }[] = [];
+
+    for (const id of ids) {
+      try {
+        if (status === 'CONFIRMED' && !force) {
+          const totals = await loadOrderTotals(id);
+          if (!fullyPaid(totals)) {
+            throw conflict(`Төлбөр дутуу: ${totals.subtotal - totals.netPaid}₮ ороогүй байна.`);
+          }
+        }
+        await changeOrderStatus(id, status, { actor, reason });
+        succeeded.push(id);
+      } catch (error) {
+        const order = await prisma.order.findUnique({
+          where: { id },
+          select: { code: true },
+        });
+        failed.push({
+          id,
+          code: order?.code,
+          message: error instanceof AppError ? error.message : 'Тодорхойгүй алдаа.',
+        });
+      }
+    }
+
+    res.json({
+      data: {
+        requested: ids.length,
+        succeeded: succeeded.length,
+        failed,
+        status,
+      },
+    });
+  }),
+);
+
 type OrderDetail = Prisma.OrderGetPayload<{
   include: {
     customer: true;
@@ -149,6 +251,11 @@ type OrderDetail = Prisma.OrderGetPayload<{
 }>;
 
 export function adminOrderDetail(order: OrderDetail) {
+  // Цуцлагдсан мөр ашгийн тооцоонд ордоггүй.
+  const activeItems = order.items.filter((i) => i.cancelledAt === null);
+  const totals = computeTotals(order);
+  const state = paymentState(totals);
+
   return {
     id: order.id,
     code: order.code,
@@ -161,10 +268,15 @@ export function adminOrderDetail(order: OrderDetail) {
     },
     items: order.items.map(adminOrderItem),
     subtotal: order.subtotal,
-    paidAmount: order.paidAmount,
-    dueAmount: order.dueAmount,
     deliveryFee: order.deliveryFee,
-    profit: profitOf(order.items),
+    paidAmount: order.paidAmount,
+    refundedAmount: order.refundedAmount,
+    dueAmount: order.dueAmount,
+    total: totals.total,
+    netPaid: totals.netPaid,
+    paymentState: state,
+    paymentStateLabel: PAYMENT_STATE_LABEL[state],
+    profit: profitOf(activeItems),
     fulfilment: order.fulfilment,
     note: order.note,
     batch: batchSummary(order.batch),

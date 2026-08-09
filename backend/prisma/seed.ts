@@ -7,11 +7,34 @@ import bcrypt from 'bcryptjs';
 import 'dotenv/config';
 import { generateOrderCode } from '../src/lib/code.js';
 import { addDays, addUbMonths, startOfUbDay, startOfUbMonth } from '../src/lib/date.js';
-import { splitPayment, subtotalOf } from '../src/lib/money.js';
+import { subtotalOf } from '../src/lib/money.js';
 import { DEFAULT_DELIVERY_FEES } from '../src/services/settings.js';
 
 const prisma = new PrismaClient();
 const now = new Date();
+
+/**
+ * Seed нь БҮХ өгөгдлийг устгадаг. Production бааз руу санамсаргүй
+ * ажиллуулахаас сэргийлнэ — `--force` эсвэл SEED_ALLOW_DESTRUCTIVE=1 хэрэгтэй.
+ */
+function assertSafeToWipe() {
+  const forced = process.argv.includes('--force') || process.env.SEED_ALLOW_DESTRUCTIVE === '1';
+  if (forced) return;
+
+  const url = process.env.DATABASE_URL ?? '';
+  const remote = !/localhost|127\.0\.0\.1/.test(url);
+  const prod = process.env.NODE_ENV === 'production';
+
+  if (prod || remote) {
+    console.error(
+      '\nSeed зогслоо — энэ нь бүх өгөгдлийг устгана.\n' +
+        `  NODE_ENV : ${process.env.NODE_ENV ?? '(тодорхойгүй)'}\n` +
+        `  Бааз     : ${remote ? 'алсын сервер' : 'локал'}\n\n` +
+        'Үнэхээр устгах бол: npm run seed -- --force\n',
+    );
+    process.exit(1);
+  }
+}
 
 async function reset() {
   await prisma.auditLog.deleteMany();
@@ -27,6 +50,7 @@ async function reset() {
   await prisma.otpCode.deleteMany();
   await prisma.customer.deleteMany();
   await prisma.adminUser.deleteMany();
+  await prisma.payment.deleteMany();
   await prisma.setting.deleteMany();
 }
 
@@ -79,6 +103,7 @@ const CUSTOMERS = [
 ];
 
 async function main() {
+  assertSafeToWipe();
   console.info('Seed эхэлж байна…');
   await reset();
 
@@ -90,7 +115,6 @@ async function main() {
       address: 'СБД, 1-р хороо, Их сургуулийн гудамж 12, "Итгэл" төв, 2 давхар 205 тоот',
       workHours: 'Даваа–Бямба 10:00–19:00',
       facebookUrl: 'https://facebook.com/itgel.mn',
-      depositPercent: 100,
       defaultLeadMinDays: 7,
       defaultLeadMaxDays: 14,
       smsOnArrival: true,
@@ -229,16 +253,16 @@ async function main() {
     });
 
     const subtotal = subtotalOf(items);
-    const { paidAmount, dueAmount } = splitPayment(subtotal, settings.depositPercent);
     const createdAt = addDays(now, -(20 - index));
+    // Шинэ захиалгад мөнгө хараахан ороогүй, бусад нь бүтнээр төлөгдсөн.
+    const paid = entry.status === 'NEW' || entry.status === 'CANCELLED' ? 0 : subtotal;
 
     await createOrder({
       code: generateOrderCode(),
       customerId: customers[entry.customer]!.id,
       status: entry.status,
       subtotal,
-      paidAmount,
-      dueAmount,
+      paidAmount: paid,
       batchId: entry.batch === null ? null : batches[entry.batch]!.id,
       createdAt,
       items,
@@ -287,7 +311,6 @@ async function main() {
         },
       ];
       const subtotal = subtotalOf(items);
-      const { paidAmount } = splitPayment(subtotal, settings.depositPercent);
       const createdAt = addDays(monthStart, (i * 3) % 25);
 
       await createOrder({
@@ -295,8 +318,7 @@ async function main() {
         customerId: customers[(monthOffset + i) % customers.length]!.id,
         status: 'HANDED_OVER',
         subtotal,
-        paidAmount,
-        dueAmount: 0,
+        paidAmount: subtotal,
         batchId: null,
         createdAt,
         items,
@@ -317,8 +339,8 @@ interface SeedOrder {
   customerId: string;
   status: OrderStatus;
   subtotal: number;
+  /** Дэвтэрт бүртгэх орлого. Төлөгдөөгүй захиалгад 0. */
   paidAmount: number;
-  dueAmount: number;
   batchId: string | null;
   createdAt: Date;
   items: Prisma.OrderItemUncheckedCreateWithoutOrderInput[];
@@ -332,14 +354,15 @@ async function createOrder(order: SeedOrder) {
 
   const at = (days: number) => addDays(order.createdAt, days);
 
-  await prisma.order.create({
+  const created = await prisma.order.create({
     data: {
       code: order.code,
       customerId: order.customerId,
       status: order.status,
       subtotal: order.subtotal,
       paidAmount: order.paidAmount,
-      dueAmount: order.dueAmount,
+      refundedAmount: 0,
+      dueAmount: order.subtotal - order.paidAmount,
       batchId: order.batchId,
       createdAt: order.createdAt,
       confirmedAt: reached('CONFIRMED') ? at(1) : null,
@@ -352,6 +375,21 @@ async function createOrder(order: SeedOrder) {
       items: { create: order.items },
     },
   });
+
+  // Мөнгө орсон захиалгад дэвтрийн бичилт үүсгэнэ — дүн эндээс гардаг.
+  if (order.paidAmount > 0) {
+    await prisma.payment.create({
+      data: {
+        orderId: created.id,
+        kind: 'PAYMENT',
+        amount: order.paidAmount,
+        method: 'BANK_TRANSFER',
+        note: 'Шилжүүлгээр',
+        actor: 'system',
+        createdAt: addDays(order.createdAt, 1),
+      },
+    });
+  }
 }
 
 main()

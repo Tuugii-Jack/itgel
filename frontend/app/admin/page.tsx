@@ -12,10 +12,33 @@ import {
   Td,
   Th,
 } from "@/components/admin/shared";
-import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner, type Tone } from "@/components/ui";
+import { OrderDetail } from "@/components/admin/OrderDetail";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
-import type { AdminBatch, AdminOrderRow, AdminSummary, OrderStatus } from "@/lib/types";
+import type {
+  AdminBatch,
+  AdminOrderRow,
+  AdminSummary,
+  OrderStatus,
+  PaymentState,
+} from "@/lib/types";
+
+const PAYMENT_TONE: Record<PaymentState, Tone> = {
+  UNPAID: "danger",
+  PARTIAL: "warn",
+  PAID: "ok",
+  OVERPAID: "info",
+  REFUNDED: "neutral",
+};
+
+const PAYMENT_LABEL: Record<PaymentState, string> = {
+  UNPAID: "Төлөгдөөгүй",
+  PARTIAL: "Хэсэгчилсэн",
+  PAID: "Төлсөн",
+  OVERPAID: "Илүү",
+  REFUNDED: "Буцаасан",
+};
 
 const STATUSES: OrderStatus[] = [
   "NEW",
@@ -36,6 +59,7 @@ export default function AdminOrdersPage() {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [openId, setOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,22 +102,28 @@ export default function AdminOrdersPage() {
     });
   };
 
-  /** Сонгосон захиалгуудыг дараагийн төлөв рүү нэг нэгээр нь шилжүүлнэ. */
+  /** Сонгосон захиалгуудыг нэг хүсэлтээр шилжүүлнэ. */
   const advanceSelected = async (target: OrderStatus) => {
     setBusy(true);
     setError(null);
-    const failed: string[] = [];
-    for (const id of selected) {
-      try {
-        await adminApi.setOrderStatus(id, target);
-      } catch (e) {
-        const order = orders.find((o) => o.id === id);
-        failed.push(`${order?.code ?? id}: ${e instanceof ApiError ? e.message : "алдаа"}`);
+
+    let message: string | null = null;
+    try {
+      const result = await adminApi.bulkOrderStatus([...selected], target);
+      if (result.failed.length > 0) {
+        message =
+          `${result.succeeded} амжилттай, ${result.failed.length} алдаатай — ` +
+          result.failed.map((f) => `${f.code ?? f.id}: ${f.message}`).join(" · ");
       }
+    } catch (e) {
+      message = e instanceof ApiError ? e.message : "Гүйцэтгэж чадсангүй.";
+    } finally {
+      setBusy(false);
     }
-    if (failed.length > 0) setError(failed.join(" · "));
-    setBusy(false);
+
+    // `load()` нь алдааг цэвэрлэдэг тул мэдэгдлийг түүний дараа тавина.
     await load();
+    if (message) setError(message);
   };
 
   const addToBatch = async (batchId: string) => {
@@ -107,6 +137,16 @@ export default function AdminOrdersPage() {
       setBusy(false);
     }
   };
+
+  if (openId) {
+    return (
+      <OrderDetail
+        orderId={openId}
+        onClose={() => setOpenId(null)}
+        onChanged={load}
+      />
+    );
+  }
 
   const todayHandover = orders.filter(
     (o) => o.status === "ARRIVED" && o.fulfilment !== null,
@@ -208,6 +248,7 @@ export default function AdminOrdersPage() {
                   <Th>Хэрэглэгч</Th>
                   <Th>Бараа</Th>
                   <Th>Дүн</Th>
+                  <Th>Төлбөр</Th>
                   <Th>Статус</Th>
                   <Th>Багц</Th>
                   <Th>Огноо</Th>
@@ -224,7 +265,15 @@ export default function AdminOrdersPage() {
                         onChange={() => toggle(order.id)}
                       />
                     </Td>
-                    <Td className="tnum whitespace-nowrap">{order.code}</Td>
+                    <Td className="whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={() => setOpenId(order.id)}
+                        className="tnum cursor-pointer border-0 bg-transparent p-0 text-ink underline"
+                      >
+                        {order.code}
+                      </button>
+                    </Td>
                     <Td>
                       <div>{order.customer.name ?? "—"}</div>
                       <div className="tnum text-[13px] text-muted">
@@ -239,6 +288,11 @@ export default function AdminOrdersPage() {
                           үлдэгдэл {money(order.dueAmount)}
                         </div>
                       )}
+                    </Td>
+                    <Td>
+                      <Badge tone={PAYMENT_TONE[order.paymentState]}>
+                        {PAYMENT_LABEL[order.paymentState]}
+                      </Badge>
                     </Td>
                     <Td>
                       <OrderBadge status={order.status} />
@@ -274,7 +328,13 @@ export default function AdminOrdersPage() {
                       checked={selected.has(order.id)}
                       onChange={() => toggle(order.id)}
                     />
-                    <span className="tnum text-[15px] font-medium">{order.code}</span>
+                    <button
+                      type="button"
+                      onClick={() => setOpenId(order.id)}
+                      className="tnum cursor-pointer border-0 bg-transparent p-0 text-[15px] font-medium text-ink underline"
+                    >
+                      {order.code}
+                    </button>
                   </label>
                   <OrderBadge status={order.status} />
                 </div>
@@ -286,11 +346,12 @@ export default function AdminOrdersPage() {
                   <span className="tnum text-[15px]">{money(order.subtotal)}</span>
                   <span className="tnum text-[13px] text-muted">{dayLabel(order.createdAt)}</span>
                 </div>
-                {order.batch && (
-                  <div className="mt-2">
-                    <Badge tone="info">{order.batch.name}</Badge>
-                  </div>
-                )}
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Badge tone={PAYMENT_TONE[order.paymentState]}>
+                    {PAYMENT_LABEL[order.paymentState]}
+                  </Badge>
+                  {order.batch && <Badge tone="info">{order.batch.name}</Badge>}
+                </div>
               </Card>
             ))}
           </div>

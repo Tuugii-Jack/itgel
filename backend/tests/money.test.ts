@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { marginPercent, profitOf, splitPayment, subtotalOf } from '../src/lib/money.js';
+import { marginPercent, profitOf, subtotalOf } from '../src/lib/money.js';
 
 describe('Захиалгын дүн', () => {
   it('Σ(unitPrice × qty)', () => {
@@ -8,32 +8,6 @@ describe('Захиалгын дүн', () => {
 
   it('хоосон захиалга 0', () => {
     expect(subtotalOf([])).toBe(0);
-  });
-});
-
-describe('Төлбөрийн хуваарилалт', () => {
-  it('100% үед үлдэгдэл 0', () => {
-    expect(splitPayment(199_000, 100)).toEqual({ paidAmount: 199_000, dueAmount: 0 });
-  });
-
-  it('50% урьдчилгаа', () => {
-    expect(splitPayment(199_000, 50)).toEqual({ paidAmount: 99_500, dueAmount: 99_500 });
-  });
-
-  it('бутархай гарвал доош тойрч, нийлбэр нь дүнтэй тэнцэнэ', () => {
-    const { paidAmount, dueAmount } = splitPayment(99_999, 30);
-    expect(paidAmount).toBe(29_999); // 29999.7 → доош
-    expect(paidAmount + dueAmount).toBe(99_999);
-    expect(Number.isInteger(paidAmount)).toBe(true);
-  });
-
-  it('0% үед бүгд үлдэгдэл', () => {
-    expect(splitPayment(50_000, 0)).toEqual({ paidAmount: 0, dueAmount: 50_000 });
-  });
-
-  it('хязгаараас гадуур хувийг таслана', () => {
-    expect(splitPayment(50_000, 140)).toEqual({ paidAmount: 50_000, dueAmount: 0 });
-    expect(splitPayment(50_000, -20)).toEqual({ paidAmount: 0, dueAmount: 50_000 });
   });
 });
 
