@@ -220,6 +220,10 @@ model Order {
   /// Ирсэн тухай SMS илгээсэн огноо — давхар илгээхээс сэргийлнэ.
   arrivalNotifiedAt DateTime?
 
+  /// Хэрэглэгч "мөнгө шилжүүлсэн" гэж мэдэгдсэн огноо. Админ эдгээрийг
+  /// эхэнд шалгана; автомат цуцлалтад ч өртөхгүй. Төлбөр орсны баталгаа БИШ.
+  paymentClaimedAt DateTime?
+
   customer Customer    @relation(fields: [customerId], references: [id])
   batch    Batch?      @relation(fields: [batchId], references: [id])
   items    OrderItem[]
@@ -340,7 +344,18 @@ model Setting {
   autoCloseOnDeadline Boolean  @default(true)
   deliveryFees        Json     @default("{}") // { "Баянзүрх": 6000, ... }
   deliveryDailyLimit  Int      @default(20)
-  updatedAt           DateTime @updatedAt
+
+  /// --- Төлбөр хүлээн авах данс ---
+  /// Захиалга өгсний дараа хэрэглэгчид харагдана. Хоосон бол данс харуулахгүй.
+  bankName          String @default("")
+  bankAccountNumber String @default("")
+  bankAccountName   String @default("")
+  /// Дансны доор нэмж бичих чөлөөт заавар (сонголтоор).
+  paymentNote       String @default("")
+  /// Мөнгө ороогүй захиалгыг хэдэн цагийн дараа автоматаар цуцлах. 0 = цуцлахгүй.
+  unpaidCancelHours Int    @default(0)
+
+  updatedAt DateTime @updatedAt
 }
 
 model AuditLog {

@@ -3,7 +3,7 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { sweepAll } from '../lib/rateLimit.js';
 import { addDays, startOfUbDay, ubDateString, UB_TZ } from '../lib/date.js';
-import { notifyArrival } from '../services/orders.js';
+import { changeOrderStatus, notifyArrival } from '../services/orders.js';
 import { getSettings } from '../services/settings.js';
 
 const tasks: ScheduledTask[] = [];
@@ -58,6 +58,53 @@ export async function sendArrivalNotifications(): Promise<number> {
   }
   if (sent > 0) console.info(`[cron] ${sent} захиалгад ирсэн мэдэгдэл илгээлээ.`);
   return sent;
+}
+
+/**
+ * 4. Мөнгө ороогүй захиалгыг цуцлах.
+ *
+ * `unpaidCancelHours` нь 0 бол огт ажиллахгүй (анхдагч). Хэрэглэгч
+ * "шилжүүлсэн" гэж мэдэгдсэн захиалгыг хөндөхгүй — админ гараар шалгана.
+ * Зөвхөн NEW төлөвтэй, огт мөнгө ороогүй захиалгад хамаарна.
+ */
+export async function cancelUnpaidOrders(now = new Date()): Promise<number> {
+  const settings = await getSettings();
+  if (settings.unpaidCancelHours <= 0) return 0;
+
+  const cutoff = new Date(now.getTime() - settings.unpaidCancelHours * 60 * 60 * 1000);
+
+  const expired = await prisma.order.findMany({
+    where: {
+      deletedAt: null,
+      status: 'NEW',
+      paidAmount: 0,
+      paymentClaimedAt: null,
+      createdAt: { lte: cutoff },
+    },
+    select: { id: true, code: true, subtotal: true },
+    take: 200,
+  });
+  if (expired.length === 0) return 0;
+
+  // Захиалга бүрийг тусад нь — нэг нь уначихвал бусад нь үргэлжилнэ.
+  let cancelled = 0;
+  for (const order of expired) {
+    try {
+      await changeOrderStatus(order.id, 'CANCELLED', {
+        actor: 'system',
+        reason: `Төлбөр ${settings.unpaidCancelHours} цагийн дотор ороогүй.`,
+        now,
+      });
+      cancelled += 1;
+    } catch (error) {
+      console.error(`[cron] ${order.code} цуцлаж чадсангүй:`, error);
+    }
+  }
+
+  if (cancelled > 0) {
+    console.info(`[cron] ${cancelled} төлөгдөөгүй захиалга цуцлагдлаа.`);
+  }
+  return cancelled;
 }
 
 export interface StaleOrderReport {
@@ -120,6 +167,11 @@ export function startCron(): void {
 
   // Өдөрт нэг — 09:00
   tasks.push(cron.schedule('0 9 * * *', () => void reportStaleOrders().catch(console.error), options));
+
+  // Цаг тутам — төлөгдөөгүй захиалгыг цуцлах (тохиргоо асаалттай үед л).
+  tasks.push(
+    cron.schedule('15 * * * *', () => void cancelUnpaidOrders().catch(console.error), options),
+  );
 
   // Rate limiter-ийн хугацаа дууссан бичлэгүүд — эс цэвэрлэвэл санах ой өснө.
   tasks.push(

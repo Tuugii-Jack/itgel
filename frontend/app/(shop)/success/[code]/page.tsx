@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { use, useEffect, useState } from "react";
+import { PaymentPanel } from "@/components/PaymentPanel";
 import { Qr } from "@/components/Qr";
 import { Button, Card, Divider, ErrorNote, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { money, phoneLabel, rangeLabel } from "@/lib/format";
+import { awaitingPayment, PAYMENT_HINT } from "@/lib/payment";
 import type { PublicOrder, Store } from "@/lib/types";
 
 export default function SuccessPage({ params }: { params: Promise<{ code: string }> }) {
@@ -45,6 +47,9 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
     );
   }
 
+  const showPayment =
+    order.status !== "CANCELLED" && awaitingPayment(order.paymentState) && order.dueAmount > 0;
+
   const arrived = order.timeline.find((s) => s.key === "arrived");
   const eta = arrived?.estimatedAt ?? arrived?.at ?? null;
   const inTransit = order.timeline.find((s) => s.key === "in_transit");
@@ -78,6 +83,11 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
         </Button>
       </div>
 
+      {/* Төлбөр бол дараагийн шууд алхам — хураангуйгаас өмнө тавина. */}
+      {showPayment && store && (
+        <PaymentPanel order={order} store={store} />
+      )}
+
       <Qr value={trackUrl || order.code} size={160} />
 
       <p className="m-0 max-w-[300px] text-center text-[15px] leading-[1.6]">
@@ -99,14 +109,26 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
           {order.items.map((item) => (
             <div key={item.id} className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[14px] leading-[1.4]">{item.name}</div>
+                <div
+                  className={`text-[14px] leading-[1.4] ${
+                    item.cancelled ? "text-muted line-through" : ""
+                  }`}
+                >
+                  {item.name}
+                </div>
                 <div className="text-[13px] text-muted">
                   {[item.size, item.color].filter(Boolean).join(" · ")}
                   {[item.size, item.color].filter(Boolean).length > 0 ? " · " : ""}
-                  {item.qty} ш
+                  {item.qty} ш{item.cancelled ? " · Цуцлагдсан" : ""}
                 </div>
               </div>
-              <span className="tnum shrink-0 text-[14px]">{money(item.total)}</span>
+              <span
+                className={`tnum shrink-0 text-[14px] ${
+                  item.cancelled ? "text-muted line-through" : ""
+                }`}
+              >
+                {money(item.total)}
+              </span>
             </div>
           ))}
         </div>
@@ -118,6 +140,9 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
           {order.paidAmount > 0 && (
             <SumRow label="Төлсөн" value={money(order.paidAmount)} />
           )}
+          {order.refundedAmount > 0 && (
+            <SumRow label="Буцаасан" value={`− ${money(order.refundedAmount)}`} />
+          )}
           <SumRow
             label={order.paidAmount > 0 ? "Үлдэгдэл" : "Шилжүүлэх дүн"}
             value={order.dueAmount === 0 ? "Байхгүй" : money(order.dueAmount)}
@@ -127,14 +152,23 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
         </div>
       </Card>
 
+      {/* Холбоосыг дараа дахин нээж болох тул шилжүүлэх дүн үлдсэн үед л зааварчилна. */}
       <Card surface className="w-full p-4">
         <div className="text-[15px] font-medium">Дараагийн алхам</div>
         <p className="mt-1 mb-0 text-[13px] text-ink-2">
-          Дээрх дүнг шилжүүлээд, гүйлгээний утга дээр{" "}
-          <span className="tnum">{order.code}</span> кодоо бичнэ үү. Төлбөр
-          баталгаажмагц захиалга боловсруулагдана. Бараа ирэхэд{" "}
-          <span className="tnum">{phoneLabel(order.customer.phone)}</span> дугаар руу
-          SMS илгээнэ.
+          {/* Шилжүүлэх зааврыг дээрх самбар хэлсэн тул энд давтахгүй. */}
+          {showPayment ? (
+            <>Төлбөр баталгаажмагц захиалга боловсруулагдана. </>
+          ) : (
+            <>{PAYMENT_HINT[order.paymentState]} </>
+          )}
+          {order.status !== "CANCELLED" && (
+            <>
+              Бараа ирэхэд{" "}
+              <span className="tnum">{phoneLabel(order.customer.phone)}</span> дугаар руу
+              SMS илгээнэ.
+            </>
+          )}
         </p>
       </Card>
 

@@ -231,6 +231,7 @@ publicOrdersRouter.get(
         refundedAmount: order.refundedAmount,
         dueAmount: order.dueAmount,
         paymentState: paymentState(computeTotals(order)),
+        paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         fulfilment: order.fulfilment,
         createdAt: order.createdAt.toISOString(),
         customer: { name: order.customer.name, phone: maskPhone(order.customer.phone) },
@@ -239,6 +240,54 @@ publicOrdersRouter.get(
         delivery: publicDelivery(order.delivery),
         timeline: buildTimeline(order),
         canChooseFulfilment: order.status === 'ARRIVED' && order.fulfilment === null,
+      },
+    });
+  }),
+);
+
+/**
+ * POST /api/orders/:code/payment-claim — "мөнгө шилжүүлсэн" гэж мэдэгдэх.
+ *
+ * Энэ нь төлбөр орсны БАТАЛГАА БИШ. Зөвхөн админд "эхэнд шалгаарай" гэж
+ * дохио өгч, автомат цуцлалтаас хамгаална. Мөнгө нь дэвтэрт бүртгэгдэх үед л
+ * тоологдоно. Хүчээр дарахаас сэргийлж IP-ээр хязгаарлав.
+ */
+publicOrdersRouter.post(
+  '/:code/payment-claim',
+  ipRateLimit(20, 10 * 60 * 1000),
+  validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
+  asyncHandler(async (req, res) => {
+    const code = param(req, 'code').toUpperCase();
+    const order = await prisma.order.findFirst({ where: { code, deletedAt: null } });
+    if (!order) throw notFound('Захиалга олдсонгүй.');
+
+    if (order.status === 'CANCELLED') {
+      throw conflict('Цуцлагдсан захиалга дээр төлбөр мэдэгдэх боломжгүй.');
+    }
+    if (order.dueAmount <= 0) {
+      throw conflict('Энэ захиалгын төлбөр аль хэдийн бүрэн орсон байна.');
+    }
+
+    // Давхар дарахад анхны огноог хадгална — дарааллын шударга байдлын төлөө.
+    if (!order.paymentClaimedAt) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { paymentClaimedAt: new Date() },
+      });
+      await audit({
+        actor: `customer:${order.customerId}`,
+        action: 'PAYMENT_CLAIM',
+        entity: 'Order',
+        entityId: order.id,
+        after: { code: order.code, dueAmount: order.dueAmount },
+      });
+    }
+
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    res.json({
+      data: {
+        code: updated.code,
+        paymentClaimedAt: updated.paymentClaimedAt?.toISOString() ?? null,
       },
     });
   }),

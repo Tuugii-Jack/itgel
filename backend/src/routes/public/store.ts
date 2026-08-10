@@ -4,7 +4,7 @@ import { districtList, getSettings } from '../../services/settings.js';
 
 export const publicStoreRouter = Router();
 
-/** GET /api/store — хаяг, цаг, утас, Facebook. */
+/** GET /api/store — хаяг, цаг, утас, Facebook, төлбөр хүлээн авах данс. */
 publicStoreRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
@@ -17,6 +17,17 @@ publicStoreRouter.get(
         workHours: settings.workHours,
         facebookUrl: settings.facebookUrl,
         deliveryFees: districtList(settings),
+        // Данс тохируулаагүй бол null — frontend төлбөрийн самбарыг нуух ёстой.
+        bank: settings.bankAccountNumber
+          ? {
+              name: settings.bankName,
+              accountNumber: settings.bankAccountNumber,
+              accountName: settings.bankAccountName,
+              note: settings.paymentNote,
+            }
+          : null,
+        /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
+        unpaidCancelHours: settings.unpaidCancelHours,
       },
     });
   }),

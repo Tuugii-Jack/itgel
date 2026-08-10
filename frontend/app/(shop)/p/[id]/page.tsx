@@ -10,7 +10,6 @@ import {
   Button,
   Card,
   ChoiceGroup,
-  Divider,
   ErrorNote,
   ImagePlaceholder,
   Spinner,
@@ -106,28 +105,46 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* Desktop дээр зүүн талд зураг, баруун талд мэдээлэл */}
-      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,460px)] lg:items-start lg:gap-10 lg:px-8 lg:pt-6">
+      <div className="lg:grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start lg:gap-10 lg:px-8 lg:pt-6">
+      {/* Зураг хэт их зай эзлэхгүй — нэр, үнэ, ирэх огноо эхний дэлгэцэд багтана. */}
       <div className="lg:sticky lg:top-20 lg:overflow-hidden lg:rounded-[12px] lg:border lg:border-line">
       <Gallery images={product.images} name={product.name} />
       </div>
 
       <div className="lg:min-w-0">
+      {blocked && (
+        <div className="px-4 pt-4 lg:px-0 lg:pt-0">
+          <div
+            className={`rounded-[12px] border px-4 py-3 ${closed ? "border-warn bg-warn-bg" : "border-danger bg-danger-bg"}`}
+          >
+            <div className={`text-[15px] font-medium ${closed ? "text-warn" : "text-danger"}`}>
+              {closed ? "Энэ барааны захиалга хаагдсан" : "Энэ бараа дууссан"}
+            </div>
+            <p className="mt-1 mb-0 text-[13px] text-ink-2">
+              {closed
+                ? "Дараагийн багцад орохоор нээгдэх үед сайт дээр дахин гарна."
+                : "Дахин нөхөгдөх үед сайт дээр дахин гарна."}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-2 px-4 pt-4 lg:px-0 lg:pt-0">
         <Badge tone={isOrder ? "neutral" : "ok"} className="self-start">
           {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
         </Badge>
-        <h1 className="m-0 text-[20px] font-medium leading-[1.4]">{product.name}</h1>
-        <div className="tnum text-[24px] font-medium">{money(product.price)}</div>
-        {!isOrder && (
-          <div className="text-[13px] text-ok">
-            {soldOut ? "Дууссан" : `Үлдэгдэл ${product.stock} ширхэг`}
-          </div>
-        )}
+        <h1 className="m-0 text-[22px] font-medium leading-[1.35] lg:text-[28px]">
+          {product.name}
+        </h1>
+        <div className="tnum text-[28px] font-medium leading-tight lg:text-[32px]">
+          {money(product.price)}
+        </div>
       </div>
 
-      <HowItArrives product={product} closeLabel={closeLabel} />
+      {/* Худалдан авах шийдвэрт нөлөөлөх гурван зүйл — эхэнд, том. */}
+      <KeyFacts product={product} closeLabel={closeLabel} soldOut={soldOut} closed={closed} />
 
-      {product.sizes.length > 0 && (
+      {!blocked && product.sizes.length > 0 && (
         <div className="px-4 lg:px-0 pt-6">
           <div className="mb-2 text-[15px] font-medium">Хэмжээ</div>
           <ChoiceGroup
@@ -141,7 +158,7 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      {product.colors.length > 0 && (
+      {!blocked && product.colors.length > 0 && (
         <div className="px-4 lg:px-0 pt-5">
           <div className="mb-2 text-[15px] font-medium">Өнгө</div>
           <ChoiceGroup
@@ -155,23 +172,27 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
         </div>
       )}
 
-      <div className="px-4 lg:px-0 pt-5">
-        <div className="mb-2 text-[15px] font-medium">Тоо ширхэг</div>
-        <div className="flex items-center gap-3">
-          <Stepper
-            qty={qty}
-            max={isOrder ? 50 : Math.max(1, product.stock)}
-            onChange={setQty}
-          />
-          <span className="tnum text-[15px] text-ink-2">= {money(total)}</span>
+      {!blocked && (
+        <div className="px-4 lg:px-0 pt-5">
+          <div className="mb-2 text-[15px] font-medium">Тоо ширхэг</div>
+          <div className="flex items-center gap-3">
+            <Stepper
+              qty={qty}
+              max={isOrder ? 50 : Math.max(1, product.stock)}
+              onChange={setQty}
+            />
+            <span className="tnum text-[15px] text-ink-2">= {money(total)}</span>
+          </div>
         </div>
-      </div>
+      )}
 
       {notice && (
         <div className="px-4 pt-4">
           <ErrorNote>{notice}</ErrorNote>
         </div>
       )}
+
+      <HowItArrives product={product} />
 
       {product.description && (
         <div className="px-4 lg:px-0 pt-6">
@@ -214,14 +235,102 @@ export default function ProductPage({ params }: { params: Promise<{ id: string }
       {/* Утсан дээр наалдсан, desktop дээр урсгалын дотор */}
       <div className="fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-[560px] items-center gap-3 border-t border-line bg-bg p-4
         lg:static lg:mx-8 lg:mt-8 lg:max-w-none lg:rounded-[12px] lg:border">
-        <div className="min-w-0 flex-1">
-          <div className="text-[12px] text-muted">Нийт төлөх</div>
-          <div className="tnum text-[17px] font-medium">{money(total)}</div>
-        </div>
-        <Button size="lg" onClick={addToCart} disabled={blocked} className="min-w-[160px]">
-          {closed ? "Захиалга хаагдсан" : soldOut ? "Дууссан" : isOrder ? "Захиалах" : "Сагсанд хийх"}
-        </Button>
+        {blocked ? (
+          <Link href="/" className="w-full no-underline">
+            <Button full size="lg" variant="outline">
+              Бусад бараа үзэх
+            </Button>
+          </Link>
+        ) : (
+          <>
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] text-muted">Нийт төлөх</div>
+              <div className="tnum text-[17px] font-medium">{money(total)}</div>
+            </div>
+            <Button size="lg" onClick={addToCart} className="min-w-[160px]">
+              {isOrder ? "Захиалах" : "Сагсанд хийх"}
+            </Button>
+          </>
+        )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Худалдан авах шийдвэрт нөлөөлдөг зүйлс — хэзээ гартаа авах, хэзээ хаагдах,
+ * хэдэн ширхэг үлдсэн. Эдгээрийг хайж олох биш, шууд харагдах ёстой.
+ */
+function KeyFacts({
+  product,
+  closeLabel,
+  soldOut,
+  closed,
+}: {
+  product: Product;
+  closeLabel: string;
+  soldOut: boolean;
+  closed: boolean;
+}) {
+  const isOrder = product.type === "order";
+
+  return (
+    <div className="px-4 pt-5 lg:px-0">
+      <div className="divide-y divide-line rounded-[12px] border border-line">
+        <Fact label="Гарт очих" value={arrivalLabel(product)} strong />
+
+        {isOrder && !closed && closeLabel && (
+          <Fact label="Захиалга хаагдах" value={closeLabel} tone="warn" />
+        )}
+
+        {!isOrder && (
+          <Fact
+            label="Үлдэгдэл"
+            value={soldOut ? "Дууссан" : `${product.stock} ширхэг`}
+            tone={soldOut ? "danger" : "ok"}
+          />
+        )}
+
+        <Fact label="Төлбөр" value="Захиалахад бүтнээр төлнө" />
+      </div>
+    </div>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  strong,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  tone?: "neutral" | "ok" | "warn" | "danger";
+}) {
+  const colors = {
+    neutral: "text-ink",
+    ok: "text-ok",
+    warn: "text-warn",
+    danger: "text-danger",
+  };
+
+  // Гарт очих огноо урт байдаг тул шошгыг дээр нь тавьж, тасрахаас сэргийлнэ.
+  if (strong) {
+    return (
+      <div className="px-4 py-3">
+        <div className="text-[13px] text-ink-2">{label}</div>
+        <div className={`tnum text-[19px] font-medium leading-tight ${colors[tone]}`}>
+          {value}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-baseline justify-between gap-3 px-4 py-3">
+      <span className="shrink-0 text-[14px] text-ink-2">{label}</span>
+      <span className={`tnum text-right text-[15px] ${colors[tone]}`}>{value}</span>
     </div>
   );
 }
@@ -246,7 +355,9 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
   const [index, setIndex] = useState(0);
 
   if (images.length === 0) {
-    return <ImagePlaceholder className="aspect-square w-full border-b border-line" />;
+    return (
+      <ImagePlaceholder className="h-[240px] w-full border-b border-line sm:h-[300px] lg:aspect-square lg:h-auto lg:border-b-0" />
+    );
   }
 
   return (
@@ -263,7 +374,7 @@ function Gallery({ images, name }: { images: string[]; name: string }) {
             key={src}
             src={src}
             alt={name}
-            className="aspect-square w-full shrink-0 snap-center"
+            className="h-[240px] w-full shrink-0 snap-center sm:h-[300px] lg:aspect-square lg:h-auto"
           />
         ))}
       </div>
@@ -316,7 +427,7 @@ function Stepper({
 }
 
 /** Дизайны хамгийн чухал блок — 4 алхамын timeline, тус бүр огноотой. */
-function HowItArrives({ product, closeLabel }: { product: Product; closeLabel: string }) {
+function HowItArrives({ product }: { product: Product }) {
   const steps = product.closeAt
     ? [
         { label: "Захиалга хаагдана", value: dayLabel(product.closeAt) },
@@ -334,14 +445,28 @@ function HowItArrives({ product, closeLabel }: { product: Product; closeLabel: s
       ];
 
   return (
-    <Card surface className="mx-4 mt-6 flex flex-col gap-3 p-4">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-[15px] font-medium">Энэ бараа хэрхэн ирэх вэ</div>
-        {product.closeAt && closeLabel && closeLabel !== "Хаагдсан" && (
-          <span className="tnum text-[12px] text-warn">{closeLabel}</span>
-        )}
-      </div>
+    <div className="px-4 pt-6 lg:px-0">
+      {/* Дэлгэрэнгүй явц — сонирхсон хүн нээж үзнэ, эхний харцыг бөглөрүүлэхгүй. */}
+      <details className="group rounded-[12px] border border-line bg-surface">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-[15px] font-medium">
+          Энэ бараа хэрхэн ирэх вэ
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="shrink-0 text-muted transition-transform group-open:rotate-180"
+            aria-hidden
+          >
+            <path d="M4 6 L8 10 L12 6" />
+          </svg>
+        </summary>
 
+        <div className="flex flex-col gap-3 px-4 pb-4">
       <ol className="m-0 flex list-none flex-col gap-0 p-0">
         {steps.map((step, i) => (
           <li key={step.label} className="flex gap-3">
@@ -358,7 +483,9 @@ function HowItArrives({ product, closeLabel }: { product: Product; closeLabel: s
       </ol>
 
       <p className="m-0 text-[12px] text-muted">Огноо ойролцоо. Өөрчлөгдвөл мэдэгдэнэ.</p>
-    </Card>
+        </div>
+      </details>
+    </div>
   );
 }
 

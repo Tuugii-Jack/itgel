@@ -28,6 +28,12 @@ const patchBody = z.object({
   autoCloseOnDeadline: z.boolean().optional(),
   deliveryFees: z.record(z.string().min(1), z.coerce.number().int().min(0).max(1_000_000)).optional(),
   deliveryDailyLimit: z.coerce.number().int().min(1).max(1000).optional(),
+  // Төлбөр хүлээн авах данс — хоосон мөр зөвшөөрнө (данс түр хураахад).
+  bankName: z.string().trim().max(60).optional(),
+  bankAccountNumber: z.string().trim().max(40).optional(),
+  bankAccountName: z.string().trim().max(80).optional(),
+  paymentNote: z.string().trim().max(300).optional(),
+  unpaidCancelHours: z.coerce.number().int().min(0).max(720).optional(),
 });
 
 adminSettingsRouter.patch(

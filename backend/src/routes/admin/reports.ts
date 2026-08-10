@@ -156,14 +156,26 @@ adminReportsRouter.get(
 adminReportsRouter.get(
   '/summary',
   asyncHandler(async (_req, res) => {
-    const [newOrders, inTransit, arrived, pendingDeliveries, activeProducts] = await Promise.all([
-      prisma.order.count({ where: { deletedAt: null, status: 'NEW' } }),
-      prisma.order.count({ where: { deletedAt: null, status: 'IN_TRANSIT' } }),
-      prisma.order.count({ where: { deletedAt: null, status: 'ARRIVED' } }),
-      prisma.delivery.count({ where: { status: { not: 'DELIVERED' } } }),
-      prisma.product.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
-    ]);
+    const [newOrders, inTransit, arrived, pendingDeliveries, activeProducts, paymentClaims] =
+      await Promise.all([
+        prisma.order.count({ where: { deletedAt: null, status: 'NEW' } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'IN_TRANSIT' } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'ARRIVED' } }),
+        prisma.delivery.count({ where: { status: { not: 'DELIVERED' } } }),
+        prisma.product.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+        // Хэрэглэгч шилжүүлсэн гэсэн ч мөнгө нь дэвтэрт ороогүй — шалгах ёстой.
+        prisma.order.count({
+          where: {
+            deletedAt: null,
+            status: { not: 'CANCELLED' },
+            paymentClaimedAt: { not: null },
+            dueAmount: { gt: 0 },
+          },
+        }),
+      ]);
 
-    res.json({ data: { newOrders, inTransit, arrived, pendingDeliveries, activeProducts } });
+    res.json({
+      data: { newOrders, inTransit, arrived, pendingDeliveries, activeProducts, paymentClaims },
+    });
   }),
 );

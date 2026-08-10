@@ -177,6 +177,8 @@ export interface PublicOrder {
   refundedAmount: number;
   dueAmount: number;
   paymentState: PaymentState;
+  /** Хэрэглэгч "шилжүүлсэн" гэж мэдэгдсэн огноо. Төлбөр орсны баталгаа биш. */
+  paymentClaimedAt: string | null;
   fulfilment: Fulfilment | null;
   canChooseFulfilment: boolean;
   createdAt: string;
@@ -220,6 +222,14 @@ export interface Me {
   createdAt: string;
 }
 
+/** Төлбөр хүлээн авах данс. Админ тохируулаагүй бол `null`. */
+export interface BankAccount {
+  name: string;
+  accountNumber: string;
+  accountName: string;
+  note: string;
+}
+
 export interface Store {
   storeName: string;
   phone: string;
@@ -227,6 +237,9 @@ export interface Store {
   workHours: string;
   facebookUrl: string;
   deliveryFees: { district: string; fee: number }[];
+  bank: BankAccount | null;
+  /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
+  unpaidCancelHours: number;
 }
 
 export interface Slot {
@@ -269,6 +282,7 @@ export interface AdminOrderRow {
   refundedAmount: number;
   dueAmount: number;
   paymentState: PaymentState;
+  paymentClaimedAt: string | null;
   profit: number;
   fulfilment: Fulfilment | null;
   batch: BatchSummary | null;
@@ -393,11 +407,33 @@ export interface Settings {
   autoCloseOnDeadline: boolean;
   deliveryFees: Record<string, number>;
   deliveryDailyLimit: number;
+  bankName: string;
+  bankAccountNumber: string;
+  bankAccountName: string;
+  paymentNote: string;
+  /** Мөнгө ороогүй захиалгыг хэдэн цагийн дараа цуцлах. 0 = цуцлахгүй. */
+  unpaidCancelHours: number;
   updatedAt: string;
+}
+
+/** Өөрчлөлтийн бүртгэл — GET /admin/settings/audit. */
+export interface AuditLog {
+  id: string;
+  /** "admin:<id>" | "customer:<id>" | "system" */
+  actor: string;
+  /** CREATE | UPDATE | DELETE | STATUS_CHANGE | HANDOVER … */
+  action: string;
+  entity: string;
+  entityId: string;
+  before: unknown;
+  after: unknown;
+  createdAt: string;
 }
 
 export interface AdminSummary {
   newOrders: number;
+  /** Хэрэглэгч шилжүүлсэн гэж мэдэгдсэн ч мөнгө нь ороогүй захиалгын тоо. */
+  paymentClaims: number;
   inTransit: number;
   arrived: number;
   pendingDeliveries: number;

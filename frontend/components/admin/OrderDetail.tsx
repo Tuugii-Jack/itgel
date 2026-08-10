@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { OrderBadge, PageHead, Select } from "@/components/admin/shared";
+import { ORDER_STATUS_LABEL, OrderBadge, PageHead, Select } from "@/components/admin/shared";
 import {
   Badge,
   Button,
@@ -11,24 +11,35 @@ import {
   Field,
   Input,
   Spinner,
-  type Tone,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
+import { PAYMENT_TONE } from "@/lib/payment";
 import type {
   AdminOrderDetail,
+  OrderStatus,
   PaymentLedger,
   PaymentMethod,
-  PaymentState,
 } from "@/lib/types";
 
-const STATE_TONE: Record<PaymentState, Tone> = {
-  UNPAID: "danger",
-  PARTIAL: "warn",
-  PAID: "ok",
-  OVERPAID: "info",
-  REFUNDED: "neutral",
-};
+/**
+ * Захиалгын урсгал — backend/src/lib/orderStatus.ts-ийн ORDER_FLOW.
+ * Зөвхөн дараагийн алхам руу, эсвэл (хүлээлгэн өгөөгүй бол) цуцлах руу шилжинэ.
+ */
+const ORDER_FLOW: OrderStatus[] = [
+  "NEW",
+  "CONFIRMED",
+  "IN_BATCH",
+  "IN_TRANSIT",
+  "ARRIVED",
+  "HANDED_OVER",
+];
+
+function nextStatus(from: OrderStatus): OrderStatus | null {
+  const i = ORDER_FLOW.indexOf(from);
+  if (i === -1 || i === ORDER_FLOW.length - 1) return null;
+  return ORDER_FLOW[i + 1];
+}
 
 const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "BANK_TRANSFER", label: "Шилжүүлэг" },
@@ -55,6 +66,10 @@ export function OrderDetail({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Төлбөр дутуу гэж 409 өгсөн үед force-оор давах саналыг харуулна. */
+  const [shortfall, setShortfall] = useState<{ status: OrderStatus; missing: number } | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,12 +95,40 @@ export function OrderDetail({
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     setError(null);
+    setShortfall(null);
     try {
       await action();
       await load();
       onChanged();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Гүйцэтгэж чадсангүй.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /**
+   * Төлөв солих. Төлбөр дутуу гэж backend 409 өгвөл дүнг нь уншаад
+   * `force`-оор давах сонголтыг санал болгоно.
+   */
+  const changeStatus = async (status: OrderStatus, force?: boolean) => {
+    setBusy(true);
+    setError(null);
+    setShortfall(null);
+    try {
+      await adminApi.setOrderStatus(orderId, status, undefined, force);
+      await load();
+      onChanged();
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setError(e.message);
+        const missing = (e.details as { missing?: number } | undefined)?.missing;
+        if (e.status === 409 && typeof missing === "number" && missing > 0) {
+          setShortfall({ status, missing });
+        }
+      } else {
+        setError("Гүйцэтгэж чадсангүй.");
+      }
     } finally {
       setBusy(false);
     }
@@ -115,14 +158,47 @@ export function OrderDetail({
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <OrderBadge status={order.status} />
-        <Badge tone={STATE_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
+        <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
         {order.batch && <Badge tone="info">{order.batch.name}</Badge>}
       </div>
+
+      {order.paymentClaimedAt && order.dueAmount > 0 && (
+        <Card className="mb-4 border-info bg-info-bg p-4">
+          <div className="text-[14px] leading-[1.5] text-info">
+            Хэрэглэгч <span className="tnum">{dayTimeLabel(order.paymentClaimedAt)}</span>-нд
+            мөнгө шилжүүлсэн гэж мэдэгдсэн. Дансаа шалгаад доор төлбөрийг бүртгэнэ үү —
+            мэдэгдэл нь төлбөр орсны баталгаа биш.
+          </div>
+        </Card>
+      )}
 
       {error && (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>
         </div>
+      )}
+
+      {shortfall && (
+        <Card className="mb-4 border-warn bg-warn-bg p-4">
+          <div className="text-[14px] leading-[1.5] text-warn">
+            <span className="tnum font-medium">{money(shortfall.missing)}</span> ороогүй
+            байна. Мөнгийг өөр сувгаар авсан бол доорх төлбөрийн хэсэгт бүртгэнэ үү.
+            Бүртгэхгүйгээр үргэлжлүүлбэл захиалга дутуу төлбөртэй хэвээр үлдэнэ.
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => changeStatus(shortfall.status, true)}
+            >
+              Дутуу ч гэсэн {ORDER_STATUS_LABEL[shortfall.status]} болгох
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setShortfall(null)}>
+              Болих
+            </Button>
+          </div>
+        </Card>
       )}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_360px] lg:items-start">
@@ -199,6 +275,12 @@ export function OrderDetail({
         </div>
 
         <div className="flex flex-col gap-4">
+          <StatusActions
+            status={order.status}
+            disabled={busy}
+            onChange={changeStatus}
+          />
+
           <Card className="flex flex-col gap-2 p-4">
             <SumRow label="Барааны дүн" value={money(totals.subtotal)} />
             {totals.deliveryFee > 0 && (
@@ -241,6 +323,47 @@ export function OrderDetail({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Дараагийн алхам ба цуцлах — backend-ийн зөвшөөрсөн шилжилтүүд л харагдана. */
+function StatusActions({
+  status,
+  disabled,
+  onChange,
+}: {
+  status: OrderStatus;
+  disabled: boolean;
+  onChange: (status: OrderStatus) => void;
+}) {
+  const next = nextStatus(status);
+  const canCancel = status !== "CANCELLED" && status !== "HANDED_OVER";
+  if (!next && !canCancel) return null;
+
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="text-[15px] font-medium">Төлөв</div>
+      <div className="text-[13px] text-ink-2">
+        Одоо: {ORDER_STATUS_LABEL[status]}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {next && (
+          <Button size="sm" disabled={disabled} onClick={() => onChange(next)}>
+            {ORDER_STATUS_LABEL[next]} болгох
+          </Button>
+        )}
+        {canCancel && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => onChange("CANCELLED")}
+          >
+            Цуцлах
+          </Button>
+        )}
+      </div>
+    </Card>
   );
 }
 

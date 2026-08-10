@@ -20,6 +20,8 @@ export default function HandoverPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  /** Үлдэгдэлтэй захиалгад бэлэн мөнгө авсныг ажилтан баталгаажуулсан эсэх. */
+  const [cashTaken, setCashTaken] = useState(false);
 
   const loadPending = useCallback(async () => {
     setLoading(true);
@@ -47,6 +49,7 @@ export default function HandoverPage() {
 
     setBusy(true);
     setScanning(false);
+    setCashTaken(false);
     try {
       setFound(await adminApi.handoverLookup(value));
     } catch (e) {
@@ -62,10 +65,18 @@ export default function HandoverPage() {
     setBusy(true);
     setError(null);
     try {
-      const result = await adminApi.handoverComplete(found.id);
+      // Үлдэгдлийг ЗААВАЛ илгээнэ. Хоосон явуулбал backend дүнг өөрөө нөхөж
+      // бэлэн мөнгө бүртгэдэг тул ажилтан мэдэлгүй төлбөр үүсэх эрсдэлтэй.
+      const result = await adminApi.handoverComplete(
+        found.id,
+        found.dueAmount > 0
+          ? { collectedAmount: found.dueAmount, note: "Хүлээлгэн өгөх үед бэлнээр авсан" }
+          : { collectedAmount: 0 },
+      );
       setDone(result.code);
       setFound(null);
       setCode("");
+      setCashTaken(false);
       await loadPending();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Хүлээлгэн өгч чадсангүй.");
@@ -85,7 +96,14 @@ export default function HandoverPage() {
               <OrderBadge status={found.status} />
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setFound(null)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setFound(null);
+              setCashTaken(false);
+            }}
+          >
             Цуцлах
           </Button>
         </div>
@@ -122,6 +140,18 @@ export default function HandoverPage() {
             <div className="tnum text-[24px] font-medium text-warn">
               {money(found.dueAmount)}
             </div>
+            <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-[14px] leading-[1.5]">
+              <input
+                type="checkbox"
+                checked={cashTaken}
+                onChange={(e) => setCashTaken(e.target.checked)}
+                className="mt-0.5 size-4 shrink-0"
+              />
+              <span>
+                <span className="tnum font-medium">{money(found.dueAmount)}</span>-ийг
+                бэлнээр авлаа. Хүлээлгэн өгөхөд энэ дүн төлбөрийн дэвтэрт бичигдэнэ.
+              </span>
+            </label>
           </Card>
         ) : (
           <Card surface className="mb-3 p-4">
@@ -160,10 +190,12 @@ export default function HandoverPage() {
             full
             onClick={complete}
             loading={busy}
-            disabled={!found.canHandOver}
+            disabled={!found.canHandOver || (found.dueAmount > 0 && !cashTaken)}
             className="h-14 text-[17px]"
           >
-            Хүлээлгэн өгсөн
+            {found.dueAmount > 0
+              ? `${money(found.dueAmount)} авч, хүлээлгэн өгөх`
+              : "Хүлээлгэн өгсөн"}
           </Button>
         </div>
       </div>

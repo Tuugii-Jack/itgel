@@ -42,6 +42,8 @@ const listQuery = z.object({
   q: z.string().trim().min(1).max(60).optional(),
   batch: z.string().min(1).optional(),
   fulfilment: z.enum(['PICKUP', 'DELIVERY']).optional(),
+  /** Хэрэглэгч "шилжүүлсэн" гэж мэдэгдсэн, гэвч мөнгө нь ороогүй захиалгууд. */
+  claimed: z.coerce.boolean().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -57,6 +59,7 @@ adminOrdersRouter.get(
       ...(q.status ? { status: q.status } : {}),
       ...(q.batch ? { batchId: q.batch } : {}),
       ...(q.fulfilment ? { fulfilment: q.fulfilment } : {}),
+      ...(q.claimed ? { paymentClaimedAt: { not: null }, dueAmount: { gt: 0 } } : {}),
       ...(q.q
         ? {
             OR: [
@@ -97,6 +100,7 @@ adminOrdersRouter.get(
         refundedAmount: order.refundedAmount,
         dueAmount: order.dueAmount,
         paymentState: paymentState(computeTotals(order)),
+        paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         profit: profitOf(order.items.filter((i) => i.cancelledAt === null)),
         fulfilment: order.fulfilment,
         batch: batchSummary(order.batch),
@@ -276,6 +280,7 @@ export function adminOrderDetail(order: OrderDetail) {
     netPaid: totals.netPaid,
     paymentState: state,
     paymentStateLabel: PAYMENT_STATE_LABEL[state],
+    paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
     profit: profitOf(activeItems),
     fulfilment: order.fulfilment,
     note: order.note,

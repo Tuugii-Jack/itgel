@@ -19,6 +19,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { awaitingPayment, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
 import type { MyOrder, OrderStatus, Store } from "@/lib/types";
 
 const STATUS_TONE: Record<OrderStatus, Tone> = {
@@ -311,12 +312,21 @@ function OrdersTab({ orders, activeCount }: { orders: MyOrder[]; activeCount: nu
                   <span className="text-muted">Төлсөн</span>
                   <span className="tnum">{money(order.paidAmount)}</span>
                 </div>
-
-                {order.canChooseFulfilment && (
-                  <div className="pt-3">
-                    <Badge tone="ok">Авах аргаа сонгоно уу</Badge>
+                {order.dueAmount > 0 && (
+                  <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                    <span className="text-muted">Шилжүүлэх</span>
+                    <span className="tnum text-warn">{money(order.dueAmount)}</span>
                   </div>
                 )}
+
+                <div className="flex flex-wrap gap-2 pt-3 empty:pt-0">
+                  {order.status !== "CANCELLED" && awaitingPayment(order.paymentState) && (
+                    <Badge tone={PAYMENT_TONE[order.paymentState]}>
+                      {PAYMENT_LABEL[order.paymentState]}
+                    </Badge>
+                  )}
+                  {order.canChooseFulfilment && <Badge tone="ok">Авах аргаа сонгоно уу</Badge>}
+                </div>
               </Card>
             </Link>
           );
@@ -339,7 +349,10 @@ function PaymentsTab({
   totalSpent: number;
   store: Store | null;
 }) {
-  const paid = orders.filter((o) => o.status !== "CANCELLED" && o.paidAmount > 0);
+  // Буцаалт хийгдсэн захиалга ч мөнгөн хөдөлгөөнтэй тул энд харагдана.
+  const paid = orders.filter(
+    (o) => o.status !== "CANCELLED" && (o.paidAmount > 0 || o.refundedAmount > 0),
+  );
 
   return (
     <div className="px-4 pt-4">
@@ -359,14 +372,20 @@ function PaymentsTab({
                   <div className="tnum text-[14px]">{order.code}</div>
                   <div className="text-[13px] text-muted">{dayLabel(order.createdAt)}</div>
                 </div>
-                <Badge tone={order.dueAmount === 0 ? "ok" : "warn"}>
-                  {order.dueAmount === 0 ? "Бүрэн" : "Үлдэгдэлтэй"}
+                <Badge tone={PAYMENT_TONE[order.paymentState]}>
+                  {PAYMENT_LABEL[order.paymentState]}
                 </Badge>
               </div>
               <div className="flex items-baseline justify-between gap-2 text-[13px]">
                 <span className="text-muted">Төлсөн дүн</span>
                 <span className="tnum">{money(order.paidAmount)}</span>
               </div>
+              {order.refundedAmount > 0 && (
+                <div className="flex items-baseline justify-between gap-2 text-[13px]">
+                  <span className="text-muted">Буцаасан</span>
+                  <span className="tnum">− {money(order.refundedAmount)}</span>
+                </div>
+              )}
               {order.dueAmount > 0 && (
                 <div className="flex items-baseline justify-between gap-2 text-[13px]">
                   <span className="text-muted">Үлдэгдэл</span>

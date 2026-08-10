@@ -9,6 +9,7 @@ import type {
   AdminOrderRow,
   AdminProduct,
   AdminSummary,
+  AuditLog,
   Category,
   CreatedOrder,
   Me,
@@ -188,6 +189,16 @@ export const api = {
 
   order: (code: string) =>
     request<PublicOrder>(`/orders/${code}`).then((r) => r.data),
+
+  /**
+   * "Мөнгө шилжүүлсэн" гэж мэдэгдэх. Төлбөр орсонд тооцогдохгүй — админ
+   * дансаа шалгаад дэвтэрт бүртгэх хүртэл захиалга төлөгдөөгүй хэвээр.
+   */
+  claimPayment: (code: string) =>
+    request<{ code: string; paymentClaimedAt: string | null }>(
+      `/orders/${code}/payment-claim`,
+      { method: "POST" },
+    ).then((r) => r.data),
 
   chooseFulfilment: (
     code: string,
@@ -540,4 +551,10 @@ export const adminApi = {
       method: "PATCH",
       body,
     }).then((r) => r.data),
+
+  /** Өөрчлөлтийн бүртгэл. Тодорхой бичлэгээр шүүж болно. */
+  audit: (query?: { entity?: string; entityId?: string; limit?: number }) =>
+    request<AuditLog[]>("/admin/settings/audit", { ...adminAuth, query }).then(
+      (r) => r.data,
+    ),
 };

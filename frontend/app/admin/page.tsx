@@ -12,33 +12,12 @@ import {
   Td,
   Th,
 } from "@/components/admin/shared";
-import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner, type Tone } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
-import type {
-  AdminBatch,
-  AdminOrderRow,
-  AdminSummary,
-  OrderStatus,
-  PaymentState,
-} from "@/lib/types";
-
-const PAYMENT_TONE: Record<PaymentState, Tone> = {
-  UNPAID: "danger",
-  PARTIAL: "warn",
-  PAID: "ok",
-  OVERPAID: "info",
-  REFUNDED: "neutral",
-};
-
-const PAYMENT_LABEL: Record<PaymentState, string> = {
-  UNPAID: "Төлөгдөөгүй",
-  PARTIAL: "Хэсэгчилсэн",
-  PAID: "Төлсөн",
-  OVERPAID: "Илүү",
-  REFUNDED: "Буцаасан",
-};
+import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
+import type { AdminBatch, AdminOrderRow, AdminSummary, OrderStatus } from "@/lib/types";
 
 const STATUSES: OrderStatus[] = [
   "NEW",
@@ -158,7 +137,12 @@ export default function AdminOrdersPage() {
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Шинэ захиалга" value={summary?.newOrders ?? "—"} />
-        <Metric label="Зам дээр" value={summary?.inTransit ?? "—"} tone="info" />
+        <Metric
+          label="Төлбөр шалгах"
+          value={summary?.paymentClaims ?? "—"}
+          tone={summary && summary.paymentClaims > 0 ? "warn" : "neutral"}
+          sub="Шилжүүлсэн гэж мэдэгдсэн"
+        />
         <Metric label="Ирсэн" value={summary?.arrived ?? "—"} tone="ok" />
         <Metric
           label="Өнөөдөр хүлээлгэж өгөх"
@@ -291,8 +275,11 @@ export default function AdminOrdersPage() {
                     </Td>
                     <Td>
                       <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                        {PAYMENT_LABEL[order.paymentState]}
+                        {PAYMENT_LABEL_SHORT[order.paymentState]}
                       </Badge>
+                      {order.paymentClaimedAt && order.dueAmount > 0 && (
+                        <div className="mt-1 text-[12px] text-info">Шилжүүлсэн гэсэн</div>
+                      )}
                     </Td>
                     <Td>
                       <OrderBadge status={order.status} />
@@ -348,8 +335,11 @@ export default function AdminOrdersPage() {
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                    {PAYMENT_LABEL[order.paymentState]}
+                    {PAYMENT_LABEL_SHORT[order.paymentState]}
                   </Badge>
+                  {order.paymentClaimedAt && order.dueAmount > 0 && (
+                    <Badge tone="info">Шилжүүлсэн гэсэн</Badge>
+                  )}
                   {order.batch && <Badge tone="info">{order.batch.name}</Badge>}
                 </div>
               </Card>

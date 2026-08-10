@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { FulfilmentChooser } from "@/components/FulfilmentChooser";
+import { PaymentPanel } from "@/components/PaymentPanel";
 import { Badge, Card, Divider, ErrorNote, Spinner, type Tone } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { dayLabel, dayTimeLabel, money, relativeDay } from "@/lib/format";
+import { awaitingPayment, PAYMENT_HINT, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
 import type { OrderStatus, PublicOrder, Store, TimelineStep } from "@/lib/types";
 
 const STATUS_TONE: Record<OrderStatus, Tone> = {
@@ -73,6 +75,15 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
         <Badge tone={STATUS_TONE[order.status]}>{order.statusLabel}</Badge>
       </div>
 
+      {/* Мөнгө хүлээж байгаа бол данс, гүйлгээний утгыг эндээс дахин харна. */}
+      {order.status !== "CANCELLED" &&
+        awaitingPayment(order.paymentState) &&
+        order.dueAmount > 0 && (
+          <div className="px-4 pt-5">
+            <PaymentPanel order={order} store={store} onClaimed={load} />
+          </div>
+        )}
+
       {/* Бараа ирсэн — авах арга сонгох (дизайны 06 дэлгэц) */}
       {order.canChooseFulfilment && (
         <FulfilmentChooser order={order} store={store} onDone={load} />
@@ -116,14 +127,31 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
           {order.items.map((item) => (
             <div key={item.id} className="flex items-start justify-between gap-3 p-3.5">
               <div className="min-w-0">
-                <div className="text-[14px] leading-[1.4]">{item.name}</div>
+                <div
+                  className={`text-[14px] leading-[1.4] ${
+                    item.cancelled ? "text-muted line-through" : ""
+                  }`}
+                >
+                  {item.name}
+                </div>
                 <div className="text-[13px] text-muted">
                   {[item.size, item.color].filter(Boolean).join(" · ")}
                   {[item.size, item.color].filter(Boolean).length > 0 ? " · " : ""}
                   {item.qty} ш × {money(item.unitPrice)}
                 </div>
+                {item.cancelled && (
+                  <div className="mt-1.5">
+                    <Badge tone="danger">Цуцлагдсан</Badge>
+                  </div>
+                )}
               </div>
-              <span className="tnum shrink-0 text-[14px]">{money(item.total)}</span>
+              <span
+                className={`tnum shrink-0 text-[14px] ${
+                  item.cancelled ? "text-muted line-through" : ""
+                }`}
+              >
+                {money(item.total)}
+              </span>
             </div>
           ))}
         </Card>
@@ -131,18 +159,41 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
 
       <div className="px-4 pt-4">
         <Card className="flex flex-col gap-2 p-4">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <span className="text-[15px] font-medium">Төлбөр</span>
+            <Badge tone={PAYMENT_TONE[order.paymentState]}>
+              {PAYMENT_LABEL[order.paymentState]}
+            </Badge>
+          </div>
           <Line label="Барааны дүн" value={money(order.subtotal)} />
           {order.deliveryFee > 0 && (
             <Line label="Хүргэлт" value={money(order.deliveryFee)} />
           )}
           <Line label="Төлсөн" value={money(order.paidAmount)} />
+          {order.refundedAmount > 0 && (
+            <Line label="Буцаасан" value={`− ${money(order.refundedAmount)}`} />
+          )}
           <Divider />
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-[14px] text-ink-2">Үлдэгдэл</span>
-            <span className="tnum text-[17px] font-medium">
+            <span
+              className={`tnum text-[17px] font-medium ${
+                order.dueAmount > 0 ? "text-warn" : ""
+              }`}
+            >
               {order.dueAmount === 0 ? "Байхгүй" : money(order.dueAmount)}
             </span>
           </div>
+          <p className="mt-1 mb-0 text-[13px] leading-[1.5] text-ink-2">
+            {PAYMENT_HINT[order.paymentState]}
+            {awaitingPayment(order.paymentState) && (
+              <>
+                {" "}
+                Гүйлгээний утга дээр <span className="tnum">{order.code}</span> кодоо
+                бичихээ мартуузай.
+              </>
+            )}
+          </p>
         </Card>
       </div>
 

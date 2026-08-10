@@ -57,6 +57,10 @@ export async function changeOrderStatus(
 
     const next = await tx.order.update({ where: { id: orderId }, data });
 
+    // Захиалга бүтнээрээ цуцлагдвал бэлэн барааны үлдэгдлийг буцаана.
+    // Эс бөгөөс цуцалсан бүрд агуулахын тоо худал багасаж үлдэнэ.
+    if (to === 'CANCELLED') await restoreReadyStock(tx, orderId);
+
     await audit(
       {
         actor: options.actor,
@@ -74,6 +78,29 @@ export async function changeOrderStatus(
 
   if (to === 'ARRIVED') await notifyArrival(updated);
   return updated;
+}
+
+/**
+ * Цуцлагдсан захиалгын бэлэн барааны үлдэгдлийг агуулахад буцаана.
+ * Урьдчилсан захиалгын бараа (`closeAt` заасан) үлдэгдэлгүй тул хамаарахгүй.
+ * Мөрөөр нь цуцалсан бараа энд дахин тоологдохгүй — тэр нь аль хэдийн буцаагдсан.
+ */
+async function restoreReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
+  const items = await tx.orderItem.findMany({
+    where: { orderId, cancelledAt: null },
+    include: { product: true },
+  });
+
+  for (const item of items) {
+    if (!item.product || item.product.closeAt !== null) continue;
+    await tx.product.update({
+      where: { id: item.productId },
+      data: {
+        stock: { increment: item.qty },
+        ...(item.product.status === 'SOLD_OUT' ? { status: 'ACTIVE' as const } : {}),
+      },
+    });
+  }
 }
 
 /** Захиалга ирснийг мэдэгдэх SMS. Нэг захиалгад нэг л удаа. */

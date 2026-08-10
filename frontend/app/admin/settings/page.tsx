@@ -14,7 +14,8 @@ import {
   Toggle,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import type { Settings } from "@/lib/types";
+import { dayTimeLabel } from "@/lib/format";
+import type { AuditLog, Settings } from "@/lib/types";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -74,6 +75,11 @@ export default function SettingsPage() {
         autoCloseOnDeadline: settings.autoCloseOnDeadline,
         deliveryDailyLimit: settings.deliveryDailyLimit,
         deliveryFees,
+        bankName: settings.bankName,
+        bankAccountNumber: settings.bankAccountNumber,
+        bankAccountName: settings.bankAccountName,
+        paymentNote: settings.paymentNote,
+        unpaidCancelHours: settings.unpaidCancelHours,
       });
       setSettings(updated);
       setSaved(true);
@@ -141,6 +147,54 @@ export default function SettingsPage() {
           <p className="m-0 text-[12px] text-muted">
             Шинэ бараа үүсгэхэд эдгээр утга анхдагчаар орно.
           </p>
+        </Card>
+
+        <Card className="flex flex-col gap-3 p-4">
+          <div>
+            <div className="text-[15px] font-medium">Төлбөр хүлээн авах данс</div>
+            <p className="mt-1 mb-0 text-[13px] text-ink-2">
+              Захиалга өгсний дараа хэрэглэгчид энэ мэдээлэл харагдана. Дансны дугаар
+              хоосон бол данс огт харуулахгүй, оронд нь дэлгүүрийн утас гарна.
+            </p>
+          </div>
+          <Field label="Банк">
+            <Input
+              value={settings.bankName}
+              onChange={(v) => patch({ bankName: v })}
+              placeholder="Хаан банк"
+            />
+          </Field>
+          <Field label="Дансны дугаар">
+            <Input
+              value={settings.bankAccountNumber}
+              onChange={(v) => patch({ bankAccountNumber: v })}
+              placeholder="5019447288"
+            />
+          </Field>
+          <Field label="Хүлээн авагч">
+            <Input
+              value={settings.bankAccountName}
+              onChange={(v) => patch({ bankAccountName: v })}
+              placeholder="Б. Сарангэрэл"
+            />
+          </Field>
+          <Field label="Нэмэлт заавар" hint="Дансны доор гарах чөлөөт текст (заавал биш)">
+            <Textarea
+              value={settings.paymentNote}
+              onChange={(v) => patch({ paymentNote: v })}
+              rows={2}
+            />
+          </Field>
+          <Field
+            label="Төлбөр хүлээх хугацаа (цаг)"
+            hint="Мөнгө ороогүй захиалгыг автоматаар цуцлана. 0 = цуцлахгүй. Шилжүүлсэн гэж мэдэгдсэн захиалгыг хөндөхгүй."
+          >
+            <Input
+              type="number"
+              value={String(settings.unpaidCancelHours)}
+              onChange={(v) => patch({ unpaidCancelHours: Number(v) || 0 })}
+            />
+          </Field>
         </Card>
 
         <Card className="flex flex-col gap-2 p-4">
@@ -228,7 +282,113 @@ export default function SettingsPage() {
             {saved ? "Хадгалсан" : "Хадгалах"}
           </Button>
         </div>
+
+        <AuditTrail />
       </div>
     </div>
   );
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  CREATE: "Үүсгэсэн",
+  UPDATE: "Зассан",
+  DELETE: "Устгасан",
+  STATUS_CHANGE: "Төлөв сольсон",
+  HANDOVER: "Хүлээлгэн өгсөн",
+  PAYMENT: "Төлбөр бүртгэсэн",
+  REFUND: "Буцаалт хийсэн",
+  ITEM_CANCEL: "Мөр цуцалсан",
+  STALE_ORDERS_REPORT: "Удаан хүлээсэн захиалгын тайлан",
+};
+
+const ENTITY_LABEL: Record<string, string> = {
+  Order: "Захиалга",
+  Product: "Бараа",
+  Category: "Ангилал",
+  Batch: "Багц",
+  Setting: "Тохиргоо",
+  Ad: "Сурталчилгаа",
+  Delivery: "Хүргэлт",
+  Payment: "Төлбөр",
+};
+
+/** Хэн юу өөрчилснийг хардаг хэсэг — GET /admin/settings/audit. */
+function AuditTrail() {
+  const [logs, setLogs] = useState<AuditLog[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setLogs(await adminApi.audit({ limit: 50 }));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !logs) void load();
+  };
+
+  return (
+    <Card className="p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[15px] font-medium">Өөрчлөлтийн түүх</div>
+          <div className="text-[13px] text-muted">Хэн юуг хэзээ өөрчилсөн</div>
+        </div>
+        <Button size="sm" variant="outline" onClick={toggle} loading={loading}>
+          {open ? "Хаах" : "Харах"}
+        </Button>
+      </div>
+
+      {open && (
+        <>
+          <Divider className="my-3" />
+          {error ? (
+            <ErrorNote>{error}</ErrorNote>
+          ) : !logs || logs.length === 0 ? (
+            <p className="m-0 text-[13px] text-muted">
+              {loading ? "Ачаалж байна…" : "Бичилт алга."}
+            </p>
+          ) : (
+            <div className="flex flex-col divide-y divide-line">
+              {logs.map((log) => (
+                <div
+                  key={log.id}
+                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 py-2.5 text-[13px]"
+                >
+                  <span>
+                    {ACTION_LABEL[log.action] ?? log.action}
+                    {" · "}
+                    <span className="text-ink-2">
+                      {ENTITY_LABEL[log.entity] ?? log.entity}
+                    </span>
+                  </span>
+                  <span className="tnum text-muted">
+                    {actorLabel(log.actor)} · {dayTimeLabel(log.createdAt)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** "admin:<id>" гэх мэт мөрийг уншихад ойлгомжтой болгоно. */
+function actorLabel(actor: string): string {
+  if (actor === "system") return "Систем";
+  if (actor.startsWith("admin:")) return "Админ";
+  if (actor.startsWith("customer:")) return "Хэрэглэгч";
+  return actor;
 }
