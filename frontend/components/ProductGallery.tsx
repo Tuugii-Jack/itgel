@@ -1,31 +1,12 @@
 "use client";
 
 import { useState } from "react";
-
-// Minimal ProductImage component to avoid circular import.
-function ProductImage({
-  src,
-  alt,
-  className = "",
-}: {
-  src?: string | null;
-  alt: string;
-  className?: string;
-}) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src ?? "/placeholder.png"}
-      alt={alt}
-      className={className + " object-cover bg-muted"}
-    />
-  );
-}
+import { ProductImage } from "@/components/ProductImage";
 
 /**
  * Барааны олон зурагтай галерей.
- * Эхний зураг (эсвэл сонгосон) том харагдана, бусад нь доор жижиг мөр болж жагсана.
- * Тухайн жижиг зураг дээр дарахад тэр нь том зураг болж солигдоно.
+ * Эхний зураг үндсэн (том) зураг байдаг ба үлдсэн зургууд доор нь жижгээр жагсдаг.
+ * Жижиг зураг дээр дарахад тэр нь дээш, том зураг болж гарч ирнэ.
  */
 export function ProductGallery({
   images,
@@ -40,25 +21,28 @@ export function ProductGallery({
   const [active, setActive] = useState(0);
   const index = Math.min(active, list.length - 1);
 
+  // Одоо гол зурган дээр харагдаж буйгаас бусад нь жижиг мөрөнд орно.
+  const thumbnails = list
+    .map((src, i) => ({ src, i }))
+    .filter(({ i }) => i !== index);
+
   return (
     <div className={`flex flex-col gap-2.5 ${className}`}>
-      {/* Гол зураг */}
+      {/* Гол зураг — эхний (эсвэл сонгосон) зураг том харагдана */}
       <div className='relative aspect-square w-full overflow-hidden rounded-[12px] border border-line bg-surface'>
         <ProductImage src={list[index]} alt={alt} className='h-full w-full' />
       </div>
 
-      {/* Thumbnail мөр — 2-с дээш зурагтай үед л харуулна */}
-      {list.length > 1 && (
+      {/* Үлдсэн зургууд — доор нь жижгээр */}
+      {thumbnails.length > 0 && (
         <div className='no-scrollbar flex gap-2 overflow-x-auto'>
-          {list.map((src, i) => (
+          {thumbnails.map(({ src, i }) => (
             <button
               key={i}
               type='button'
               onClick={() => setActive(i)}
               aria-label={`${alt} — зураг ${i + 1}`}
-              aria-current={i === index}
-              className={`h-16 w-16 shrink-0 overflow-hidden rounded-[8px] border transition-colors
-                ${i === index ? "border-primary" : "border-line hover:border-primary-muted"}`}
+              className='h-16 w-16 shrink-0 overflow-hidden rounded-[8px] border border-line transition-colors hover:border-primary-muted'
             >
               <ProductImage
                 src={src}
@@ -72,5 +56,3 @@ export function ProductGallery({
     </div>
   );
 }
-export { ProductImage };
-

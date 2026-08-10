@@ -5,14 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
 import { ProductCard } from "@/components/ProductCard";
-import {
-  Button,
-  Card,
-  Divider,
-  Empty,
-  ErrorNote,
-  Spinner,
-} from "@/components/ui";
+import { Button, Divider, Empty, ErrorNote, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import type { Ad, Category, Product, Store } from "@/lib/types";
@@ -87,7 +80,7 @@ export default function HomePage() {
   const filtering = category !== null || query !== "";
 
   return (
-    <div className='page pb-24 sm:pb-16'>
+    <div className='page'>
       <TopNav store={store} />
 
       {ads.length > 0 && !filtering && (
@@ -377,12 +370,9 @@ function MapSection() {
 
 function TrustBlock({ store }: { store: Store }) {
   return (
-    <section className='mt-10 sm:mt-12'>
-      {/* GUTTER байхгүй → зүүн, баруун зайгүй */}
-      <Card
-        surface
-        className='rounded-none border-x-0 border-b-0 border-t border-line p-5 shadow-none sm:p-6 lg:p-8'
-      >
+    <section className='relative z-10 mt-10 sm:mt-12'>
+      {/* GUTTER байхгүй → зүүн, баруун зайгүй. Бага зэргийн цэнхэр tint. */}
+      <div className='rounded-none border-x-0 border-b-0 border-t border-line bg-primary-soft/60 p-5 sm:p-6 lg:p-8'>
         <div className={`${GUTTER}`}>
           <div className='flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-6'>
             {/* Logo */}
@@ -448,7 +438,7 @@ function TrustBlock({ store }: { store: Store }) {
             © {new Date().getFullYear()} {store.storeName}
           </p>
         </div>
-      </Card>
+      </div>
     </section>
   );
 }
