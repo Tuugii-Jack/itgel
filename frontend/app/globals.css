@@ -3,7 +3,7 @@
 /*
  * itgel дизайн систем — design-prompt.md-ийн токенууд.
  * Өнгийг ЗӨВХӨН статус илэрхийлэхэд. Товч, header, хүрээнд өнгө хэрэглэхгүй.
- * Logo-ийн бүдэг/тод цэнхэртэй тааруулж primary blue нэмсэн.
+ * Primary/secondary нь лого дээрх яг өнгөтэй (#44b9ea цэнхэр, #2a2a65 хар хөх) таарсан.
  */
 @theme {
   --color-bg: #ffffff;
@@ -14,11 +14,16 @@
   --color-ink-2: #57534e;
   --color-muted: #a8a29e;
 
-  /* Primary blues — logo-той нийцүүлсэн */
-  --color-primary: #2563eb;        /* тод цэнхэр */
-  --color-primary-soft: #eff6ff;   /* бүдэг цэнхэр background */
-  --color-primary-muted: #93c5fd;  /* дунд зэргийн */
-  --color-primary-dark: #1d4ed8;
+  /* Primary blues — лого дээрх цэнхэртэй яг таарсан (#44b9ea) */
+  --color-primary: #44b9ea;        /* тод цэнхэр — лого */
+  --color-primary-soft: #ecf8fd;   /* бүдэг цэнхэр background */
+  --color-primary-muted: #abe0f6;  /* дунд зэргийн */
+  --color-primary-dark: #1796cb;   /* hover/idle-д зориулсан бараан цэнхэр */
+
+  /* Secondary — лого дээрх хар хөхтэй яг таарсан (#2a2a65) */
+  --color-secondary: #2a2a65;
+  --color-secondary-soft: #eeeef7;
+  --color-secondary-muted: #8686b0;
 
   --color-ok: #15803d;
   --color-ok-bg: #f0fdf4;

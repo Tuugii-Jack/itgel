@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
  * Дизайн системийн үндсэн элементүүд.
  * Сүүдэр, градиент хэрэглэхгүй — зөвхөн 1px хүрээ.
  * Товч, оролтын өндөр 44px минимум.
+ * Интерактив/сонгогдсон төлөв → brand primary (лого цэнхэр). Энгийн текст → ink хэвээр.
  */
 
 export function Card({
@@ -49,10 +50,16 @@ export function Button({
   full,
   className = "",
 }: ButtonProps) {
-  const heights = { sm: "h-9 px-3 text-[13px]", md: "h-11 px-4", lg: "h-14 px-5 text-[15px]" };
+  const heights = {
+    sm: "h-9 px-3 text-[13px]",
+    md: "h-11 px-4",
+    lg: "h-14 px-5 text-[15px]",
+  };
   const variants = {
-    primary: "bg-ink text-white border border-ink",
-    outline: "bg-bg text-ink border border-line",
+    primary:
+      "bg-primary text-white border border-primary hover:bg-primary-dark hover:border-primary-dark transition-colors",
+    outline:
+      "bg-bg text-ink border border-line hover:border-primary-muted hover:text-primary transition-colors",
     ghost: "bg-transparent text-ink-2 border border-transparent",
     danger: "bg-bg text-danger border border-line",
   };
@@ -125,9 +132,11 @@ export function Row({
     danger: "text-danger",
   };
   return (
-    <div className="flex items-baseline justify-between gap-2 text-[13px]">
-      <span className="shrink-0 text-muted">{label}</span>
-      <span className={`tnum text-right ${colors[tone ?? "neutral"]}`}>{value}</span>
+    <div className='flex items-baseline justify-between gap-2 text-[13px]'>
+      <span className='shrink-0 text-muted'>{label}</span>
+      <span className={`tnum text-right ${colors[tone ?? "neutral"]}`}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -146,10 +155,10 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      {label && <span className="text-[13px] text-ink-2">{label}</span>}
+    <label className='flex flex-col gap-1.5'>
+      {label && <span className='text-[13px] text-ink-2'>{label}</span>}
       {children}
-      {hint && <span className="text-[12px] text-muted">{hint}</span>}
+      {hint && <span className='text-[12px] text-muted'>{hint}</span>}
     </label>
   );
 }
@@ -208,7 +217,7 @@ export function Textarea({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       rows={rows}
-      className="w-full resize-none rounded-[8px] border border-line bg-bg px-3 py-2.5 text-[15px] placeholder:text-muted"
+      className='w-full resize-none rounded-[8px] border border-line bg-bg px-3 py-2.5 text-[15px] placeholder:text-muted'
     />
   );
 }
@@ -228,18 +237,22 @@ export function ChoiceGroup({
   return (
     <div
       className={columns ? "grid gap-2" : "flex flex-wrap gap-2"}
-      style={columns ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` } : undefined}
+      style={
+        columns
+          ? { gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }
+          : undefined
+      }
     >
       {options.map((option) => {
         const active = option.value === value;
         return (
           <button
             key={option.value}
-            type="button"
+            type='button'
             disabled={option.disabled}
             onClick={() => onChange(option.value)}
-            className={`h-11 rounded-[8px] border px-3 text-[14px] leading-tight
-              ${active ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"}
+            className={`h-11 rounded-[8px] border px-3 text-[14px] leading-tight transition-colors
+              ${active ? "border-primary bg-primary text-white" : "border-line bg-bg text-ink hover:border-primary-muted"}
               ${option.disabled ? "opacity-35" : "cursor-pointer"}
               ${columns ? "" : "min-w-11"}`}
           >
@@ -263,19 +276,19 @@ export function Toggle({
   hint?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-1">
-      <div className="min-w-0">
-        <div className="text-[14px]">{label}</div>
-        {hint && <div className="text-[13px] text-muted">{hint}</div>}
+    <div className='flex items-center justify-between gap-3 py-1'>
+      <div className='min-w-0'>
+        <div className='text-[14px]'>{label}</div>
+        {hint && <div className='text-[13px] text-muted'>{hint}</div>}
       </div>
       <button
-        type="button"
-        role="switch"
+        type='button'
+        role='switch'
         aria-checked={checked}
         aria-label={label}
         onClick={() => onChange(!checked)}
         className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors
-          ${checked ? "border-ink bg-ink" : "border-line bg-surface-2"}`}
+          ${checked ? "border-primary bg-primary" : "border-line bg-surface-2"}`}
       >
         <span
           className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white transition-all
@@ -289,13 +302,15 @@ export function Toggle({
 
 export function Empty({ children }: { children: ReactNode }) {
   return (
-    <div className="px-6 py-12 text-center text-[15px] text-ink-2">{children}</div>
+    <div className='px-6 py-12 text-center text-[15px] text-ink-2'>
+      {children}
+    </div>
   );
 }
 
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <div className="rounded-[8px] border border-line bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
+    <div className='rounded-[8px] border border-line bg-danger-bg px-3 py-2.5 text-[13px] text-danger'>
       {children}
     </div>
   );
@@ -305,11 +320,17 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 export function ImagePlaceholder({ className = "" }: { className?: string }) {
   return (
     <div className={`flex items-center justify-center bg-surface ${className}`}>
-      <svg viewBox="0 0 100 100" className="h-1/2 w-1/2" aria-hidden>
-        <g fill="none" stroke="#A8A29E" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="18" y="26" width="64" height="48" rx="4" />
-          <path d="M18 60 L36 44 L52 60 L62 52 L82 68" />
-          <circle cx="62" cy="40" r="5" />
+      <svg viewBox='0 0 100 100' className='h-1/2 w-1/2' aria-hidden>
+        <g
+          fill='none'
+          stroke='#A8A29E'
+          strokeWidth='1.4'
+          strokeLinecap='round'
+          strokeLinejoin='round'
+        >
+          <rect x='18' y='26' width='64' height='48' rx='4' />
+          <path d='M18 60 L36 44 L52 60 L62 52 L82 68' />
+          <circle cx='62' cy='40' r='5' />
         </g>
       </svg>
     </div>

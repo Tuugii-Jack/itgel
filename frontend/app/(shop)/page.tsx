@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
 import { ProductCard } from "@/components/ProductCard";
 import {
@@ -17,7 +17,7 @@ import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import type { Ad, Category, Product, Store } from "@/lib/types";
 
-const GUTTER = "px-4 sm:px-6 lg:px-8 xl:px-12 2xl:px-16";
+const GUTTER = "mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8 xl:px-10";
 
 export default function HomePage() {
   const cart = useCart();
@@ -150,11 +150,9 @@ export default function HomePage() {
       {store && <TrustBlock store={store} />}
 
       {cart.count > 0 && (
-        <div
-          className={`sticky bottom-0 z-20 border-t border-line bg-bg/95 backdrop-blur-sm p-4 sm:static sm:border-0 sm:bg-transparent sm:backdrop-blur-none ${GUTTER} sm:pb-4`}
-        >
+        <div className='fixed bottom-0 m-auto z-20 md:static md: p-4 '>
           <Link href='/cart' className='no-underline'>
-            <Button full size='lg' className='sm:mx-auto sm:max-w-[360px]'>
+            <Button full size='lg' className='md:mx-auto md:max-w-[360px]'>
               Сагс үзэх · {cart.count} бараа
             </Button>
           </Link>
@@ -164,19 +162,59 @@ export default function HomePage() {
   );
 }
 
+/**
+ * Доош scroll хийхэд header-г нуух, дээш scroll хийхэд буцааж харуулах hook.
+ * threshold хүртэлх бага зэргийн scroll-д header нуугдахгүй.
+ */
+function useHideOnScroll(threshold = 400) {
+  const [hidden, setHidden] = useState(false);
+  const lastY = useRef(0);
+  const accum = useRef(0);
+
+  useEffect(() => {
+    lastY.current = window.scrollY;
+
+    const onScroll = () => {
+      const y = window.scrollY;
+      const diff = y - lastY.current;
+
+      if (diff < 0) {
+        accum.current = 0;
+        setHidden(false);
+      } else if (diff > 0) {
+        accum.current += diff;
+        if (y > threshold && accum.current > threshold) {
+          setHidden(true);
+        }
+      }
+
+      lastY.current = y;
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [threshold]);
+
+  return hidden;
+}
+
 function TopNav({ store }: { store: Store | null }) {
+  const hidden = useHideOnScroll(800);
+
   return (
     <header
-      className={`sticky top-0 z-30 flex h-16 items-center gap-6 border-b border-line bg-bg/95 backdrop-blur-sm ${GUTTER}`}
+      className={`sticky top-0 z-30 flex h-16 lg:h-20 items-center gap-6 lg:gap-8 bg-bg/80 backdrop-blur-sm mx-auto w-full px-4 sm:px-6 lg:px-10 xl:px-14 transition-transform duration-300 ease-out ${
+        hidden ? "-translate-y-full" : "translate-y-0"
+      }`}
     >
-      <Link href='/' className='no-underline'>
+      <Link href='/' className='no-underline shrink-0'>
         <Image
           src='/logo.png'
           alt={store?.storeName ?? "itgel"}
           width={40}
           height={40}
           priority
-          className='h-10 w-auto'
+          className='h-10 lg:h-11 w-auto'
         />
       </Link>
 
@@ -185,7 +223,7 @@ function TopNav({ store }: { store: Store | null }) {
         <NavLink href='#ready'>Бэлэн бараа</NavLink>
       </nav>
 
-      <div className='ml-auto flex items-center gap-2'>
+      <div className='ml-auto flex items-center gap-2 lg:gap-3'>
         {store?.phone && (
           <a
             href={`tel:${store.phone.replace(/\D/g, "")}`}
@@ -195,12 +233,12 @@ function TopNav({ store }: { store: Store | null }) {
           </a>
         )}
         <Link href='/profile' className='no-underline'>
-          <Button variant='outline' size='sm' className='h-10'>
+          <Button variant='outline' size='sm' className='h-10 lg:h-11'>
             Профайл
           </Button>
         </Link>
         <Link href='/t' className='no-underline'>
-          <Button variant='outline' size='sm' className='h-10'>
+          <Button variant='outline' size='sm' className='h-10 lg:h-11'>
             <svg
               width='16'
               height='16'

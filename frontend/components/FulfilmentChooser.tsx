@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Card, ChoiceGroup, Divider, ErrorNote, Input, Textarea } from "@/components/ui";
+import {
+  Button,
+  Card,
+  ChoiceGroup,
+  Divider,
+  ErrorNote,
+  Input,
+  Textarea,
+} from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { dayKey, money, weekdayShort } from "@/lib/format";
@@ -73,7 +81,11 @@ export function FulfilmentChooser({
       // Дараагийн удаа автоматаар орохын тулд хаягийг хадгална.
       if (type === "DELIVERY" && session.me) {
         await api
-          .updateMe({ district, khoroo: khoroo || null, addressText: address || null })
+          .updateMe({
+            district,
+            khoroo: khoroo || null,
+            addressText: address || null,
+          })
           .catch(() => undefined);
       }
       onDone();
@@ -84,37 +96,41 @@ export function FulfilmentChooser({
   };
 
   return (
-    <div className="px-4 pt-5">
-      <div className="mb-1 text-[20px] font-medium">Таны бараа ирлээ</div>
-      <p className="mt-0 mb-3 text-[13px] text-ink-2">
+    <div className='px-4 pt-5'>
+      <div className='mb-1 text-[20px] font-medium'>Таны бараа ирлээ</div>
+      <p className='mt-0 mb-3 text-[13px] text-ink-2'>
         Хэрхэн авахаа сонгоно уу. Дараа нь өөрчлөх боломжгүй.
       </p>
 
-      <div className="flex flex-col gap-2">
+      <div className='flex flex-col gap-2'>
         <OptionCard
           selected={type === "PICKUP"}
           onSelect={() => setType("PICKUP")}
-          title="Өөрөө ирж авах"
-          right={<span className="text-[13px] text-ok">Үнэгүй</span>}
+          title='Өөрөө ирж авах'
+          right={<span className='text-[13px] text-ok'>Үнэгүй</span>}
         >
-          <div className="text-[13px] text-ink-2">{store.address}</div>
-          <div className="text-[13px] text-muted">{store.workHours}</div>
+          <div className='text-[13px] text-ink-2'>{store.address}</div>
+          <div className='text-[13px] text-muted'>{store.workHours}</div>
         </OptionCard>
 
         <OptionCard
           selected={type === "DELIVERY"}
           onSelect={() => setType("DELIVERY")}
-          title="Хүргүүлэх"
-          right={<span className="tnum text-[13px] text-ink-2">{money(minFee)}-с</span>}
+          title='Хүргүүлэх'
+          right={
+            <span className='tnum text-[13px] text-ink-2'>
+              {money(minFee)}-с
+            </span>
+          }
         >
-          <div className="text-[13px] text-muted">Мя, Пү, Бя гаригт</div>
+          <div className='text-[13px] text-muted'>Мя, Пү, Бя гаригт</div>
         </OptionCard>
       </div>
 
       {type === "DELIVERY" && (
-        <div className="flex flex-col gap-4 pt-4">
+        <div className='flex flex-col gap-4 pt-4'>
           <div>
-            <div className="mb-2 text-[14px]">Дүүрэг</div>
+            <div className='mb-2 text-[14px]'>Дүүрэг</div>
             <ChoiceGroup
               options={store.deliveryFees.map((d) => ({
                 value: d.district,
@@ -127,37 +143,45 @@ export function FulfilmentChooser({
           </div>
 
           <div>
-            <div className="mb-2 text-[14px]">Хороо</div>
-            <Input value={khoroo} onChange={setKhoroo} placeholder="Жишээ: 15-р хороо" />
+            <div className='mb-2 text-[14px]'>Хороо</div>
+            <Input
+              value={khoroo}
+              onChange={setKhoroo}
+              placeholder='Жишээ: 15-р хороо'
+            />
           </div>
 
           <div>
-            <div className="mb-2 text-[14px]">Дэлгэрэнгүй хаяг</div>
+            <div className='mb-2 text-[14px]'>Дэлгэрэнгүй хаяг</div>
             <Textarea
               value={address}
               onChange={setAddress}
-              placeholder="Байр, орц, тоот, чиглүүлэг"
+              placeholder='Байр, орц, тоот, чиглүүлэг'
               rows={3}
             />
           </div>
 
           <div>
-            <div className="mb-2 text-[14px]">Хүргэлтийн өдөр</div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className='mb-2 text-[14px]'>Хүргэлтийн өдөр</div>
+            <div className='grid grid-cols-3 gap-2'>
               {slots.map((slot) => {
                 const active = day === slot.day;
                 return (
                   <button
                     key={slot.day}
-                    type="button"
+                    type='button'
                     disabled={!slot.available}
                     onClick={() => setDay(slot.day)}
-                    className={`flex h-[68px] flex-col items-center justify-center rounded-[8px] border px-1
-                      ${active ? "border-ink bg-ink text-white" : "border-line bg-bg"}
+                    className={`flex h-[68px] flex-col items-center justify-center rounded-[8px] border px-1 transition-colors
+                      ${active ? "border-primary bg-primary text-white" : "border-line bg-bg hover:border-primary-muted"}
                       ${slot.available ? "cursor-pointer" : "opacity-40"}`}
                   >
-                    <span className="text-[12px] opacity-70">{weekdayShort(slot.day)}</span>
-                    <span className="tnum text-[15px]">{Number(slot.day.slice(8))}</span>
+                    <span className='text-[12px] opacity-70'>
+                      {weekdayShort(slot.day)}
+                    </span>
+                    <span className='tnum text-[15px]'>
+                      {Number(slot.day.slice(8))}
+                    </span>
                     <span
                       className={`text-[12px] ${active ? "opacity-80" : slot.available ? "text-ok" : "text-muted"}`}
                     >
@@ -171,25 +195,25 @@ export function FulfilmentChooser({
         </div>
       )}
 
-      <Card className="mt-4 flex flex-col gap-2 p-4">
-        <div className="flex items-baseline justify-between gap-2 text-[14px]">
-          <span className="text-ink-2">Үлдэгдэл төлбөр</span>
-          <span className="tnum">{money(order.dueAmount)}</span>
+      <Card className='mt-4 flex flex-col gap-2 p-4'>
+        <div className='flex items-baseline justify-between gap-2 text-[14px]'>
+          <span className='text-ink-2'>Үлдэгдэл төлбөр</span>
+          <span className='tnum'>{money(order.dueAmount)}</span>
         </div>
-        <div className="flex items-baseline justify-between gap-2 text-[14px]">
-          <span className="text-ink-2">Хүргэлтийн хураамж</span>
-          <span className="tnum">{fee === 0 ? "Үнэгүй" : money(fee)}</span>
+        <div className='flex items-baseline justify-between gap-2 text-[14px]'>
+          <span className='text-ink-2'>Хүргэлтийн хураамж</span>
+          <span className='tnum'>{fee === 0 ? "Үнэгүй" : money(fee)}</span>
         </div>
         <Divider />
-        <div className="flex items-baseline justify-between gap-2">
-          <span className="text-[14px] text-ink-2">Нийт төлөх</span>
-          <span className="tnum text-[20px] font-medium">{money(total)}</span>
+        <div className='flex items-baseline justify-between gap-2'>
+          <span className='text-[14px] text-ink-2'>Нийт төлөх</span>
+          <span className='tnum text-[20px] font-medium'>{money(total)}</span>
         </div>
       </Card>
 
-      {error && <div className="pt-3">{<ErrorNote>{error}</ErrorNote>}</div>}
+      {error && <div className='pt-3'>{<ErrorNote>{error}</ErrorNote>}</div>}
 
-      <Button full size="lg" className="mt-4" onClick={submit} loading={busy}>
+      <Button full size='lg' className='mt-4' onClick={submit} loading={busy}>
         Баталгаажуулах
       </Button>
     </div>
@@ -211,24 +235,24 @@ function OptionCard({
 }) {
   return (
     <button
-      type="button"
+      type='button'
       onClick={onSelect}
-      className={`w-full cursor-pointer rounded-[12px] border bg-bg p-4 text-left
-        ${selected ? "border-ink" : "border-line"}`}
+      className={`w-full cursor-pointer rounded-[12px] border bg-bg p-4 text-left transition-colors
+        ${selected ? "border-primary" : "border-line hover:border-primary-muted"}`}
     >
-      <div className="flex items-start gap-3">
+      <div className='flex items-start gap-3'>
         <span
           className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border
-            ${selected ? "border-ink" : "border-muted"}`}
+            ${selected ? "border-primary" : "border-muted"}`}
         >
-          {selected && <span className="h-2.5 w-2.5 rounded-full bg-ink" />}
+          {selected && <span className='h-2.5 w-2.5 rounded-full bg-primary' />}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline justify-between gap-2">
-            <span className="text-[15px] font-medium">{title}</span>
+        <div className='min-w-0 flex-1'>
+          <div className='flex items-baseline justify-between gap-2'>
+            <span className='text-[15px] font-medium'>{title}</span>
             {right}
           </div>
-          <div className="mt-1 flex flex-col gap-0.5">{children}</div>
+          <div className='mt-1 flex flex-col gap-0.5'>{children}</div>
         </div>
       </div>
     </button>
