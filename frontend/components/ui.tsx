@@ -32,7 +32,7 @@ type ButtonProps = {
   onClick?: () => void;
   type?: "button" | "submit";
   variant?: "primary" | "outline" | "ghost" | "danger";
-  size?: "md" | "lg" | "sm";
+  size?: "md" | "bar" | "lg" | "sm";
   disabled?: boolean;
   loading?: boolean;
   full?: boolean;
@@ -50,9 +50,11 @@ export function Button({
   full,
   className = "",
 }: ButtonProps) {
+  // `bar` — дизайны үндсэн CTA (сагс, ирсэн, амжилттай) 48px өндөртэй.
   const heights = {
     sm: "h-9 px-3 text-[13px]",
     md: "h-11 px-4",
+    bar: "h-12 px-5 text-[15px]",
     lg: "h-14 px-5 text-[15px]",
   };
   const variants = {
@@ -217,7 +219,7 @@ export function Textarea({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       rows={rows}
-      className='w-full resize-none rounded-[8px] border border-line bg-bg px-3 py-2.5 text-[15px] placeholder:text-muted'
+      className='w-full resize-none rounded-[8px] border border-line bg-bg p-3 text-[15px] leading-[1.6] placeholder:text-muted'
     />
   );
 }

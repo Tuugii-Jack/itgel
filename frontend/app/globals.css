@@ -29,6 +29,8 @@
   --color-ok-bg: #f0fdf4;
   --color-warn: #b45309;
   --color-warn-bg: #fffbeb;
+  /* Дизайны анхааруулгын хайрцгийн хүрээ. */
+  --color-warn-bd: #fde68a;
   --color-info: #1d4ed8;
   --color-info-bg: #eff6ff;
   --color-danger: #b91c1c;

@@ -1,23 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  Button,
-  Card,
-  ChoiceGroup,
-  Divider,
-  ErrorNote,
-  Input,
-  Textarea,
-} from "@/components/ui";
+import { Button, ErrorNote, Input, Textarea } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import { dayKey, money, weekdayShort } from "@/lib/format";
+import { money, weekdayShort } from "@/lib/format";
 import type { PublicOrder, Slot, Store } from "@/lib/types";
 
 /**
- * «Бараа ирсэн — авах арга сонгох» (дизайны 06).
- * Бүх зүйл нэг дэлгэцэнд, олон алхам болгохгүй.
+ * 06 Бараа ирсэн — авах арга сонгох.
+ *
+ * Дизайны хэмжээ: гарчиг 24px, сонголтын карт 16px дотор зайтай, радио 18px,
+ * дүүрэг 2 багана, өдөр 3 багана, доод мөр 12/16px дотор 48px товч.
  */
 export function FulfilmentChooser({
   order,
@@ -62,6 +56,7 @@ export function FulfilmentChooser({
       ? (store.deliveryFees.find((d) => d.district === district)?.fee ?? minFee)
       : 0;
   const total = order.dueAmount + fee;
+  const liveItems = order.items.filter((i) => !i.cancelled);
 
   const submit = async () => {
     setError(null);
@@ -96,90 +91,121 @@ export function FulfilmentChooser({
   };
 
   return (
-    <div className='px-4 pt-5'>
-      <div className='mb-1 text-[20px] font-medium'>Таны бараа ирлээ</div>
-      <p className='mt-0 mb-3 text-[13px] text-ink-2'>
-        Хэрхэн авахаа сонгоно уу. Дараа нь өөрчлөх боломжгүй.
-      </p>
+    <div className="pb-24">
+      <div className="px-4 pt-6">
+        <div className="tnum text-[13px] text-muted">{order.code}</div>
+        <div className="mt-1 text-[24px] font-medium">
+          {liveItems.length} бараа ирлээ
+        </div>
+        <div className="mt-1 text-[14px] leading-[1.5] text-ink-2">
+          Хэрхэн авахаа сонгоно уу.
+        </div>
+      </div>
 
-      <div className='flex flex-col gap-2'>
+      {/* Ирсэн бараанууд */}
+      <div className="flex flex-col gap-2 px-4 pt-5">
+        <div className="text-[13px] text-ink-2">Ирсэн бараа</div>
+        <div className="overflow-hidden rounded-[12px] border border-line">
+          {liveItems.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center gap-3 border-b border-line p-3.5 last:border-b-0"
+            >
+              <span className="flex size-5 shrink-0 items-center justify-center rounded-[4px] border border-ok bg-ok-bg">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#15803D" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2.5 6.2 L4.8 8.5 L9.5 3.5" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px]">{item.name}</span>
+                <span className="block text-[13px] text-muted">
+                  {[item.size, item.color].filter(Boolean).join(" · ")}
+                  {[item.size, item.color].filter(Boolean).length > 0 ? " · " : ""}
+                  {item.qty} ш
+                </span>
+              </span>
+              <span className="tnum shrink-0 text-[14px]">{money(item.total)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-4 pt-6">
+        <div className="text-[15px] font-medium">Авах аргаа сонгоно уу</div>
+      </div>
+
+      <div className="flex flex-col gap-3 px-4 pt-6">
         <OptionCard
           selected={type === "PICKUP"}
           onSelect={() => setType("PICKUP")}
-          title='Өөрөө ирж авах'
-          right={<span className='text-[13px] text-ok'>Үнэгүй</span>}
+          title="Өөрөө ирж авах"
+          right={<span className="whitespace-nowrap text-[14px] text-ok">Үнэгүй</span>}
         >
-          <div className='text-[13px] text-ink-2'>{store.address}</div>
-          <div className='text-[13px] text-muted'>{store.workHours}</div>
+          <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">{store.address}</span>
+          <span className="mt-0.5 block text-[14px] text-ink-2">{store.workHours}</span>
         </OptionCard>
 
         <OptionCard
           selected={type === "DELIVERY"}
           onSelect={() => setType("DELIVERY")}
-          title='Хүргүүлэх'
+          title="Хүргүүлэх"
           right={
-            <span className='tnum text-[13px] text-ink-2'>
+            <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
               {money(minFee)}-с
             </span>
           }
         >
-          <div className='text-[13px] text-muted'>Мя, Пү, Бя гаригт</div>
+          <span className="mt-1.5 block text-[14px] text-ink-2">Мя, Пү, Бя гаригт</span>
         </OptionCard>
       </div>
 
       {type === "DELIVERY" && (
-        <div className='flex flex-col gap-4 pt-4'>
-          <div>
-            <div className='mb-2 text-[14px]'>Дүүрэг</div>
-            <ChoiceGroup
-              options={store.deliveryFees.map((d) => ({
-                value: d.district,
-                label: d.district,
-              }))}
-              value={district}
-              onChange={setDistrict}
-              columns={2}
-            />
-          </div>
+        <div className="flex flex-col gap-6 px-4 pt-6">
+          <Field label="Дүүрэг">
+            <div className="grid grid-cols-2 gap-2">
+              {store.deliveryFees.map((d) => (
+                <Chip
+                  key={d.district}
+                  active={district === d.district}
+                  onClick={() => setDistrict(d.district)}
+                >
+                  {d.district}
+                </Chip>
+              ))}
+            </div>
+          </Field>
 
-          <div>
-            <div className='mb-2 text-[14px]'>Хороо</div>
-            <Input
-              value={khoroo}
-              onChange={setKhoroo}
-              placeholder='Жишээ: 15-р хороо'
-            />
-          </div>
+          <Field label="Хороо">
+            <Input value={khoroo} onChange={setKhoroo} placeholder="Жишээ: 15-р хороо" />
+          </Field>
 
-          <div>
-            <div className='mb-2 text-[14px]'>Дэлгэрэнгүй хаяг</div>
+          <Field label="Дэлгэрэнгүй хаяг">
             <Textarea
               value={address}
               onChange={setAddress}
-              placeholder='Байр, орц, тоот, чиглүүлэг'
+              placeholder="Байр, орц, тоот, чиглүүлэг"
               rows={3}
             />
-          </div>
+          </Field>
 
-          <div>
-            <div className='mb-2 text-[14px]'>Хүргэлтийн өдөр</div>
-            <div className='grid grid-cols-3 gap-2'>
+          <Field label="Хүргэлтийн өдөр">
+            <div className="grid grid-cols-3 gap-2">
               {slots.map((slot) => {
                 const active = day === slot.day;
                 return (
                   <button
                     key={slot.day}
-                    type='button'
+                    type="button"
                     disabled={!slot.available}
                     onClick={() => setDay(slot.day)}
-                    className={`flex h-[68px] flex-col items-center justify-center rounded-[8px] border px-1 transition-colors
-                      ${active ? "border-primary bg-primary text-white" : "border-line bg-bg hover:border-primary-muted"}
+                    className={`flex flex-col items-center gap-0.5 rounded-[8px] border px-1 py-2.5
+                      ${active ? "border-ink bg-ink text-white" : "border-line bg-bg"}
                       ${slot.available ? "cursor-pointer" : "opacity-40"}`}
                   >
-                    <span className='text-[12px] opacity-70'>
+                    <span className={`text-[13px] ${active ? "opacity-70" : "text-muted"}`}>
                       {weekdayShort(slot.day)}
                     </span>
-                    <span className='tnum text-[15px]'>
+                    <span className="tnum whitespace-nowrap text-[14px]">
                       {Number(slot.day.slice(8))}
                     </span>
                     <span
@@ -191,35 +217,83 @@ export function FulfilmentChooser({
                 );
               })}
             </div>
-          </div>
+          </Field>
         </div>
       )}
 
-      <Card className='mt-4 flex flex-col gap-2 p-4'>
-        <div className='flex items-baseline justify-between gap-2 text-[14px]'>
-          <span className='text-ink-2'>Үлдэгдэл төлбөр</span>
-          <span className='tnum'>{money(order.dueAmount)}</span>
+      {/* Хураангуй */}
+      <div className="px-4 pb-6 pt-6">
+        <div className="tnum flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5 text-[14px]">
+          <Row label="Одоо авах" value={`${liveItems.length} бараа`} />
+          <Row
+            label="Барааны төлбөр"
+            value={order.dueAmount > 0 ? money(order.dueAmount) : "Төлөгдсөн"}
+            ok={order.dueAmount === 0}
+          />
+          <Row label="Хүргэлтийн хураамж" value={fee === 0 ? "Үнэгүй" : money(fee)} />
+          <div className="h-px bg-line" />
+          <div className="flex justify-between gap-3 text-[17px] font-medium">
+            <span>Одоо төлөх</span>
+            <span>{money(total)}</span>
+          </div>
         </div>
-        <div className='flex items-baseline justify-between gap-2 text-[14px]'>
-          <span className='text-ink-2'>Хүргэлтийн хураамж</span>
-          <span className='tnum'>{fee === 0 ? "Үнэгүй" : money(fee)}</span>
-        </div>
-        <Divider />
-        <div className='flex items-baseline justify-between gap-2'>
-          <span className='text-[14px] text-ink-2'>Нийт төлөх</span>
-          <span className='tnum text-[20px] font-medium'>{money(total)}</span>
-        </div>
-      </Card>
+      </div>
 
-      {error && <div className='pt-3'>{<ErrorNote>{error}</ErrorNote>}</div>}
+      {error && (
+        <div className="px-4 pb-3">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
 
-      <Button full size='lg' className='mt-4' onClick={submit} loading={busy}>
-        Баталгаажуулах
-      </Button>
+      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3">
+        <Button full size="bar" onClick={submit} loading={busy}>
+          Баталгаажуулах
+        </Button>
+      </div>
     </div>
   );
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-[14px] text-ink-2">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+function Chip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-11 cursor-pointer rounded-[8px] border px-2 text-[14px]
+        ${active ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Row({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <span className="text-ink-2">{label}</span>
+      <span className={ok ? "text-ok" : ""}>{value}</span>
+    </div>
+  );
+}
+
+/** Дизайны радио карт — 18px цэг, 17px гарчиг. */
 function OptionCard({
   selected,
   onSelect,
@@ -235,26 +309,24 @@ function OptionCard({
 }) {
   return (
     <button
-      type='button'
+      type="button"
       onClick={onSelect}
-      className={`w-full cursor-pointer rounded-[12px] border bg-bg p-4 text-left transition-colors
-        ${selected ? "border-primary" : "border-line hover:border-primary-muted"}`}
+      className={`flex w-full cursor-pointer gap-3 rounded-[12px] border p-4 text-left
+        ${selected ? "border-ink bg-surface" : "border-line bg-bg"}`}
     >
-      <div className='flex items-start gap-3'>
-        <span
-          className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border
-            ${selected ? "border-primary" : "border-muted"}`}
-        >
-          {selected && <span className='h-2.5 w-2.5 rounded-full bg-primary' />}
+      <span
+        className={`mt-0.5 flex size-[18px] shrink-0 items-center justify-center rounded-full border bg-bg
+          ${selected ? "border-ink" : "border-line"}`}
+      >
+        {selected && <span className="size-[9px] rounded-full bg-ink" />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-baseline justify-between gap-3">
+          <span className="text-[17px] text-ink">{title}</span>
+          {right}
         </span>
-        <div className='min-w-0 flex-1'>
-          <div className='flex items-baseline justify-between gap-2'>
-            <span className='text-[15px] font-medium'>{title}</span>
-            {right}
-          </div>
-          <div className='mt-1 flex flex-col gap-0.5'>{children}</div>
-        </div>
-      </div>
+        {children}
+      </span>
     </button>
   );
 }

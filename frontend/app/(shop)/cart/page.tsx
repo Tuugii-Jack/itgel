@@ -4,21 +4,27 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
-import { Button, Card, Divider, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
+import { Button, Empty, ErrorNote, Input, Spinner, Textarea } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart, type CartLine } from "@/lib/cart";
 import { useSession } from "@/lib/session";
 import { money, rangeLabel, relativeDay } from "@/lib/format";
-import type { Store } from "@/lib/types";
 
 type Step = "phone" | "code" | "verified";
 
+/**
+ * 03 Сагс ба захиалга — дизайны хэмжээг яг барина.
+ *
+ * Толгой 48px, хэсэг хооронд 24px, картын мөр 64px зурагтай grid, тоо
+ * ширхэгийн хяналт 32px, доод мөр 12/16px дотор 48px товч.
+ */
 export default function CartPage() {
   const cart = useCart();
   const session = useSession();
   const router = useRouter();
 
-  const [store, setStore] = useState<Store | null>(null);
+  const [buyerName, setBuyerName] = useState("");
+  const [note, setNote] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [step, setStep] = useState<Step>("phone");
@@ -27,14 +33,11 @@ export default function CartPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.store().then(setStore).catch(() => undefined);
-  }, []);
-
   // Аль хэдийн нэвтэрсэн бол утсыг нь ашиглана.
   useEffect(() => {
     if (session.me) {
       setPhone(session.me.phone);
+      if (session.me.name) setBuyerName(session.me.name);
       setStep("verified");
     }
   }, [session.me]);
@@ -57,8 +60,8 @@ export default function CartPage() {
 
   if (cart.lines.length === 0) {
     return (
-      <div>
-        <Header title="Сагс" />
+      <div className="screen">
+        <Header />
         <Empty>Сагс хоосон байна.</Empty>
         <div className="px-4">
           <Link href="/" className="no-underline">
@@ -90,7 +93,7 @@ export default function CartPage() {
     setError(null);
     setBusy(true);
     try {
-      const result = await api.verifyOtp(phone, code);
+      const result = await api.verifyOtp(phone, code, buyerName.trim() || undefined);
       await session.signIn(result.token);
       setStep("verified");
     } catch (e) {
@@ -106,6 +109,8 @@ export default function CartPage() {
     try {
       const order = await api.createOrder({
         phone,
+        name: buyerName.trim() || undefined,
+        note: note.trim() || undefined,
         items: cart.lines.map((line) => ({
           productId: line.productId,
           qty: line.qty,
@@ -121,161 +126,197 @@ export default function CartPage() {
     }
   };
 
+  const orderTotal = cart.lines
+    .filter((l) => l.type === "order")
+    .reduce((sum, l) => sum + l.price * l.qty, 0);
+  const readyTotal = cart.subtotal - orderTotal;
+
   return (
-    <div className="screen pb-28">
-      <Header title="Сагс ба захиалга" />
+    <div className="screen flex flex-col pb-28">
+      <Header />
 
-      {/* Блок 1 — сагсны бараанууд, төрлөөр бүлэглэсэн */}
-      <div className="flex flex-col gap-6 px-4 pt-4">
-        {groups.map((group) => (
-          <section key={group.key}>
-            <div className="mb-2 text-[13px] text-ink-2">{group.label}</div>
-            <Card className="divide-y divide-line">
-              {group.lines.map(({ line, index }) => (
-                <CartRow
-                  key={`${line.productId}-${line.size}-${line.color}`}
-                  line={line}
-                  onQty={(qty) => cart.setQty(index, qty)}
-                  onRemove={() => cart.remove(index)}
-                />
-              ))}
-            </Card>
-          </section>
-        ))}
-      </div>
+      {/* Бараанууд — төрлөөр бүлэглэж, ирэх огноог картын хөлд */}
+      {groups.map((group) => (
+        <section key={group.key} className="px-4 pt-4">
+          <div className="mb-2 text-[13px] text-ink-2">{group.label}</div>
+          <div className="overflow-hidden rounded-[12px] border border-line">
+            {group.lines.map(({ line, index }) => (
+              <CartRow
+                key={`${line.productId}-${line.size}-${line.color}`}
+                line={line}
+                showEta={group.mixedEta}
+                onQty={(qty) => cart.setQty(index, qty)}
+                onRemove={() => cart.remove(index)}
+              />
+            ))}
+            <div className="bg-surface px-3.5 py-2.5 text-[13px] text-ink-2">{group.note}</div>
+          </div>
+        </section>
+      ))}
 
-      {/* Блок 2 — утасны дугаар */}
-      <div className="px-4 pt-6">
-        <div className="mb-2 text-[15px] font-medium">Утасны дугаар</div>
-        <Card className="flex flex-col gap-3 p-4">
+      <Rule />
+
+      {/* Захиалагчийн мэдээлэл */}
+      <div className="flex flex-col gap-4 px-4 pt-6">
+        <div className="text-[15px] font-medium">Захиалагчийн мэдээлэл</div>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px] text-ink-2">Нэр</span>
+          <Input value={buyerName} onChange={setBuyerName} placeholder="Овог, нэр" />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px] text-ink-2">Утасны дугаар</span>
           {step === "verified" ? (
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="tnum text-[15px]">{phone}</div>
-                <div className="text-[13px] text-ok">Баталгаажсан</div>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
+            <div className="flex h-11 items-center justify-between gap-3 rounded-[8px] border border-line px-3">
+              <span className="tnum text-[17px]">{phone}</span>
+              <button
+                type="button"
                 onClick={() => {
                   session.signOut();
                   setStep("phone");
                   setCode("");
                 }}
+                className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ink-2 underline"
               >
                 Солих
-              </Button>
+              </button>
             </div>
-          ) : step === "phone" ? (
-            <>
-              <Input
-                value={phone}
-                onChange={(v) => setPhone(v.replace(/\D/g, "").slice(0, 8))}
-                placeholder="8 оронтой дугаар"
-                inputMode="numeric"
-                maxLength={8}
-              />
-              <p className="m-0 text-[13px] text-ink-2">
-                Бараа ирэхэд энэ дугаар руу мэдэгдэнэ.
-              </p>
-              <Button full onClick={sendCode} disabled={phone.length !== 8} loading={busy}>
-                Үргэлжлүүлэх
-              </Button>
-            </>
           ) : (
-            <>
-              <p className="m-0 text-[13px] text-ink-2">
-                <span className="tnum">{phone}</span> дугаар руу 4 оронтой код илгээлээ.
-              </p>
-              <Input
-                value={code}
-                onChange={(v) => setCode(v.replace(/\D/g, "").slice(0, 4))}
-                placeholder="0000"
-                inputMode="numeric"
-                maxLength={4}
-                autoFocus
-              />
-              {devCode && (
-                <p className="m-0 text-[12px] text-muted">
-                  Туршилтын код: <span className="tnum">{devCode}</span>
-                </p>
-              )}
-              <Button full onClick={verify} disabled={code.length !== 4} loading={busy}>
-                Баталгаажуулах
-              </Button>
-              <div className="flex items-center justify-between text-[13px]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep("phone");
-                    setCode("");
-                  }}
-                  className="cursor-pointer border-0 bg-transparent p-0 text-ink-2 underline"
-                >
-                  Дугаар солих
-                </button>
-                <span className="tnum text-muted">
-                  {cooldown > 0 ? `${cooldown} сек` : "Дахин илгээж болно"}
-                </span>
-              </div>
-            </>
+            <Input
+              value={phone}
+              onChange={(v) => setPhone(v.replace(/\D/g, "").slice(0, 8))}
+              placeholder="8 оронтой дугаар"
+              inputMode="numeric"
+              maxLength={8}
+              className="tnum text-[17px]"
+            />
           )}
-        </Card>
+          <div className="text-[13px] text-ink-2">
+            Захиалгаа хянах, бараа ирэхэд мэдэгдэхэд ашиглана.
+          </div>
+        </div>
+
+        {step === "phone" && (
+          <Button full variant="outline" onClick={sendCode} disabled={phone.length !== 8} loading={busy}>
+            Дугаараа баталгаажуулах
+          </Button>
+        )}
+
+        {step === "code" && (
+          <div className="flex flex-col gap-2 rounded-[12px] border border-line bg-surface p-3.5">
+            <div className="text-[14px]">Илгээсэн 4 оронтой кодыг оруулна уу</div>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              inputMode="numeric"
+              maxLength={4}
+              placeholder="0000"
+              autoFocus
+              className="tnum h-11 w-[120px] rounded-[8px] border border-line bg-bg px-3 text-[20px] tracking-[0.3em] placeholder:text-muted"
+            />
+            {devCode && (
+              <div className="text-[13px] text-muted">
+                Туршилтын код: <span className="tnum">{devCode}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
+              <span>
+                {cooldown > 0
+                  ? `Код ирээгүй бол ${cooldown} секундын дараа дахин илгээнэ.`
+                  : "Код ирээгүй бол дахин илгээж болно."}
+              </span>
+            </div>
+            <Button full onClick={verify} disabled={code.length !== 4} loading={busy}>
+              Баталгаажуулах
+            </Button>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px] text-ink-2">Нэмэлт тэмдэглэл</span>
+          <Textarea
+            value={note}
+            onChange={setNote}
+            rows={2}
+            placeholder="Жишээ: 18:00 цагаас хойш залгана уу"
+          />
+        </div>
       </div>
 
-      {/* Блок 3 — төлбөрийн хураангуй */}
-      <div className="px-4 pt-6">
-        <div className="mb-2 text-[15px] font-medium">Төлбөр</div>
-        <Card className="flex flex-col gap-2.5 p-4">
-          <SumRow label="Барааны дүн" value={money(cart.subtotal)} />
-          <Divider />
-          <SumRow label="Одоо шилжүүлэх" value={money(cart.subtotal)} strong />
-          <p className="m-0 pt-1 text-[13px] text-ink-2">
-            Барааны үнийг бүтнээр төлнө. Хүргэлт сонговол хураамжийг бараа ирэхэд авна.
-          </p>
-        </Card>
+      <Rule />
+
+      {/* Төлбөрийн хураангуй */}
+      <div className="px-4 pb-6 pt-6">
+        <div className="mb-3 text-[15px] font-medium">Төлбөрийн хураангуй</div>
+        <div className="tnum flex flex-col gap-2.5 text-[14px]">
+          {orderTotal > 0 && <SumRow label="Захиалгын бараа" value={money(orderTotal)} />}
+          {readyTotal > 0 && <SumRow label="Бэлэн бараа" value={money(readyTotal)} />}
+          <div className="h-px bg-line" />
+          <div className="flex justify-between gap-3 text-[17px] font-medium">
+            <span>Одоо төлөх</span>
+            <span>{money(cart.subtotal)}</span>
+          </div>
+        </div>
+        <p className="mt-4 mb-0 text-[13px] leading-[1.6] text-ink-2">
+          Төлбөрөө дансаар бүтнээр шилжүүлнэ. Админ шалгаж баталгаажуулсны дараа захиалга
+          баталгаажна.
+        </p>
       </div>
 
       {error && (
-        <div className="px-4 pt-4">
+        <div className="px-4 pb-2">
           <ErrorNote>{error}</ErrorNote>
         </div>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg p-4">
+      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3">
         <Button
           full
-          size="lg"
           onClick={placeOrder}
           disabled={step !== "verified"}
           loading={busy && step === "verified"}
+          size="bar"
         >
-          Захиалга өгөх · {money(cart.subtotal)}
+          Дансны мэдээлэл авах
         </Button>
       </div>
     </div>
   );
 }
 
-function Header({ title }: { title: string }) {
+/** Дизайны толгой — 48px өндөр, 16px хажуугийн зай. */
+function Header() {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-3 py-3">
-      <Link href="/" aria-label="Буцах" className="no-underline">
+    <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-3 border-b border-line bg-bg px-4">
+      <Link
+        href="/"
+        aria-label="Буцах"
+        className="-ml-3 flex h-11 w-11 items-center justify-center no-underline"
+      >
         <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#1C1917" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 4 L6 10 L12 16" />
         </svg>
       </Link>
-      <span className="text-[15px]">{title}</span>
+      <span className="text-[15px] font-medium">Сагс</span>
     </div>
   );
 }
 
+/** Блок хоорондын зураас — 24px дээд зайтай, 16px хажуугийн зайтай. */
+function Rule() {
+  return <div className="mx-4 mt-6 h-px bg-line" />;
+}
+
 function CartRow({
   line,
+  showEta,
   onQty,
   onRemove,
 }: {
   line: CartLine;
+  /** Бүлэгт өөр өөр огноо байвал мөр бүрд нь бичнэ. */
+  showEta: boolean;
   onQty: (qty: number) => void;
   onRemove: () => void;
 }) {
@@ -283,23 +324,37 @@ function CartRow({
   const max = line.type === "ready" && line.stock > 0 ? line.stock : 50;
 
   return (
-    <div className="flex gap-3 p-3.5">
-      <div className="h-16 w-16 shrink-0 overflow-hidden rounded-[8px] border border-line">
+    <div className="grid grid-cols-[64px_1fr] gap-x-3 border-b border-line p-3.5">
+      <div className="h-16 w-16 overflow-hidden rounded-[8px] border border-line bg-surface">
         <ProductImage src={line.image} alt={line.name} className="h-full w-full" />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="clamp-2 text-[14px] leading-[1.4]">{line.name}</div>
-        {options && <div className="text-[13px] text-muted">{options}</div>}
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="text-[14px] leading-[1.4]">{line.name}</div>
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label="Устгах"
+            className="-my-2.5 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-end border-0 bg-transparent text-muted"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+              <path d="M4 4 L12 12 M12 4 L4 12" />
+            </svg>
+          </button>
+        </div>
 
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <div className="flex h-9 items-center rounded-[8px] border border-line">
+        {options && <div className="text-[13px] text-muted">{options}</div>}
+        {showEta && <div className="tnum text-[13px] text-muted">{etaOf(line)}</div>}
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex h-8 items-center rounded-[8px] border border-line">
             <button
               type="button"
               aria-label="Хасах"
               onClick={() => onQty(line.qty - 1)}
               disabled={line.qty <= 1}
-              className="h-full w-9 cursor-pointer border-0 bg-transparent text-ink disabled:opacity-30"
+              className="h-full w-8 cursor-pointer border-0 bg-transparent text-[15px] text-ink-2 disabled:opacity-30"
             >
               −
             </button>
@@ -309,66 +364,59 @@ function CartRow({
               aria-label="Нэмэх"
               onClick={() => onQty(line.qty + 1)}
               disabled={line.qty >= max}
-              className="h-full w-9 cursor-pointer border-0 bg-transparent text-ink disabled:opacity-30"
+              className="h-full w-8 cursor-pointer border-0 bg-transparent text-[15px] text-ink-2 disabled:opacity-30"
             >
               +
             </button>
           </div>
-          <span className="tnum text-[15px] font-medium">{money(line.price * line.qty)}</span>
+          <div className="tnum text-[15px] font-medium">{money(line.price * line.qty)}</div>
         </div>
       </div>
-
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label="Устгах"
-        className="h-8 w-8 shrink-0 cursor-pointer border-0 bg-transparent text-muted"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
-          <path d="M3 4h10M6.5 4V2.8h3V4M5 4l.6 9h4.8L11 4" />
-        </svg>
-      </button>
     </div>
   );
 }
 
-function SumRow({
-  label,
-  value,
-  strong,
-  muted,
-}: {
-  label: string;
-  value: string;
-  strong?: boolean;
-  muted?: boolean;
-}) {
+function SumRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-2">
-      <span className={`text-[14px] ${muted ? "text-muted" : "text-ink-2"}`}>{label}</span>
-      <span
-        className={`tnum ${strong ? "text-[17px] font-medium" : "text-[14px]"} ${muted ? "text-muted" : "text-ink"}`}
-      >
-        {value}
-      </span>
+    <div className="flex justify-between gap-3">
+      <span className="text-ink-2">{label}</span>
+      <span>{value}</span>
     </div>
   );
 }
 
-/** Захиалгын бараа болон бэлэн барааг тусад нь бүлэглэнэ. */
+function etaOf(line: CartLine): string {
+  return line.type === "ready"
+    ? `${relativeDay(line.arriveFrom)} бэлэн`
+    : `${rangeLabel(line.arriveFrom, line.arriveTo)}-нд ирнэ`;
+}
+
+/**
+ * Захиалгын бараа болон бэлэн барааг тусад нь — дизайны хоёр бүлэг.
+ * Бүлэг доторх огноо ялгаатай бол мөр бүрд нь бичиж, хөлд нь сануулна.
+ */
 function groupLines(lines: CartLine[]) {
-  const groups = new Map<string, { key: string; label: string; lines: { line: CartLine; index: number }[] }>();
+  const byType = new Map<"order" | "ready", { line: CartLine; index: number }[]>();
 
   lines.forEach((line, index) => {
-    const key = line.type === "ready" ? "ready" : `${line.arriveFrom}|${line.arriveTo}`;
-    const label =
-      line.type === "ready"
-        ? `Эдгээр ${relativeDay(line.arriveFrom).toLowerCase()} бэлэн`
-        : `Эдгээр ${rangeLabel(line.arriveFrom, line.arriveTo)}-нд ирнэ`;
-    const group = groups.get(key) ?? { key, label, lines: [] };
-    group.lines.push({ line, index });
-    groups.set(key, group);
+    const type = line.type === "ready" ? "ready" : "order";
+    const list = byType.get(type) ?? [];
+    list.push({ line, index });
+    byType.set(type, list);
   });
 
-  return [...groups.values()];
+  return [...byType.entries()].map(([type, list]) => {
+    const etas = new Set(list.map(({ line }) => etaOf(line)));
+    const mixedEta = etas.size > 1;
+    const first = list[0]!.line;
+    return {
+      key: type,
+      label: type === "ready" ? "Бэлэн бараа" : "Захиалгын бараа",
+      mixedEta,
+      note: mixedEta
+        ? "Бараа тус бүр өөр өдөр ирнэ — дээр тэмдэглэв"
+        : `Эдгээр ${etaOf(first).replace(/^./, (c) => c.toLowerCase())}`,
+      lines: list,
+    };
+  });
 }
