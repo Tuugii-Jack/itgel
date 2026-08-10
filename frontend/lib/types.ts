@@ -127,8 +127,58 @@ export interface AdminRound extends Omit<Product, "price"> {
   profit: number;
   marginPercent: number;
   note: string | null;
+  /** Энэ гаргалтыг хэдэн өөр хүн авсан бэ. */
+  customerCount: number;
+  /** Захиалагдсан нийт ширхэг (цуцлагдсаныг оруулаагүй). */
+  orderedQty: number;
   updatedAt: string;
   deletedAt: string | null;
+}
+
+/** Нэг гаргалтыг хэн хэн авсан бэ — GET /admin/rounds/:id/orders. */
+export interface RoundBuyer {
+  orderId: string;
+  code: string;
+  status: OrderStatus;
+  statusLabel: string;
+  paymentState: PaymentState;
+  dueAmount: number;
+  paymentClaimedAt: string | null;
+  createdAt: string;
+  customer: { id: string; name: string | null; phone: string };
+  size: string | null;
+  color: string | null;
+  qty: number;
+  unitPrice: number;
+  total: number;
+  cancelled: boolean;
+  cancelReason: string | null;
+}
+
+export interface RoundOrders {
+  round: {
+    id: string;
+    roundNo: number;
+    productId: string;
+    name: string;
+    sellPrice: number;
+    costPrice: number;
+    status: ProductStatus;
+    closeAt: string | null;
+  };
+  summary: {
+    customerCount: number;
+    orderCount: number;
+    qty: number;
+    revenue: number;
+    profit: number;
+    unpaidCount: number;
+    cancelledCount: number;
+    byStatus: Partial<Record<OrderStatus, number>>;
+    /** Нийлүүлэгч рүү захиалах жагсаалт — хэмжээ/өнгөөр. */
+    byVariant: { size: string | null; color: string | null; qty: number }[];
+  };
+  orders: RoundBuyer[];
 }
 
 /**
@@ -478,4 +528,127 @@ export interface AdminSummary {
   arrived: number;
   pendingDeliveries: number;
   activeProducts: number;
+}
+
+// --- Архив: устгасан бичлэгийг ч агуулсан бүрэн түүх ---
+
+export interface ArchiveItem {
+  id: string;
+  roundId: string;
+  productId: string;
+  name: string;
+  size: string | null;
+  color: string | null;
+  qty: number;
+  unitPrice: number;
+  total: number;
+  cancelled: boolean;
+  cancelReason: string | null;
+}
+
+export interface ArchiveOrder {
+  id: string;
+  code: string;
+  status: OrderStatus;
+  statusLabel: string;
+  createdAt: string;
+  /** Захиалгыг устгасан ч архивт үлдэнэ. */
+  deleted: boolean;
+  customer: { id: string; name: string | null; phone: string };
+  subtotal: number;
+  paidAmount: number;
+  refundedAmount: number;
+  dueAmount: number;
+  paymentState: PaymentState;
+  batch: { id: string; name: string } | null;
+  items: ArchiveItem[];
+}
+
+export interface ArchiveCalendar {
+  year: number;
+  month: number;
+  days: { date: string; orders: number; revenue: number }[];
+  total: number;
+}
+
+export interface ArchiveDay {
+  date: string;
+  summary: {
+    orderCount: number;
+    customerCount: number;
+    qty: number;
+    revenue: number;
+    cancelledCount: number;
+  };
+  orders: ArchiveOrder[];
+}
+
+export interface ArchiveProduct {
+  product: {
+    id: string;
+    name: string;
+    category: string | null;
+    images: string[];
+    deleted: boolean;
+    createdAt: string;
+  };
+  rounds: {
+    id: string;
+    roundNo: number;
+    status: ProductStatus;
+    deleted: boolean;
+    sellPrice: number;
+    costPrice: number;
+    closeAt: string | null;
+    createdAt: string;
+    customerCount: number;
+    qty: number;
+    revenue: number;
+  }[];
+  summary: {
+    roundCount: number;
+    customerCount: number;
+    orderCount: number;
+    qty: number;
+    revenue: number;
+    profit: number;
+  };
+  buyers: (ArchiveItem & {
+    roundNo: number | null;
+    orderId: string;
+    code: string;
+    status: OrderStatus;
+    statusLabel: string;
+    orderDeleted: boolean;
+    createdAt: string;
+    customer: { id: string; name: string | null; phone: string };
+  })[];
+}
+
+export interface ArchiveCustomer {
+  customer: {
+    id: string;
+    name: string | null;
+    phone: string;
+    district: string | null;
+    khoroo: string | null;
+    addressText: string | null;
+    createdAt: string;
+  };
+  summary: {
+    orderCount: number;
+    cancelledCount: number;
+    qty: number;
+    spent: number;
+    dueTotal: number;
+    firstOrderAt: string | null;
+    lastOrderAt: string | null;
+  };
+  topProducts: { productId: string; name: string; qty: number; total: number }[];
+  orders: ArchiveOrder[];
+}
+
+export interface ArchiveSearch {
+  products: { id: string; name: string; image: string | null; deleted: boolean; roundCount: number }[];
+  customers: { id: string; name: string | null; phone: string; orderCount: number }[];
 }

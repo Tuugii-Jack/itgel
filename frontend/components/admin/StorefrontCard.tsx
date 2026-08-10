@@ -48,6 +48,7 @@ export function StorefrontCard({
   onEditRound,
   onNewRound,
   onEditProduct,
+  onOpenBuyers,
 }: {
   item: ShelfItem;
   busy: boolean;
@@ -55,6 +56,7 @@ export function StorefrontCard({
   onEditRound: () => void;
   onNewRound: () => void;
   onEditProduct: () => void;
+  onOpenBuyers: () => void;
 }) {
   const { round, product } = item;
   const isOrder = round.type === "order";
@@ -125,6 +127,24 @@ export function StorefrontCard({
             />
           )}
         </div>
+
+        {/* Хэн авсныг задалж харахгүйгээр тоог нь эндээс мэдэнэ. */}
+        <button
+          type="button"
+          onClick={onOpenBuyers}
+          disabled={round.customerCount === 0}
+          className={`mt-1 rounded-[8px] border border-line px-2.5 py-2 text-left text-[13px]
+            ${round.customerCount > 0 ? "cursor-pointer bg-surface hover:bg-surface-2" : "bg-bg text-muted"}`}
+        >
+          {round.customerCount > 0 ? (
+            <>
+              <span className="tnum font-medium">{round.customerCount}</span> хүн авсан ·{" "}
+              <span className="tnum">{round.orderedQty} ш</span>
+            </>
+          ) : (
+            "Захиалга алга"
+          )}
+        </button>
 
         <div className="mt-auto flex flex-col gap-1.5 pt-2">
           {/*

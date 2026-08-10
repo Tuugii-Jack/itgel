@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
 import { ProductForm } from "@/components/admin/ProductForm";
+import { RoundBuyers } from "@/components/admin/RoundBuyers";
 import { RoundForm } from "@/components/admin/RoundForm";
 import { StorefrontCard, type ShelfItem } from "@/components/admin/StorefrontCard";
 import { ProductImage } from "@/components/ProductImage";
@@ -34,6 +35,7 @@ export default function StorefrontPage() {
     product: AdminProduct;
     round: AdminRound | null;
   } | null>(null);
+  const [buyersFor, setBuyersFor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +137,10 @@ export default function StorefrontPage() {
     );
   }
 
+  if (buyersFor) {
+    return <RoundBuyers roundId={buyersFor} onClose={() => setBuyersFor(null)} />;
+  }
+
   if (roundFor) {
     return (
       <RoundForm
@@ -215,6 +221,7 @@ export default function StorefrontPage() {
             onEditRound={(item) => setRoundFor({ product: item.product, round: item.round })}
             onNewRound={(item) => setRoundFor({ product: item.product, round: null })}
             onEditProduct={(item) => setEditing(item.product)}
+            onOpenBuyers={(item) => setBuyersFor(item.round.id)}
             onAdd={() => setEditing("new")}
           />
           <Shelf
@@ -226,6 +233,7 @@ export default function StorefrontPage() {
             onEditRound={(item) => setRoundFor({ product: item.product, round: item.round })}
             onNewRound={(item) => setRoundFor({ product: item.product, round: null })}
             onEditProduct={(item) => setEditing(item.product)}
+            onOpenBuyers={(item) => setBuyersFor(item.round.id)}
             onAdd={() => setEditing("new")}
           />
         </div>
@@ -243,6 +251,7 @@ function Shelf({
   onEditRound,
   onNewRound,
   onEditProduct,
+  onOpenBuyers,
   onAdd,
 }: {
   title: string;
@@ -253,6 +262,7 @@ function Shelf({
   onEditRound: (item: ShelfItem) => void;
   onNewRound: (item: ShelfItem) => void;
   onEditProduct: (item: ShelfItem) => void;
+  onOpenBuyers: (item: ShelfItem) => void;
   onAdd: () => void;
 }) {
   if (items.length === 0) return null;
@@ -276,6 +286,7 @@ function Shelf({
             onEditRound={() => onEditRound(item)}
             onNewRound={() => onNewRound(item)}
             onEditProduct={() => onEditProduct(item)}
+            onOpenBuyers={() => onOpenBuyers(item)}
           />
         ))}
         <AddTile onClick={onAdd} />

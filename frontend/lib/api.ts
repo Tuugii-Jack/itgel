@@ -10,6 +10,11 @@ import type {
   AdminProduct,
   AdminRound,
   AdminSummary,
+  ArchiveCalendar,
+  ArchiveCustomer,
+  ArchiveDay,
+  ArchiveProduct,
+  ArchiveSearch,
   AuditLog,
   Category,
   CreatedOrder,
@@ -24,6 +29,7 @@ import type {
   ProductReportRow,
   PublicOrder,
   RevenueReport,
+  RoundOrders,
   Settings,
   Slot,
   Store,
@@ -338,6 +344,10 @@ export const adminApi = {
       body,
     }).then((r) => r.data),
 
+  /** Энэ гаргалтыг хэн хэн авсан бэ — хураангуй, хэмжээний задаргаатай. */
+  roundOrders: (roundId: string) =>
+    request<RoundOrders>(`/admin/rounds/${roundId}/orders`, adminAuth).then((r) => r.data),
+
   deleteRound: (roundId: string) =>
     request<{ id: string }>(`/admin/rounds/${roundId}`, {
       ...adminAuth,
@@ -590,6 +600,34 @@ export const adminApi = {
       ...adminAuth,
       query: { period, limit },
     }).then((r) => r.data),
+
+  // --- Архив: устгасан бичлэгийг ч агуулсан бүрэн түүх ---
+
+  archiveCalendar: (year: number, month: number) =>
+    request<ArchiveCalendar>("/admin/archive/calendar", {
+      ...adminAuth,
+      query: { year, month },
+    }).then((r) => r.data),
+
+  archiveDay: (date: string) =>
+    request<ArchiveDay>("/admin/archive/day", { ...adminAuth, query: { date } }).then(
+      (r) => r.data,
+    ),
+
+  archiveProduct: (productId: string) =>
+    request<ArchiveProduct>(`/admin/archive/product/${productId}`, adminAuth).then(
+      (r) => r.data,
+    ),
+
+  archiveCustomer: (customerId: string) =>
+    request<ArchiveCustomer>(`/admin/archive/customer/${customerId}`, adminAuth).then(
+      (r) => r.data,
+    ),
+
+  archiveSearch: (q: string) =>
+    request<ArchiveSearch>("/admin/archive/search", { ...adminAuth, query: { q } }).then(
+      (r) => r.data,
+    ),
 
   settings: () =>
     request<Settings>("/admin/settings", adminAuth).then((r) => r.data),

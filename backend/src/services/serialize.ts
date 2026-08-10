@@ -62,8 +62,20 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
   };
 }
 
+/** Тойрог тус бүрийн захиалгын хураангуй — жагсаалтад шууд харуулна. */
+export interface RoundStats {
+  /** Хэдэн өөр хэрэглэгч авсан бэ. */
+  customerCount: number;
+  /** Нийт ширхэг (цуцлагдсаныг оруулахгүй). */
+  qty: number;
+}
+
 /** Админ — өртөг, ашгийн мэдээлэлтэй нэг тойрог. */
-export function adminRound(round: RoundWithProduct, now = new Date()) {
+export function adminRound(
+  round: RoundWithProduct,
+  now = new Date(),
+  stats?: RoundStats,
+) {
   return {
     ...publicProduct(round, now),
     costPrice: round.costPrice,
@@ -72,6 +84,9 @@ export function adminRound(round: RoundWithProduct, now = new Date()) {
     profit: round.sellPrice - round.costPrice,
     marginPercent: marginPercent(round.sellPrice, round.costPrice),
     note: round.note,
+    /** Хэн хэн авсныг задалж харахгүйгээр тоог нь мэдэх. */
+    customerCount: stats?.customerCount ?? 0,
+    orderedQty: stats?.qty ?? 0,
     updatedAt: round.updatedAt.toISOString(),
     deletedAt: toIso(round.deletedAt),
   };
@@ -84,9 +99,11 @@ export function adminRound(round: RoundWithProduct, now = new Date()) {
 export function adminProduct(
   product: ProductWithRelations & { rounds?: ProductRound[] },
   now = new Date(),
+  /** Тойргийн id → захиалгын хураангуй. Нэг асуулгаар бэлдэж дамжуулна. */
+  statsByRound?: Map<string, RoundStats>,
 ) {
   const rounds = (product.rounds ?? []).map((round) =>
-    adminRound({ ...round, product }, now),
+    adminRound({ ...round, product }, now, statsByRound?.get(round.id)),
   );
 
   return {

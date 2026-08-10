@@ -6,7 +6,7 @@ import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
-import { adminProduct } from '../../services/serialize.js';
+import { adminProduct, type RoundStats } from '../../services/serialize.js';
 import { getSettings } from '../../services/settings.js';
 import { presignProductImage } from '../../services/storage.js';
 
@@ -117,12 +117,52 @@ adminProductsRouter.get(
       }),
     ]);
 
+    const stats = await roundStats(products.flatMap((p) => p.rounds.map((r) => r.id)));
+
     res.json({
-      data: products.map((p) => adminProduct(p)),
+      data: products.map((p) => adminProduct(p, new Date(), stats)),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
     });
   }),
 );
+
+/**
+ * Тойрог бүрд хэдэн хүн, хэдэн ширхэг авсныг НЭГ асуулгаар бодно.
+ * Тойрог бүрээр давталт хийвэл N+1 болно.
+ *
+ * Цуцлагдсан мөр, цуцлагдсан болон устгагдсан захиалгыг тооцохгүй —
+ * нийлүүлэгч рүү захиалах тоо нь эдгээрийг агуулах ёсгүй.
+ */
+async function roundStats(roundIds: string[]): Promise<Map<string, RoundStats>> {
+  const map = new Map<string, RoundStats>();
+  if (roundIds.length === 0) return map;
+
+  const rows = await prisma.orderItem.findMany({
+    where: {
+      roundId: { in: roundIds },
+      cancelledAt: null,
+      order: { deletedAt: null, status: { not: 'CANCELLED' } },
+    },
+    select: { roundId: true, qty: true, order: { select: { customerId: true } } },
+  });
+
+  const customers = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const entry = map.get(row.roundId) ?? { customerCount: 0, qty: 0 };
+    entry.qty += row.qty;
+    map.set(row.roundId, entry);
+
+    const set = customers.get(row.roundId) ?? new Set<string>();
+    set.add(row.order.customerId);
+    customers.set(row.roundId, set);
+  }
+  for (const [roundId, set] of customers) {
+    const entry = map.get(roundId);
+    if (entry) entry.customerCount = set.size;
+  }
+
+  return map;
+}
 
 adminProductsRouter.get(
   '/:id',
@@ -133,7 +173,8 @@ adminProductsRouter.get(
       include: roundInclude,
     });
     if (!product) throw notFound('Бараа олдсонгүй.');
-    res.json({ data: adminProduct(product) });
+    const stats = await roundStats(product.rounds.map((r) => r.id));
+    res.json({ data: adminProduct(product, new Date(), stats) });
   }),
 );
 

@@ -4,7 +4,10 @@ import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
+import { profitOf } from '../../lib/money.js';
+import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
+import { computeTotals, paymentState } from '../../services/money.js';
 import { adminRound } from '../../services/serialize.js';
 import { productStatus, roundFields } from './products.js';
 
@@ -36,6 +39,104 @@ adminRoundsRouter.get(
     });
     if (!round) throw notFound('Тойрог олдсонгүй.');
     res.json({ data: adminRound(round) });
+  }),
+);
+
+/**
+ * GET /:id/orders — энэ гаргалтыг хэн хэн авсан бэ.
+ *
+ * Урьдчилсан захиалгын дэлгүүрт хамгийн хэрэгтэй харагдац: нийлүүлэгч рүү
+ * юу захиалахаа мэдэхийн тулд хэмжээ/өнгөөр нь задалж өгнө.
+ * Цуцлагдсан мөр, цуцлагдсан захиалгыг тоонд оруулахгүй — тэднийг
+ * жагсаалтад үзүүлэх боловч тэмдэглэсэн байна.
+ */
+adminRoundsRouter.get(
+  '/:id/orders',
+  validate({ params: idParams }),
+  asyncHandler(async (req, res) => {
+    const round = await prisma.productRound.findUnique({
+      where: { id: req.params.id },
+      include: { product: { select: { id: true, name: true } } },
+    });
+    if (!round) throw notFound('Тойрог олдсонгүй.');
+
+    const items = await prisma.orderItem.findMany({
+      where: { roundId: round.id, order: { deletedAt: null } },
+      include: { order: { include: { customer: true } } },
+      orderBy: { order: { createdAt: 'desc' } },
+    });
+
+    const rows = items.map((item) => {
+      const cancelled = item.cancelledAt !== null || item.order.status === 'CANCELLED';
+      return {
+        orderId: item.order.id,
+        code: item.order.code,
+        status: item.order.status,
+        statusLabel: ORDER_STATUS_LABEL[item.order.status],
+        paymentState: paymentState(computeTotals(item.order)),
+        dueAmount: item.order.dueAmount,
+        paymentClaimedAt: item.order.paymentClaimedAt?.toISOString() ?? null,
+        createdAt: item.order.createdAt.toISOString(),
+        customer: {
+          id: item.order.customer.id,
+          name: item.order.customer.name,
+          phone: item.order.customer.phone,
+        },
+        size: item.size,
+        color: item.color,
+        qty: item.qty,
+        unitPrice: item.unitPrice,
+        total: item.unitPrice * item.qty,
+        cancelled,
+        cancelReason: item.cancelReason,
+      };
+    });
+
+    const live = rows.filter((r) => !r.cancelled);
+
+    // Хэмжээ/өнгөөр задаргаа — нийлүүлэгч рүү явуулах жагсаалт.
+    const variantMap = new Map<string, { size: string | null; color: string | null; qty: number }>();
+    for (const row of live) {
+      const key = `${row.size ?? ''}|${row.color ?? ''}`;
+      const entry = variantMap.get(key) ?? { size: row.size, color: row.color, qty: 0 };
+      entry.qty += row.qty;
+      variantMap.set(key, entry);
+    }
+
+    const byStatus: Record<string, number> = {};
+    for (const row of live) byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
+
+    const liveItems = items.filter(
+      (i) => i.cancelledAt === null && i.order.status !== 'CANCELLED',
+    );
+
+    res.json({
+      data: {
+        round: {
+          id: round.id,
+          roundNo: round.roundNo,
+          productId: round.product.id,
+          name: round.product.name,
+          sellPrice: round.sellPrice,
+          costPrice: round.costPrice,
+          status: round.status,
+          closeAt: round.closeAt?.toISOString() ?? null,
+        },
+        summary: {
+          customerCount: new Set(live.map((r) => r.customer.id)).size,
+          orderCount: new Set(live.map((r) => r.orderId)).size,
+          qty: live.reduce((sum, r) => sum + r.qty, 0),
+          revenue: live.reduce((sum, r) => sum + r.total, 0),
+          profit: profitOf(liveItems),
+          /** Мөнгө нь ороогүй захиалгын тоо — эдгээр эргэлзээтэй. */
+          unpaidCount: live.filter((r) => r.dueAmount > 0).length,
+          cancelledCount: rows.length - live.length,
+          byStatus,
+          byVariant: [...variantMap.values()].sort((a, b) => b.qty - a.qty),
+        },
+        orders: rows,
+      },
+    });
   }),
 );
 

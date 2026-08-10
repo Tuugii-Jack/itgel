@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireStaff } from '../../middleware/auth.js';
 import { adminAdsRouter } from './ads.js';
+import { adminArchiveRouter } from './archive.js';
 import { adminAuthRouter } from './auth.js';
 import { adminBatchesRouter } from './batches.js';
 import { adminCategoriesRouter } from './categories.js';
@@ -20,6 +21,7 @@ adminRouter.use('/auth', adminAuthRouter);
 adminRouter.use(requireStaff);
 
 adminRouter.use('/ads', adminAdsRouter);
+adminRouter.use('/archive', adminArchiveRouter);
 adminRouter.use('/products', adminProductsRouter);
 adminRouter.use('/rounds', adminRoundsRouter);
 adminRouter.use('/categories', adminCategoriesRouter);

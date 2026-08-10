@@ -257,9 +257,7 @@ export default function ProductsPage() {
                     />
                   </Th>
                   <Th>Бараа</Th>
-                  <Th>Гаргалт</Th>
-                  <Th>Зарах үнэ</Th>
-                  <Th>Ашиг</Th>
+                  <Th>Үнэ</Th>
                   <Th>Үлдэгдэл</Th>
                   <Th>Гарт очих</Th>
                   <Th>Статус</Th>
@@ -291,7 +289,7 @@ export default function ProductsPage() {
                           />
                         </Td>
                         <Td>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2.5">
                             <div className="h-10 w-10 shrink-0 overflow-hidden rounded-[6px] border border-line">
                               <ProductImage
                                 src={row.images[0]}
@@ -307,37 +305,47 @@ export default function ProductsPage() {
                                   <> · {current.type === "order" ? "Захиалгын" : "Бэлэн"}</>
                                 )}
                               </div>
+                              {/* Олон удаа гарсан үед л задлах хэрэгтэй. */}
+                              {row.roundCount > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleExpanded(row.id)}
+                                  className="mt-0.5 cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ink-2 underline"
+                                >
+                                  {row.roundCount} гаргалт {open ? "▴" : "▾"}
+                                </button>
+                              )}
                             </div>
                           </div>
                         </Td>
-                        <Td>
-                          <button
-                            type="button"
-                            onClick={() => toggleExpanded(row.id)}
-                            className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ink underline"
-                          >
-                            {row.roundCount} удаа
-                            {current ? ` (одоо #${current.roundNo})` : ""}
-                          </button>
-                        </Td>
-                        <Td className="tnum">{current ? money(current.sellPrice) : "—"}</Td>
-                        <Td className="tnum">
+
+                        {/* Үнэ, өртөг, маржин — нэг баганад. */}
+                        <Td className="tnum whitespace-nowrap">
                           {current ? (
                             <>
-                              {money(current.profit)}
-                              <div className="text-[13px] text-ok">{current.marginPercent}%</div>
+                              <div>{money(current.sellPrice)}</div>
+                              <div className="text-[13px] text-muted">
+                                өртөг {money(current.costPrice)} ·{" "}
+                                <span className="text-ok">{current.marginPercent}%</span>
+                              </div>
                             </>
                           ) : (
                             "—"
                           )}
                         </Td>
+
+                        {/* Хэн авсныг Архив дээрээс — ажлын хүснэгт цэвэр байх. */}
                         <Td className="tnum">
                           {current && current.type === "ready" ? current.stock : "—"}
                         </Td>
-                        <Td className="tnum text-[13px] text-ink-2">
+                        {/* Огнооны муж урт тул хоёр мөр болгож зөвшөөрнө —
+                            nowrap тавибал багана хэт өргөсөж үйлдлийг шахна. */}
+                        <Td className="tnum min-w-[118px] text-[13px] text-ink-2">
                           {current && arrivalLabel(current)}
                           {current?.closeAt && current.status === "ACTIVE" && (
-                            <div className="text-warn">{countdown(current.closeAt)}</div>
+                            <div className="whitespace-nowrap text-warn">
+                              {countdown(current.closeAt)}
+                            </div>
                           )}
                         </Td>
                         <Td>
@@ -347,7 +355,7 @@ export default function ProductsPage() {
                             </Badge>
                           )}
                         </Td>
-                        <Td>
+                        <Td className="whitespace-nowrap">
                           <div className="flex gap-1.5">
                             <Button
                               size="sm"
@@ -367,33 +375,42 @@ export default function ProductsPage() {
                         row.rounds.map((round) => (
                           <tr key={round.id} className="bg-surface">
                             <Td>{null}</Td>
-                            <Td className="text-[13px] text-ink-2">
+                            <Td className="pl-8 text-[13px] text-ink-2">
                               <span className="tnum">#{round.roundNo}</span> гаргалт
+                              <div className="tnum text-muted">
+                                {round.closeAt
+                                  ? `${new Date(round.closeAt).toLocaleDateString("mn-MN")}-нд хаагдсан`
+                                  : "Бэлэн бараа"}
+                              </div>
                             </Td>
-                            <Td className="tnum text-[13px] text-muted">
-                              {round.closeAt
-                                ? new Date(round.closeAt).toLocaleDateString("mn-MN")
-                                : "Бэлэн"}
+                            <Td className="tnum whitespace-nowrap text-[13px]">
+                              <div>{money(round.sellPrice)}</div>
+                              <div className="text-muted">
+                                өртөг {money(round.costPrice)} ·{" "}
+                                <span className="text-ok">{round.marginPercent}%</span>
+                              </div>
                             </Td>
-                            <Td className="tnum text-[13px]">{money(round.sellPrice)}</Td>
-                            <Td className="tnum text-[13px]">{round.marginPercent}%</Td>
                             <Td className="tnum text-[13px]">
                               {round.type === "ready" ? round.stock : "—"}
                             </Td>
-                            <Td className="tnum text-[13px] text-muted">{arrivalLabel(round)}</Td>
+                            <Td className="tnum min-w-[118px] text-[13px] text-muted">
+                              {arrivalLabel(round)}
+                            </Td>
                             <Td>
                               <Badge tone={STATUS_TONE[round.status]}>
                                 {STATUS_LABEL[round.status]}
                               </Badge>
                             </Td>
-                            <Td>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                onClick={() => setRoundFor({ product: row, round })}
-                              >
-                                Тойрог засах
-                              </Button>
+                            <Td className="whitespace-nowrap">
+                              <div className="flex gap-1.5">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setRoundFor({ product: row, round })}
+                                >
+                                  Засах
+                                </Button>
+                              </div>
                             </Td>
                           </tr>
                         ))}

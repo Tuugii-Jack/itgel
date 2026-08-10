@@ -16,6 +16,7 @@ const NAV = [
   { href: "/admin/ads", label: "Зар" },
   { href: "/admin/categories", label: "Ангилал" },
   { href: "/admin/customers", label: "Хэрэглэгчид" },
+  { href: "/admin/archive", label: "Архив" },
   { href: "/admin/reports", label: "Тайлан" },
   { href: "/admin/settings", label: "Тохиргоо" },
 ];
