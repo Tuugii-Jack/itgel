@@ -68,6 +68,22 @@ adminRoundsRouter.patch(
     const leadMaxDays = body.leadMaxDays ?? before.leadMaxDays;
     if (leadMinDays > leadMaxDays) throw badRequest('leadMinDays нь leadMaxDays-с их байж болохгүй.');
 
+    // Хугацаа нь өнгөрсөн тойргийг дахин нээхээс сэргийлнэ.
+    //
+    // Нээвэл ирэх огноо нь ч өнгөрсөн болж, cron дараагийн ажиллагаандаа
+    // дахин хаана. Хамгийн муу нь — тэр хооронд захиалга орж ирвэл хэрэглэгчид
+    // өнгөрсөн огноо амлагдана. Зөв үйлдэл нь шинэ гаргалт үүсгэх.
+    // Огноогоо хамт сунгаж байгаа бол зөвшөөрнө.
+    const nextStatus = body.status ?? before.status;
+    const nextCloseAt = body.closeAt === undefined ? before.closeAt : body.closeAt;
+    if (nextStatus === 'ACTIVE' && nextCloseAt !== null && nextCloseAt <= new Date()) {
+      throw conflict(
+        'Хаагдах хугацаа нь өнгөрсөн тойргийг дахин нээх боломжгүй. ' +
+          'Шинэ огноо тавих, эсвэл «Дахин гаргах»-аар шинэ гаргалт үүсгэнэ үү.',
+        { closeAt: nextCloseAt.toISOString() },
+      );
+    }
+
     const after = await prisma.productRound.update({
       where: { id: before.id },
       data: {
@@ -107,20 +123,29 @@ adminRoundsRouter.post(
   asyncHandler(async (req, res) => {
     const { ids, status } = req.body as { ids: string[]; status: z.infer<typeof productStatus> };
 
+    // Нэг нэгээр засахтай ижил дүрэм — хугацаа нь өнгөрснийг дахин нээхгүй.
     const result = await prisma.productRound.updateMany({
-      where: { id: { in: ids }, deletedAt: null },
+      where: {
+        id: { in: ids },
+        deletedAt: null,
+        ...(status === 'ACTIVE'
+          ? { OR: [{ closeAt: null }, { closeAt: { gt: new Date() } }] }
+          : {}),
+      },
       data: { status },
     });
+
+    const skipped = ids.length - result.count;
 
     await audit({
       actor: actorOf(req),
       action: 'BULK_STATUS',
       entity: 'ProductRound',
       entityId: ids.join(','),
-      after: { status, count: result.count },
+      after: { status, count: result.count, skipped },
     });
 
-    res.json({ data: { updated: result.count, status } });
+    res.json({ data: { updated: result.count, status, skipped } });
   }),
 );
 

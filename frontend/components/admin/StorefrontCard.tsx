@@ -1,0 +1,184 @@
+"use client";
+
+import { ProductImage } from "@/components/ProductImage";
+import { Badge, Button, Divider, type Tone } from "@/components/ui";
+import { arrivalLabel, countdown, money } from "@/lib/format";
+import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
+
+/** Дэлгүүрт харагдах нэгж — тойрог, эцэг бараагаа дагуулсан. */
+export interface ShelfItem {
+  round: AdminRound;
+  product: AdminProduct;
+  /** Энэ бараанд идэвхтэй тойрог байгаа эсэх — хуучныг нуухад хэрэгтэй. */
+  hasActiveRound: boolean;
+}
+
+const STATUS_LABEL: Record<ProductStatus, string> = {
+  ACTIVE: "Идэвхтэй",
+  HIDDEN: "Нуусан",
+  DRAFT: "Ноорог",
+  CLOSED: "Хаагдсан",
+  SOLD_OUT: "Дууссан",
+  ARCHIVED: "Архивласан",
+};
+
+const STATUS_TONE: Record<ProductStatus, Tone> = {
+  ACTIVE: "ok",
+  HIDDEN: "neutral",
+  DRAFT: "neutral",
+  CLOSED: "warn",
+  SOLD_OUT: "danger",
+  ARCHIVED: "neutral",
+};
+
+/** Хэрэглэгчид үнэхээр харагддаг төлвүүд. */
+const PUBLIC: ProductStatus[] = ["ACTIVE", "CLOSED", "SOLD_OUT"];
+
+/**
+ * Дэлгүүрийн карт — хэрэглэгчийн `ProductCard`-ын визуалыг давтана,
+ * гэхдээ сагсны оронд админы үйлдлүүдтэй.
+ *
+ * `ProductCard`-ыг шууд ашиглах боломжгүй: тэр нь сагсны контекст
+ * шаарддаг ба админд сагс байхгүй.
+ */
+export function StorefrontCard({
+  item,
+  busy,
+  onToggle,
+  onEditRound,
+  onNewRound,
+  onEditProduct,
+}: {
+  item: ShelfItem;
+  busy: boolean;
+  onToggle: () => void;
+  onEditRound: () => void;
+  onNewRound: () => void;
+  onEditProduct: () => void;
+}) {
+  const { round, product } = item;
+  const isOrder = round.type === "order";
+  const soldOut = round.status === "SOLD_OUT" || (!isOrder && round.stock <= 0);
+  const closed = round.status === "CLOSED";
+  const live = PUBLIC.includes(round.status);
+  /** Хугацаа нь дууссан — дахин нээхийн оронд шинэ гаргалт хийх ёстой. */
+  const expired = round.status === "CLOSED" || round.status === "SOLD_OUT";
+
+  return (
+    <div
+      className={`flex flex-col overflow-hidden rounded-[12px] border bg-bg
+        ${live ? "border-line" : "border-dashed border-muted"}`}
+    >
+      <div className="relative aspect-square border-b border-line bg-surface">
+        <ProductImage
+          src={product.images[0]}
+          alt={product.name}
+          className={`h-full w-full ${live ? "" : "opacity-50"}`}
+        />
+
+        {/* Хэрэглэгчид харагдахгүйг ил тод хэлнэ. */}
+        {!live && (
+          <div className="absolute inset-x-2 top-2 rounded-[6px] bg-ink/85 px-2 py-1 text-center text-[12px] text-white">
+            Хэрэглэгчид харагдахгүй
+          </div>
+        )}
+
+        {isOrder && round.closeAt && round.status === "ACTIVE" && (
+          <div className="absolute inset-x-2 bottom-2 flex h-[26px] items-center justify-center rounded-[6px] border border-line bg-bg">
+            <span className="tnum text-[12px] text-warn">{countdown(round.closeAt)}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-1 flex-col gap-2 p-3.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge tone={STATUS_TONE[round.status]}>{STATUS_LABEL[round.status]}</Badge>
+          {product.roundCount > 1 && (
+            <Badge tone="info">#{round.roundNo} гаргалт</Badge>
+          )}
+        </div>
+
+        <div className="clamp-2 text-[15px] leading-[1.4] text-ink">{product.name}</div>
+
+        <div className="flex items-baseline gap-2">
+          <span className="tnum text-[18px] font-medium">{money(round.sellPrice)}</span>
+          <span className="tnum text-[12px] text-muted">
+            өртөг {money(round.costPrice)}
+          </span>
+        </div>
+
+        <Divider className="my-0.5" />
+
+        <div className="flex flex-col gap-1.5">
+          <Fact
+            label="Гарт очих"
+            value={arrivalLabel(round)}
+            tone={closed ? "danger" : "neutral"}
+          />
+          {isOrder ? (
+            <Fact label="Ашиг" value={`${money(round.profit)} · ${round.marginPercent}%`} tone="ok" />
+          ) : (
+            <Fact
+              label="Үлдэгдэл"
+              value={soldOut ? "Дууссан" : `${round.stock} ширхэг`}
+              tone={soldOut ? "danger" : "ok"}
+            />
+          )}
+        </div>
+
+        <div className="mt-auto flex flex-col gap-1.5 pt-2">
+          {/*
+            Хаагдсан/дууссан тойргийг ДАХИН НЭЭХГҮЙ: хугацаа нь өнгөрсөн тул
+            ирэх огноо нь ч өнгөрсөн болно, cron дахин хаана. Зөв үйлдэл нь
+            шинэ гаргалт үүсгэх.
+          */}
+          {expired ? (
+            <Button full loading={busy} onClick={onNewRound}>
+              Дахин гаргах
+            </Button>
+          ) : (
+            <Button
+              full
+              variant={round.status === "ACTIVE" ? "outline" : "primary"}
+              loading={busy}
+              onClick={onToggle}
+            >
+              {round.status === "ACTIVE" ? "Дэлгүүрээс нуух" : "Дэлгүүрт гаргах"}
+            </Button>
+          )}
+          <div className="flex gap-1.5">
+            <Button size="sm" variant="ghost" className="flex-1" onClick={onEditRound}>
+              {expired && !isOrder ? "Үлдэгдэл нэмэх" : "Үнэ, огноо"}
+            </Button>
+            {!expired && (
+              <Button size="sm" variant="ghost" className="flex-1" onClick={onNewRound}>
+                Дахин гаргах
+              </Button>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" full onClick={onEditProduct}>
+            Нэр, зураг засах
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Fact({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "ok" | "danger";
+}) {
+  const colors = { neutral: "text-ink", ok: "text-ok", danger: "text-danger" };
+  return (
+    <div className="leading-[1.35]">
+      <div className="text-[12px] text-muted">{label}</div>
+      <div className={`tnum text-[13px] ${colors[tone]}`}>{value}</div>
+    </div>
+  );
+}
