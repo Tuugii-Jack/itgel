@@ -17,6 +17,7 @@ import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import type { Ad, Category, Product, Store } from "@/lib/types";
 
+// const GUTTER = "px-4 sm:px-6 lg:px-8 xl:px-12 2xl:px-16";
 const GUTTER = "mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8 xl:px-10";
 
 export default function HomePage() {
@@ -150,9 +151,17 @@ export default function HomePage() {
       {store && <TrustBlock store={store} />}
 
       {cart.count > 0 && (
-        <div className='fixed bottom-0 m-auto z-20 md:static md: p-4 '>
+        <div
+          className={`fixed inset-x-0 bottom-4 z-20 flex justify-center px-4
+            md:inset-x-auto md:right-6 md:bottom-6 md:justify-end md:px-0`}
+        >
           <Link href='/cart' className='no-underline'>
-            <Button full size='lg' className='md:mx-auto md:max-w-[360px]'>
+            <Button
+              variant='outline'
+              size='sm'
+              className='bg-bg/90 backdrop-blur-sm opacity-60 transition-opacity duration-200
+                hover:opacity-100 active:opacity-100 focus:opacity-100'
+            >
               Сагс үзэх · {cart.count} бараа
             </Button>
           </Link>
@@ -166,7 +175,7 @@ export default function HomePage() {
  * Доош scroll хийхэд header-г нуух, дээш scroll хийхэд буцааж харуулах hook.
  * threshold хүртэлх бага зэргийн scroll-д header нуугдахгүй.
  */
-function useHideOnScroll(threshold = 400) {
+function useHideOnScroll(threshold = 500) {
   const [hidden, setHidden] = useState(false);
   const lastY = useRef(0);
   const accum = useRef(0);
@@ -199,11 +208,11 @@ function useHideOnScroll(threshold = 400) {
 }
 
 function TopNav({ store }: { store: Store | null }) {
-  const hidden = useHideOnScroll(800);
+  const hidden = useHideOnScroll(500);
 
   return (
     <header
-      className={`sticky top-0 z-30 flex h-16 lg:h-20 items-center gap-6 lg:gap-8 bg-bg/80 backdrop-blur-sm mx-auto w-full px-4 sm:px-6 lg:px-10 xl:px-14 transition-transform duration-300 ease-out ${
+      className={`sticky top-0 z-30 flex h-16 lg:h-20 items-center gap-6 lg:gap-8 bg-bg/80 backdrop-blur-md mx-auto w-full px-4 sm:px-6 lg:px-10 xl:px-14 transition-transform duration-300 ease-out ${
         hidden ? "-translate-y-full" : "translate-y-0"
       }`}
     >
