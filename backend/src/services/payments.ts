@@ -104,7 +104,7 @@ export async function cancelOrderItem(input: {
 
     const item = await tx.orderItem.findFirst({
       where: { id: input.itemId, orderId: order.id },
-      include: { product: { select: { id: true, closeAt: true, status: true } } },
+      include: { round: { select: { id: true, closeAt: true, status: true } } },
     });
     if (!item) throw notFound('Захиалгын мөр олдсонгүй.');
     if (item.cancelledAt) throw conflict('Энэ мөр аль хэдийн цуцлагдсан байна.');
@@ -116,14 +116,14 @@ export async function cancelOrderItem(input: {
       data: { cancelledAt: new Date(), cancelReason: input.reason ?? null },
     });
 
-    // Бэлэн бараа байсан бол үлдэгдлийг буцаана.
-    if (item.product && item.product.closeAt === null) {
-      await tx.product.update({
-        where: { id: item.productId },
+    // Бэлэн бараа байсан бол үлдэгдлийг тухайн тойрогт нь буцаана.
+    if (item.round && item.round.closeAt === null) {
+      await tx.productRound.update({
+        where: { id: item.roundId },
         data: {
           stock: { increment: item.qty },
           // Дууссан гэж хаагдсан байсан бол дахин зарагдах боломжтой болно.
-          ...(item.product.status === 'SOLD_OUT' ? { status: 'ACTIVE' as const } : {}),
+          ...(item.round.status === 'SOLD_OUT' ? { status: 'ACTIVE' as const } : {}),
         },
       });
     }

@@ -10,6 +10,7 @@ import { adminHandoverRouter } from './handover.js';
 import { adminOrdersRouter } from './orders.js';
 import { adminProductsRouter } from './products.js';
 import { adminReportsRouter } from './reports.js';
+import { adminRoundsRouter } from './rounds.js';
 import { adminSettingsRouter } from './settings.js';
 
 export const adminRouter = Router();
@@ -20,6 +21,7 @@ adminRouter.use(requireStaff);
 
 adminRouter.use('/ads', adminAdsRouter);
 adminRouter.use('/products', adminProductsRouter);
+adminRouter.use('/rounds', adminRoundsRouter);
 adminRouter.use('/categories', adminCategoriesRouter);
 adminRouter.use('/orders', adminOrdersRouter);
 adminRouter.use('/batches', adminBatchesRouter);

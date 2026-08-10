@@ -86,9 +86,19 @@ export interface SizeChartRow {
   chestCm: string;
 }
 
-/** Хэрэглэгчийн API — costPrice энд хэзээ ч байхгүй. */
+/**
+ * Хэрэглэгчийн API — costPrice энд хэзээ ч байхгүй.
+ *
+ * `id` нь ТОЙРГИЙН id: дэлгүүрт захиалагдах нэгж нь барааны нэг гаргалт.
+ * Нэг барааг дахин гаргавал шинэ `id`-тай шинэ мөр үүснэ, харин `productId`
+ * нь хэвээрээ — ингэж хуучин тойргийн үнэ, огноо хөндөгдөхгүй үлддэг.
+ */
 export interface Product {
   id: string;
+  /** Барааны (загварын) id — тойргуудыг нэгтгэхэд. */
+  productId: string;
+  /** Хэддэх удаагийн гаргалт бэ. */
+  roundNo: number;
   name: string;
   description: string | null;
   categoryId: string;
@@ -109,11 +119,36 @@ export interface Product {
   createdAt: string;
 }
 
-export interface AdminProduct extends Omit<Product, "price"> {
+/** Админ талын нэг тойрог — үнэ, ашиг, төлөв энд байна. */
+export interface AdminRound extends Omit<Product, "price"> {
+  price: number;
   costPrice: number;
   sellPrice: number;
   profit: number;
   marginPercent: number;
+  note: string | null;
+  updatedAt: string;
+  deletedAt: string | null;
+}
+
+/**
+ * Барааны загвар — нэр, зураг, хэмжээ. Үнэ, төлөв нь тойрог дээр байна.
+ */
+export interface AdminProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  categoryId: string;
+  category?: { id: string; name: string };
+  images: string[];
+  sizes: string[];
+  colors: string[];
+  sizeChart: SizeChartRow[];
+  rounds: AdminRound[];
+  roundCount: number;
+  /** Одоо зарагдаж буй тойрог, байхгүй бол хамгийн сүүлийнх. */
+  currentRound: AdminRound | null;
+  createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
 }
@@ -123,12 +158,17 @@ export interface OrderItem {
   /** Хэсэгчилсэн цуцлалт — дүнд ордоггүй. */
   cancelled: boolean;
   productId: string;
+  /** Аль тойргоос захиалсан бэ. */
+  roundId: string;
   name: string;
   size: string | null;
   color: string | null;
   qty: number;
   unitPrice: number;
   total: number;
+  /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
+  arriveFrom: string | null;
+  arriveTo: string | null;
 }
 
 export interface TimelineStep {

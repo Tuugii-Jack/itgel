@@ -9,33 +9,36 @@ import { getSettings } from '../services/settings.js';
 const tasks: ScheduledTask[] = [];
 
 /**
- * 1. Захиалга хаах — `closeAt` хүрсэн барааг CLOSED болгоно.
+ * 1. Захиалга хаах — `closeAt` хүрсэн тойргийг CLOSED болгоно.
  * `autoCloseOnDeadline` унтраалттай бол алгасна.
  */
 export async function closeExpiredProducts(now = new Date()): Promise<number> {
   const settings = await getSettings();
   if (!settings.autoCloseOnDeadline) return 0;
 
-  const expired = await prisma.product.findMany({
+  const expired = await prisma.productRound.findMany({
     where: { deletedAt: null, status: 'ACTIVE', closeAt: { not: null, lte: now } },
-    select: { id: true, name: true },
+    select: { id: true, roundNo: true, product: { select: { name: true } } },
   });
   if (expired.length === 0) return 0;
 
-  await prisma.product.updateMany({
-    where: { id: { in: expired.map((p) => p.id) } },
+  await prisma.productRound.updateMany({
+    where: { id: { in: expired.map((r) => r.id) } },
     data: { status: 'CLOSED' },
   });
 
   await audit({
     actor: 'system',
     action: 'AUTO_CLOSE',
-    entity: 'Product',
-    entityId: expired.map((p) => p.id).join(','),
-    after: { count: expired.length, names: expired.map((p) => p.name) },
+    entity: 'ProductRound',
+    entityId: expired.map((r) => r.id).join(','),
+    after: {
+      count: expired.length,
+      rounds: expired.map((r) => `${r.product.name} #${r.roundNo}`),
+    },
   });
 
-  console.info(`[cron] ${expired.length} барааны захиалга хаагдлаа.`);
+  console.info(`[cron] ${expired.length} тойргийн захиалга хаагдлаа.`);
   return expired.length;
 }
 

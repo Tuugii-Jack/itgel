@@ -1,4 +1,11 @@
-import type { Batch, Order, OrderItem, OrderStatus, Prisma, Product } from '@prisma/client';
+import type {
+  Batch,
+  Order,
+  OrderItem,
+  OrderStatus,
+  Prisma,
+  ProductRound,
+} from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { addDays, computeArrival, toIso } from '../lib/date.js';
@@ -8,7 +15,7 @@ import { getSettings } from './settings.js';
 import { sms, smsTemplates } from './sms.js';
 
 export type OrderWithItems = Order & {
-  items: (OrderItem & { product?: Product | null })[];
+  items: (OrderItem & { round?: ProductRound | null })[];
   batch?: Batch | null;
 };
 
@@ -88,16 +95,16 @@ export async function changeOrderStatus(
 async function restoreReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
   const items = await tx.orderItem.findMany({
     where: { orderId, cancelledAt: null },
-    include: { product: true },
+    include: { round: true },
   });
 
   for (const item of items) {
-    if (!item.product || item.product.closeAt !== null) continue;
-    await tx.product.update({
-      where: { id: item.productId },
+    if (!item.round || item.round.closeAt !== null) continue;
+    await tx.productRound.update({
+      where: { id: item.roundId },
       data: {
         stock: { increment: item.qty },
-        ...(item.product.status === 'SOLD_OUT' ? { status: 'ACTIVE' as const } : {}),
+        ...(item.round.status === 'SOLD_OUT' ? { status: 'ACTIVE' as const } : {}),
       },
     });
   }
@@ -140,15 +147,15 @@ export function estimatedArrival(order: OrderWithItems, now = new Date()): { fro
   let from: Date | null = null;
   let to: Date | null = null;
   for (const item of order.items) {
-    if (!item.product) continue;
-    const arrival = computeArrival(
-      item.product.closeAt,
-      item.product.leadMinDays,
-      item.product.leadMaxDays,
-      now,
-    );
-    if (!from || arrival.arriveFrom > from) from = arrival.arriveFrom;
-    if (!to || arrival.arriveTo > to) to = arrival.arriveTo;
+    // Захиалах үед амласан огноог мөрөнд нь царцаасан байдаг. Тойрог дахин
+    // гарсан ч эдгээр хөдлөхгүй — өмнө нь тойргоос шууд уншиж байсан тул
+    // барааг дахин гаргахад хуучин захиалгын огноо чимээгүй хойшилдог байв.
+    const arriveFrom =
+      item.arriveFrom ?? computeArrival(null, 0, 0, now).arriveFrom;
+    const arriveTo = item.arriveTo ?? computeArrival(null, 0, 0, now).arriveTo;
+
+    if (!from || arriveFrom > from) from = arriveFrom;
+    if (!to || arriveTo > to) to = arriveTo;
   }
   return { from, to };
 }
@@ -161,11 +168,11 @@ export interface TimelineStep {
   estimatedAt: string | null;
 }
 
-/** Захиалгын дотор хамгийн сүүлд хаагдах барааны огноо. */
+/** Захиалгын дотор хамгийн сүүлд хаагдах тойргийн огноо. */
 function latestCloseAt(order: OrderWithItems): Date | null {
   let latest: Date | null = null;
   for (const item of order.items) {
-    const closeAt = item.product?.closeAt;
+    const closeAt = item.round?.closeAt;
     if (closeAt && (!latest || closeAt > latest)) latest = closeAt;
   }
   return latest;

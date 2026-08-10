@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { generateOrderCode, normalizePhone, PHONE_RE } from '../../lib/code.js';
-import { parseUbDay, startOfUbDay } from '../../lib/date.js';
+import { computeArrival, parseUbDay, startOfUbDay } from '../../lib/date.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
@@ -50,45 +50,55 @@ publicOrdersRouter.post(
     const settings = await getSettings();
     const now = new Date();
 
-    const products = await prisma.product.findMany({
+    // `productId` нь дэлгүүрийн зүгээс ТОЙРГИЙН id — /products тэрийг буцаадаг.
+    const rounds = await prisma.productRound.findMany({
       where: { id: { in: body.items.map((i) => i.productId) }, deletedAt: null },
-      include: { variants: true },
+      include: { product: { include: { variants: true } } },
     });
-    const byId = new Map(products.map((p) => [p.id, p]));
+    const byId = new Map(rounds.map((r) => [r.id, r]));
 
     // Захиалахын өмнө бүх мөрийг шалгана — хэсэгчилсэн захиалга үүсгэхгүй.
     for (const item of body.items) {
-      const product = byId.get(item.productId);
-      if (!product) throw badRequest(`Бараа олдсонгүй: ${item.productId}`);
-      if (product.status !== 'ACTIVE') {
-        throw conflict(`"${product.name}" одоогоор захиалах боломжгүй байна.`);
+      const round = byId.get(item.productId);
+      if (!round) throw badRequest(`Бараа олдсонгүй: ${item.productId}`);
+      const name = round.product.name;
+
+      if (round.product.deletedAt !== null) throw conflict(`"${name}" олдсонгүй.`);
+      if (round.status !== 'ACTIVE') {
+        throw conflict(`"${name}" одоогоор захиалах боломжгүй байна.`);
       }
-      if (product.closeAt && product.closeAt <= now) {
-        throw conflict(`"${product.name}" барааны захиалга хаагдсан байна.`);
+      if (round.closeAt && round.closeAt <= now) {
+        throw conflict(`"${name}" барааны захиалга хаагдсан байна.`);
       }
-      if (product.closeAt === null && product.stock < item.qty) {
-        throw conflict(`"${product.name}" барааны үлдэгдэл хүрэлцэхгүй байна (${product.stock}).`);
+      if (round.closeAt === null && round.stock < item.qty) {
+        throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${round.stock}).`);
       }
-      const sizes = product.variants.filter((v) => v.kind === 'SIZE').map((v) => v.value);
-      const colors = product.variants.filter((v) => v.kind === 'COLOR').map((v) => v.value);
+      const sizes = round.product.variants.filter((v) => v.kind === 'SIZE').map((v) => v.value);
+      const colors = round.product.variants.filter((v) => v.kind === 'COLOR').map((v) => v.value);
       if (sizes.length > 0 && (!item.size || !sizes.includes(item.size))) {
-        throw badRequest(`"${product.name}" барааны хэмжээг сонгоно уу.`, { sizes });
+        throw badRequest(`"${name}" барааны хэмжээг сонгоно уу.`, { sizes });
       }
       if (colors.length > 0 && (!item.color || !colors.includes(item.color))) {
-        throw badRequest(`"${product.name}" барааны өнгийг сонгоно уу.`, { colors });
+        throw badRequest(`"${name}" барааны өнгийг сонгоно уу.`, { colors });
       }
     }
 
     const items = body.items.map((item) => {
-      const product = byId.get(item.productId)!;
+      const round = byId.get(item.productId)!;
+      // Ирэх огноог ЭНД царцаана. Тойрог дараа дахин гарсан ч энэ захиалгын
+      // амлалт хөдлөхгүй.
+      const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
       return {
-        productId: product.id,
-        nameSnapshot: product.name,
+        roundId: round.id,
+        productId: round.productId,
+        nameSnapshot: round.product.name,
         size: item.size ?? null,
         color: item.color ?? null,
         qty: item.qty,
-        unitPrice: product.sellPrice,
-        costPriceSnapshot: product.costPrice,
+        unitPrice: round.sellPrice,
+        costPriceSnapshot: round.costPrice,
+        arriveFrom: round.closeAt === null ? null : arrival.arriveFrom,
+        arriveTo: round.closeAt === null ? null : arrival.arriveTo,
       };
     });
 
@@ -103,22 +113,22 @@ publicOrdersRouter.post(
         update: body.name ? { name: body.name } : {},
       });
 
-      // Бэлэн барааны үлдэгдлийг хасна.
+      // Бэлэн барааны үлдэгдлийг тухайн тойргоос хасна.
       for (const item of body.items) {
-        const product = byId.get(item.productId)!;
-        if (product.closeAt !== null) continue;
+        const round = byId.get(item.productId)!;
+        if (round.closeAt !== null) continue;
 
-        const updated = await tx.product.updateMany({
-          where: { id: product.id, stock: { gte: item.qty } },
+        const updated = await tx.productRound.updateMany({
+          where: { id: round.id, stock: { gte: item.qty } },
           data: { stock: { decrement: item.qty } },
         });
         if (updated.count === 0) {
-          throw conflict(`"${product.name}" барааны үлдэгдэл хүрэлцэхгүй байна.`);
+          throw conflict(`"${round.product.name}" барааны үлдэгдэл хүрэлцэхгүй байна.`);
         }
 
-        const after = await tx.product.findUniqueOrThrow({ where: { id: product.id } });
+        const after = await tx.productRound.findUniqueOrThrow({ where: { id: round.id } });
         if (after.stock === 0) {
-          await tx.product.update({ where: { id: product.id }, data: { status: 'SOLD_OUT' } });
+          await tx.productRound.update({ where: { id: round.id }, data: { status: 'SOLD_OUT' } });
         }
       }
 
@@ -166,6 +176,7 @@ interface NewOrderData {
   subtotal: number;
   note: string | null;
   items: {
+    roundId: string;
     productId: string;
     nameSnapshot: string;
     size: string | null;
@@ -173,6 +184,8 @@ interface NewOrderData {
     qty: number;
     unitPrice: number;
     costPriceSnapshot: number;
+    arriveFrom: Date | null;
+    arriveTo: Date | null;
   }[];
 }
 

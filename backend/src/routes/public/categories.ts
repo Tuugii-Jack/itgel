@@ -15,7 +15,14 @@ publicCategoriesRouter.get(
         id: true,
         name: true,
         sortOrder: true,
-        _count: { select: { products: { where: { status: 'ACTIVE', deletedAt: null } } } },
+        // Идэвхтэй тойрогтой бараа л тоологдоно — хаагдсан нь дэлгүүрт харагдахгүй.
+        _count: {
+          select: {
+            products: {
+              where: { deletedAt: null, rounds: { some: { status: 'ACTIVE', deletedAt: null } } },
+            },
+          },
+        },
       },
     });
 

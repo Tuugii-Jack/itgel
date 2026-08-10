@@ -157,7 +157,10 @@ async function main() {
   );
   const categoryByName = new Map(categories.map((c) => [c.name, c]));
 
-  const products: Prisma.ProductGetPayload<{ include: { variants: true } }>[] = [];
+  // Бараа бүрд нэг тойрог. Дэлгүүрт захиалагдах нэгж нь ТОЙРОГ.
+  const products: Prisma.ProductGetPayload<{
+    include: { variants: true; rounds: true };
+  }>[] = [];
   for (const seed of PRODUCTS) {
     const category = categoryByName.get(seed.category)!;
     const product = await prisma.product.create({
@@ -165,13 +168,6 @@ async function main() {
         name: seed.name,
         description: `${seed.name} — гадаадаас захиалгаар авчирна. Чанарын баталгаатай.`,
         categoryId: category.id,
-        costPrice: seed.costPrice,
-        sellPrice: seed.sellPrice,
-        stock: seed.stock,
-        closeAt: seed.closeInDays === null ? null : startOfUbDay(addDays(now, seed.closeInDays)),
-        leadMinDays: settings.defaultLeadMinDays,
-        leadMaxDays: settings.defaultLeadMaxDays,
-        status: seed.status ?? 'ACTIVE',
         images: [`https://placehold.co/800x800?text=${encodeURIComponent(seed.name)}`],
         variants: {
           create: [
@@ -187,8 +183,20 @@ async function main() {
             sortOrder: i,
           })),
         },
+        rounds: {
+          create: {
+            roundNo: 1,
+            costPrice: seed.costPrice,
+            sellPrice: seed.sellPrice,
+            stock: seed.stock,
+            closeAt: seed.closeInDays === null ? null : startOfUbDay(addDays(now, seed.closeInDays)),
+            leadMinDays: settings.defaultLeadMinDays,
+            leadMaxDays: settings.defaultLeadMaxDays,
+            status: seed.status ?? 'ACTIVE',
+          },
+        },
       },
-      include: { variants: true },
+      include: { variants: true, rounds: true },
     });
     products.push(product);
   }
@@ -241,14 +249,18 @@ async function main() {
       const product = products[productIndex]!;
       const sizes = product.variants.filter((v) => v.kind === 'SIZE');
       const colors = product.variants.filter((v) => v.kind === 'COLOR');
+      const round = product.rounds[0]!;
       return {
+        roundId: round.id,
         productId: product.id,
         nameSnapshot: product.name,
         size: sizes[index % Math.max(1, sizes.length)]?.value ?? null,
         color: colors[index % Math.max(1, colors.length)]?.value ?? null,
         qty,
-        unitPrice: product.sellPrice,
-        costPriceSnapshot: product.costPrice,
+        unitPrice: round.sellPrice,
+        costPriceSnapshot: round.costPrice,
+        arriveFrom: round.closeAt === null ? null : addDays(round.closeAt, round.leadMinDays),
+        arriveTo: round.closeAt === null ? null : addDays(round.closeAt, round.leadMaxDays),
       };
     });
 
@@ -299,15 +311,19 @@ async function main() {
     for (let i = 0; i < ordersInMonth; i++) {
       const product = products[(monthOffset * 3 + i) % products.length]!;
       const qty = 1 + ((i + monthOffset) % 3);
+      const round = product.rounds[0]!;
       const items = [
         {
+          roundId: round.id,
           productId: product.id,
           nameSnapshot: product.name,
           size: null,
           color: null,
           qty,
-          unitPrice: product.sellPrice,
-          costPriceSnapshot: product.costPrice,
+          unitPrice: round.sellPrice,
+          costPriceSnapshot: round.costPrice,
+          arriveFrom: round.closeAt === null ? null : addDays(round.closeAt, round.leadMinDays),
+          arriveTo: round.closeAt === null ? null : addDays(round.closeAt, round.leadMaxDays),
         },
       ];
       const subtotal = subtotalOf(items);

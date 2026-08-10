@@ -88,31 +88,68 @@ model Category {
   @@index([isActive, sortOrder])
 }
 
+/**
+ * Барааны загвар — дахин ашиглагдах хэсэг.
+ *
+ * Үнэ, хаах огноо, үлдэгдэл, төлөв нь энд БАЙХГҮЙ: тэдгээр нь тойрог бүрд
+ * өөр байдаг тул `ProductRound` дээр байна. Нэг барааг олон удаа гаргахад
+ * шинэ тойрог л нэмнэ — загвар нь хэвээрээ үлдэж, хуучин захиалга хөндөгдөхгүй.
+ */
 model Product {
-  id           String        @id @default(cuid())
-  name         String
-  description  String?
-  categoryId   String
-  costPrice    Int // анхны үнэ — хэрэглэгчийн API-д хэзээ ч буцаахгүй
-  sellPrice    Int
-  stock        Int           @default(0)
-  closeAt      DateTime? // null бол бэлэн бараа
-  leadMinDays  Int           @default(7)
-  leadMaxDays  Int           @default(14)
-  status       ProductStatus @default(DRAFT)
-  images       String[]      @default([])
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  deletedAt    DateTime?
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  categoryId  String
+  images      String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
 
-  category   Category       @relation(fields: [categoryId], references: [id])
+  category   Category         @relation(fields: [categoryId], references: [id])
   variants   ProductVariant[]
   sizeChart  SizeChartRow[]
+  rounds     ProductRound[]
   orderItems OrderItem[]
 
   @@index([categoryId])
+}
+
+/**
+ * Барааны нэг удаагийн гаргалт («тойрог»).
+ *
+ * Хэрэглэгчийн зүгээс захиалдаг зүйл нь ЯГ ЭНЭ — нийтийн API дээр `id` нь
+ * тойргийн id байна. Ингэснээр тойрог бүрийн үнэ, ашиг, ирэх огноо тусдаа
+ * бөгөөд хуучин тойргийг дараагийнх нь хэзээ ч дарж бичихгүй.
+ */
+model ProductRound {
+  id        String @id @default(cuid())
+  productId String
+
+  /// Хэддэх удаагийн гаргалт бэ — бараа тус бүрд 1-ээс эхэлнэ.
+  roundNo Int
+
+  costPrice Int // анхны үнэ — хэрэглэгчийн API-д хэзээ ч буцаахгүй
+  sellPrice Int
+  stock     Int           @default(0)
+  closeAt   DateTime? // null бол бэлэн бараа
+  leadMinDays Int         @default(7)
+  leadMaxDays Int         @default(14)
+  status    ProductStatus @default(DRAFT)
+
+  /// Админд зориулсан дотоод тэмдэглэл (жишээ нь нийлүүлэгчийн нэр).
+  note String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@unique([productId, roundNo])
   @@index([status])
   @@index([closeAt])
+  @@index([productId, createdAt])
 }
 
 model ProductVariant {
@@ -260,8 +297,11 @@ model Payment {
 }
 
 model OrderItem {
-  id                String  @id @default(cuid())
-  orderId           String
+  id      String @id @default(cuid())
+  orderId String
+  /// Аль тойргоос захиалсан бэ. Тайлан, үлдэгдэл энэ дээр тулгуурлана.
+  roundId String
+  /// Загварын id — тойргуудыг нийлүүлж тайлаглахад хэрэгтэй тул давхар хадгална.
   productId         String
   nameSnapshot      String
   size              String?
@@ -270,16 +310,23 @@ model OrderItem {
   unitPrice         Int
   costPriceSnapshot Int
 
+  /// Захиалах үеийн ирэх огнооны амлалт. Тойрог дахин гарсан ч энэ хөдлөхгүй.
+  /// Бэлэн бараанд null — тэр нь маргааш гарт очно.
+  arriveFrom DateTime?
+  arriveTo   DateTime?
+
   /// Хэсэгчилсэн цуцлалт — мөр устгагдахгүй, тэмдэглэгдэнэ.
   /// Цуцлагдсан мөр subtotal, тайлангийн ашгийн аль алинд ордоггүй.
   cancelledAt  DateTime?
   cancelReason String?
 
-  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  order   Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  round   ProductRound @relation(fields: [roundId], references: [id])
+  product Product      @relation(fields: [productId], references: [id])
 
   @@index([orderId])
   @@index([productId])
+  @@index([roundId])
 }
 
 model Batch {

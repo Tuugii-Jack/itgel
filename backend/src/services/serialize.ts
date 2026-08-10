@@ -5,6 +5,7 @@ import type {
   Order,
   OrderItem,
   Product,
+  ProductRound,
   ProductVariant,
   SizeChartRow,
 } from '@prisma/client';
@@ -18,22 +19,35 @@ export type ProductWithRelations = Product & {
   sizeChart?: SizeChartRow[];
 };
 
-/** Хэрэглэгчийн API — `costPrice` хэзээ ч энд гарахгүй. */
-export function publicProduct(product: ProductWithRelations, now = new Date()) {
-  const arrival = computeArrival(product.closeAt, product.leadMinDays, product.leadMaxDays, now);
+/** Тойрог нь өөрийн загвартайгаа — дэлгүүрт харагдах нэгж. */
+export type RoundWithProduct = ProductRound & {
+  product: ProductWithRelations;
+};
+
+/**
+ * Хэрэглэгчийн API — `costPrice` хэзээ ч энд гарахгүй.
+ *
+ * `id` нь ТОЙРГИЙН id. Дэлгүүрийн зүгээс «бараа» гэдэг нь нэг тойрог гэсэн үг
+ * тул захиалга шууд тухайн тойрог руу холбогдоно.
+ */
+export function publicProduct(round: RoundWithProduct, now = new Date()) {
+  const { product } = round;
+  const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
   return {
-    id: product.id,
+    id: round.id,
+    productId: product.id,
+    roundNo: round.roundNo,
     name: product.name,
     description: product.description,
     categoryId: product.categoryId,
     category: product.category ? { id: product.category.id, name: product.category.name } : undefined,
-    price: product.sellPrice,
-    stock: product.stock,
-    type: product.closeAt === null ? ('ready' as const) : ('order' as const),
-    status: product.status,
-    closeAt: toIso(product.closeAt),
-    leadMinDays: product.leadMinDays,
-    leadMaxDays: product.leadMaxDays,
+    price: round.sellPrice,
+    stock: round.stock,
+    type: round.closeAt === null ? ('ready' as const) : ('order' as const),
+    status: round.status,
+    closeAt: toIso(round.closeAt),
+    leadMinDays: round.leadMinDays,
+    leadMaxDays: round.leadMaxDays,
     arriveFrom: arrival.arriveFrom.toISOString(),
     arriveTo: arrival.arriveTo.toISOString(),
     images: product.images,
@@ -44,31 +58,43 @@ export function publicProduct(product: ProductWithRelations, now = new Date()) {
       heightRange: row.heightRange,
       chestCm: row.chestCm,
     })),
-    createdAt: product.createdAt.toISOString(),
+    createdAt: round.createdAt.toISOString(),
   };
 }
 
-/** Админ — өртөг, ашгийн мэдээлэлтэй. */
-export function adminProduct(product: ProductWithRelations, now = new Date()) {
-  const arrival = computeArrival(product.closeAt, product.leadMinDays, product.leadMaxDays, now);
+/** Админ — өртөг, ашгийн мэдээлэлтэй нэг тойрог. */
+export function adminRound(round: RoundWithProduct, now = new Date()) {
+  return {
+    ...publicProduct(round, now),
+    costPrice: round.costPrice,
+    // `price` нь хэрэглэгчийн нэр — админд `sellPrice` гэж бас өгнө.
+    sellPrice: round.sellPrice,
+    profit: round.sellPrice - round.costPrice,
+    marginPercent: marginPercent(round.sellPrice, round.costPrice),
+    note: round.note,
+    updatedAt: round.updatedAt.toISOString(),
+    deletedAt: toIso(round.deletedAt),
+  };
+}
+
+/**
+ * Админы барааны жагсаалт — загвар ба түүний тойргууд.
+ * Тойргийг шинэ дараалалаар нь өгнө: хамгийн сүүлийнх эхэнд.
+ */
+export function adminProduct(
+  product: ProductWithRelations & { rounds?: ProductRound[] },
+  now = new Date(),
+) {
+  const rounds = (product.rounds ?? []).map((round) =>
+    adminRound({ ...round, product }, now),
+  );
+
   return {
     id: product.id,
     name: product.name,
     description: product.description,
     categoryId: product.categoryId,
     category: product.category ? { id: product.category.id, name: product.category.name } : undefined,
-    costPrice: product.costPrice,
-    sellPrice: product.sellPrice,
-    profit: product.sellPrice - product.costPrice,
-    marginPercent: marginPercent(product.sellPrice, product.costPrice),
-    stock: product.stock,
-    type: product.closeAt === null ? ('ready' as const) : ('order' as const),
-    status: product.status,
-    closeAt: toIso(product.closeAt),
-    leadMinDays: product.leadMinDays,
-    leadMaxDays: product.leadMaxDays,
-    arriveFrom: arrival.arriveFrom.toISOString(),
-    arriveTo: arrival.arriveTo.toISOString(),
     images: product.images,
     sizes: (product.variants ?? []).filter((v) => v.kind === 'SIZE').map((v) => v.value),
     colors: (product.variants ?? []).filter((v) => v.kind === 'COLOR').map((v) => v.value),
@@ -78,6 +104,10 @@ export function adminProduct(product: ProductWithRelations, now = new Date()) {
       heightRange: row.heightRange,
       chestCm: row.chestCm,
     })),
+    rounds,
+    roundCount: rounds.length,
+    /** Одоо зарагдаж буй тойрог — жагсаалтад үнэ, төлвийг харуулахад. */
+    currentRound: rounds.find((r) => r.status === 'ACTIVE') ?? rounds[0] ?? null,
     createdAt: product.createdAt.toISOString(),
     updatedAt: product.updatedAt.toISOString(),
     deletedAt: toIso(product.deletedAt),
@@ -89,12 +119,16 @@ export function publicOrderItem(item: OrderItem) {
     id: item.id,
     cancelled: item.cancelledAt !== null,
     productId: item.productId,
+    roundId: item.roundId,
     name: item.nameSnapshot,
     size: item.size,
     color: item.color,
     qty: item.qty,
     unitPrice: item.unitPrice,
     total: item.unitPrice * item.qty,
+    /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
+    arriveFrom: toIso(item.arriveFrom),
+    arriveTo: toIso(item.arriveTo),
   };
 }
 

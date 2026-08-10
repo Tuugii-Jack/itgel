@@ -162,7 +162,10 @@ adminReportsRouter.get(
         prisma.order.count({ where: { deletedAt: null, status: 'IN_TRANSIT' } }),
         prisma.order.count({ where: { deletedAt: null, status: 'ARRIVED' } }),
         prisma.delivery.count({ where: { status: { not: 'DELIVERED' } } }),
-        prisma.product.count({ where: { deletedAt: null, status: 'ACTIVE' } }),
+        // Зарагдаж буй тойргийн тоо — нэг бараа хэд хэдэн удаа гарч болно.
+        prisma.productRound.count({
+          where: { deletedAt: null, status: 'ACTIVE', product: { deletedAt: null } },
+        }),
         // Хэрэглэгч шилжүүлсэн гэсэн ч мөнгө нь дэвтэрт ороогүй — шалгах ёстой.
         prisma.order.count({
           where: {

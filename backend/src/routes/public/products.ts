@@ -8,6 +8,12 @@ import { publicProduct } from '../../services/serialize.js';
 
 export const publicProductsRouter = Router();
 
+/**
+ * Дэлгүүрт харагдах нэгж нь БАРАА биш, барааны нэг ТОЙРОГ.
+ * Нэг бараа хэд хэдэн удаа гарсан бол тухай бүрд нь тусдаа мөр харагдана,
+ * учир нь үнэ, хаах огноо, ирэх огноо нь өөр өөр.
+ */
+
 /** Хэрэглэгчид харагдах төлвүүд — DRAFT, HIDDEN, ARCHIVED нуугдана. */
 const VISIBLE_STATUSES: ProductStatus[] = ['ACTIVE', 'CLOSED', 'SOLD_OUT'];
 
@@ -20,7 +26,9 @@ const listQuery = z.object({
   sort: z.enum(['new', 'priceAsc', 'priceDesc', 'closing']).default('new'),
 });
 
-const orderByFor = (sort: z.infer<typeof listQuery>['sort']): Prisma.ProductOrderByWithRelationInput => {
+const orderByFor = (
+  sort: z.infer<typeof listQuery>['sort'],
+): Prisma.ProductRoundOrderByWithRelationInput => {
   switch (sort) {
     case 'priceAsc':
       return { sellPrice: 'asc' };
@@ -33,41 +41,62 @@ const orderByFor = (sort: z.infer<typeof listQuery>['sort']): Prisma.ProductOrde
   }
 };
 
+const roundInclude = {
+  product: {
+    include: {
+      category: true,
+      variants: { orderBy: { sortOrder: 'asc' as const } },
+      sizeChart: { orderBy: { sortOrder: 'asc' as const } },
+    },
+  },
+};
+
 publicProductsRouter.get(
   '/',
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
 
-    const where: Prisma.ProductWhereInput = {
+    const where: Prisma.ProductRoundWhereInput = {
       deletedAt: null,
       status: { in: VISIBLE_STATUSES },
-      ...(q.category ? { categoryId: q.category } : {}),
+      // Барааг дахин гаргасан бол хуучин хаагдсан тойргийг нуумаар байдаг:
+      // эс бөгөөс нэг бараа хоёр карт болж хэрэглэгчийг эргэлзүүлнэ.
+      // Идэвхтэй тойрог огт байхгүй үед л хаагдсаныг нь харуулна.
+      OR: [
+        { status: 'ACTIVE' },
+        { product: { rounds: { none: { status: 'ACTIVE', deletedAt: null } } } },
+      ],
+      // Загвар нь устгагдсан бол тойрог нь ч харагдахгүй.
+      product: {
+        deletedAt: null,
+        ...(q.category ? { categoryId: q.category } : {}),
+        ...(q.q
+          ? {
+              OR: [
+                { name: { contains: q.q, mode: 'insensitive' } },
+                { description: { contains: q.q, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
       ...(q.type === 'order' ? { closeAt: { not: null } } : {}),
       ...(q.type === 'ready' ? { closeAt: null } : {}),
-      ...(q.q
-        ? {
-            OR: [
-              { name: { contains: q.q, mode: 'insensitive' } },
-              { description: { contains: q.q, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
     };
 
-    const [total, products] = await Promise.all([
-      prisma.product.count({ where }),
-      prisma.product.findMany({
+    const [total, rounds] = await Promise.all([
+      prisma.productRound.count({ where }),
+      prisma.productRound.findMany({
         where,
         orderBy: orderByFor(q.sort),
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
-        include: { category: true, variants: { orderBy: { sortOrder: 'asc' } } },
+        include: roundInclude,
       }),
     ]);
 
     res.json({
-      data: products.map((p) => publicProduct(p)),
+      data: rounds.map((r) => publicProduct(r)),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
     });
   }),
@@ -77,16 +106,17 @@ publicProductsRouter.get(
   '/:id',
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
-    const product = await prisma.product.findFirst({
-      where: { id: req.params.id, deletedAt: null, status: { in: VISIBLE_STATUSES } },
-      include: {
-        category: true,
-        variants: { orderBy: { sortOrder: 'asc' } },
-        sizeChart: { orderBy: { sortOrder: 'asc' } },
+    const round = await prisma.productRound.findFirst({
+      where: {
+        id: req.params.id,
+        deletedAt: null,
+        status: { in: VISIBLE_STATUSES },
+        product: { deletedAt: null },
       },
+      include: roundInclude,
     });
 
-    if (!product) throw notFound('Бараа олдсонгүй.');
-    res.json({ data: publicProduct(product) });
+    if (!round) throw notFound('Бараа олдсонгүй.');
+    res.json({ data: publicProduct(round) });
   }),
 );

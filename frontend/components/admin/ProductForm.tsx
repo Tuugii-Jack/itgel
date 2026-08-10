@@ -38,14 +38,16 @@ export function ProductForm({
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? categories[0]?.id ?? "");
-  const [costPrice, setCostPrice] = useState(String(product?.costPrice ?? ""));
-  const [sellPrice, setSellPrice] = useState(String(product?.sellPrice ?? ""));
-  const [stock, setStock] = useState(String(product?.stock ?? 0));
-  const [isOrder, setIsOrder] = useState(product ? product.type === "order" : true);
-  const [closeAt, setCloseAt] = useState(product?.closeAt ? dayKey(product.closeAt) : "");
-  const [leadMin, setLeadMin] = useState(String(product?.leadMinDays ?? 7));
-  const [leadMax, setLeadMax] = useState(String(product?.leadMaxDays ?? 14));
-  const [status, setStatus] = useState<ProductStatus>(product?.status ?? "DRAFT");
+  // Үнэ, огноо, төлөв нь ТОЙРОГ дээр байдаг. Шинэ бараа үүсгэхэд эхний
+  // тойргийг хамт үүсгэх тул энд асууна; засварлахад тэдгээр нь RoundForm дээр.
+  const [costPrice, setCostPrice] = useState("");
+  const [sellPrice, setSellPrice] = useState("");
+  const [stock, setStock] = useState("0");
+  const [isOrder, setIsOrder] = useState(true);
+  const [closeAt, setCloseAt] = useState("");
+  const [leadMin, setLeadMin] = useState("7");
+  const [leadMax, setLeadMax] = useState("14");
+  const [status, setStatus] = useState<ProductStatus>("DRAFT");
   const [sizes, setSizes] = useState<string[]>(product?.sizes ?? []);
   const [colors, setColors] = useState<string[]>(product?.colors ?? []);
   const [sizeChart, setSizeChart] = useState<SizeChartRow[]>(product?.sizeChart ?? []);
@@ -63,17 +65,10 @@ export function ProductForm({
     setBusy(true);
     setError(null);
     try {
-      const body = {
+      const template = {
         name: name.trim(),
         description: description.trim() || undefined,
         categoryId,
-        costPrice: cost,
-        sellPrice: sell,
-        stock: Number(stock) || 0,
-        closeAt: isOrder && closeAt ? new Date(`${closeAt}T00:00:00+08:00`).toISOString() : null,
-        leadMinDays: Number(leadMin) || 0,
-        leadMaxDays: Number(leadMax) || 0,
-        status,
         images,
         sizes,
         colors,
@@ -84,8 +79,22 @@ export function ProductForm({
         })),
       };
 
-      if (product) await adminApi.updateProduct(product.id, body);
-      else await adminApi.createProduct(body);
+      if (product) {
+        await adminApi.updateProduct(product.id, template);
+      } else {
+        await adminApi.createProduct({
+          ...template,
+          // Эхний гаргалт.
+          costPrice: cost,
+          sellPrice: sell,
+          stock: isOrder ? 0 : Number(stock) || 0,
+          closeAt:
+            isOrder && closeAt ? new Date(`${closeAt}T00:00:00+08:00`).toISOString() : null,
+          leadMinDays: Number(leadMin) || 0,
+          leadMaxDays: Number(leadMax) || 0,
+          status,
+        });
+      }
 
       await onSaved();
     } catch (e) {
@@ -158,16 +167,28 @@ export function ProductForm({
               className="w-full"
             />
           </Field>
-          <Field label="Статус">
-            <Select
-              value={status}
-              onChange={(v) => setStatus(v as ProductStatus)}
-              options={STATUSES}
-              className="w-full"
-            />
-          </Field>
+          {!product && (
+            <Field label="Статус">
+              <Select
+                value={status}
+                onChange={(v) => setStatus(v as ProductStatus)}
+                options={STATUSES}
+                className="w-full"
+              />
+            </Field>
+          )}
         </Card>
 
+        {product && (
+          <Card className="p-4 text-[13px] leading-[1.6] text-ink-2">
+            Үнэ, захиалга хаагдах огноо, үлдэгдэл, статус нь <b>гаргалт бүрд</b> өөр
+            байдаг тул энд байхгүй. Барааны жагсаалт дээрх «Дахин гаргах» эсвэл
+            «Тойрог засах»-аас өөрчилнө үү. Энд хийсэн өөрчлөлт (нэр, зураг, хэмжээ)
+            бүх гаргалтад нэгэн зэрэг нөлөөлнө.
+          </Card>
+        )}
+
+        {!product && (
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Үнэ</div>
           <div className="grid grid-cols-2 gap-3">
@@ -196,7 +217,9 @@ export function ProductForm({
             </div>
           )}
         </Card>
+        )}
 
+        {!product && (
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Төрөл</div>
           <div className="flex gap-2">
@@ -248,6 +271,7 @@ export function ProductForm({
             </Field>
           )}
         </Card>
+        )}
 
         <Card className="flex flex-col gap-4 p-4">
           <div className="text-[15px] font-medium">Сонголт</div>

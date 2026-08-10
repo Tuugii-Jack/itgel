@@ -8,6 +8,7 @@ import type {
   AdminOrderDetail,
   AdminOrderRow,
   AdminProduct,
+  AdminRound,
   AdminSummary,
   AuditLog,
   Category,
@@ -288,11 +289,59 @@ export const adminApi = {
       method: "DELETE",
     }).then((r) => r.data),
 
-  bulkStatus: (ids: string[], status: string) =>
-    request<{ updated: number }>("/admin/products/bulk-status", {
+  /** Төлөв нь ТОЙРОГ дээр байдаг тул id-нууд нь тойргийнх. */
+  bulkStatus: (roundIds: string[], status: string) =>
+    request<{ updated: number }>("/admin/rounds/bulk-status", {
       ...adminAuth,
       method: "POST",
-      body: { ids, status },
+      body: { ids: roundIds, status },
+    }).then((r) => r.data),
+
+  // --- Барааны тойрог («дахин гаргах») ---
+
+  /** Шинэ тойрог. Үнэ, хүлээх хоногийг өгөхгүй бол сүүлийн тойргийнхыг авна. */
+  createRound: (
+    productId: string,
+    body?: {
+      costPrice?: number;
+      sellPrice?: number;
+      stock?: number;
+      closeAt?: string | null;
+      leadMinDays?: number;
+      leadMaxDays?: number;
+      status?: string;
+      note?: string;
+    },
+  ) =>
+    request<AdminProduct>(`/admin/products/${productId}/rounds`, {
+      ...adminAuth,
+      method: "POST",
+      body: body ?? {},
+    }).then((r) => r.data),
+
+  updateRound: (
+    roundId: string,
+    body: Partial<{
+      costPrice: number;
+      sellPrice: number;
+      stock: number;
+      closeAt: string | null;
+      leadMinDays: number;
+      leadMaxDays: number;
+      status: string;
+      note: string | null;
+    }>,
+  ) =>
+    request<AdminRound>(`/admin/rounds/${roundId}`, {
+      ...adminAuth,
+      method: "PATCH",
+      body,
+    }).then((r) => r.data),
+
+  deleteRound: (roundId: string) =>
+    request<{ id: string }>(`/admin/rounds/${roundId}`, {
+      ...adminAuth,
+      method: "DELETE",
     }).then((r) => r.data),
 
   bulkDelete: (ids: string[]) =>
