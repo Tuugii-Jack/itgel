@@ -24,6 +24,7 @@ export default function AdminLoginPage() {
       const message = e instanceof ApiError ? e.message : "Нэвтэрч чадсангүй.";
       setError(message);
       toast.error(message);
+    } finally {
       setBusy(false);
     }
   };

@@ -3,12 +3,22 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
-import { nextBatchStage } from '../../lib/orderStatus.js';
+import { nextBatchStage, previousBatchStage } from '../../lib/orderStatus.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
-import { advanceBatch, attachOrdersForRound, detachOrdersForRound, resyncArrivalsForBatch } from '../../services/batches.js';
+import {
+  advanceBatch,
+  attachOrdersForRound,
+  detachOrdersForRound,
+  findOrderIdsForBatch,
+  omitOrderFromBatch,
+  reinstateOrderInBatch,
+  resyncArrivalsForBatch,
+  revertBatch,
+} from '../../services/batches.js';
 import { roundStats } from '../../services/roundStats.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
+import { computeTotals, paymentState, PAYMENT_STATE_LABEL } from '../../services/money.js';
 import { getSettings } from '../../services/settings.js';
 
 export const adminBatchesRouter = Router();
@@ -60,6 +70,7 @@ adminBatchesRouter.get(
         orderCount: batch._count.orders,
         totalValue: sumByBatch.get(batch.id) ?? 0,
         nextStage: nextBatchStage(batch.stage),
+        previousStage: previousBatchStage(batch.stage),
         createdAt: batch.createdAt.toISOString(),
       })),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
@@ -74,14 +85,6 @@ adminBatchesRouter.get(
     const batch = await prisma.batch.findUnique({
       where: { id: req.params.id },
       include: {
-        orders: {
-          where: { deletedAt: null },
-          include: {
-            customer: { select: { id: true, name: true, phone: true } },
-            items: { select: { qty: true, cancelledAt: true } },
-          },
-          orderBy: { createdAt: 'asc' },
-        },
         rounds: {
           where: { deletedAt: null },
           orderBy: { createdAt: 'asc' },
@@ -93,26 +96,70 @@ adminBatchesRouter.get(
     });
     if (!batch) throw notFound('Багц олдсонгүй.');
 
-    const stats = await roundStats(batch.rounds.map((r) => r.id));
+    // Цуглуулж байгаа үед тойрогт захиалсан ч batchId-гүй захиалгыг хавсаргана.
+    if (batch.stage === 'COLLECTING' && batch.rounds.length > 0) {
+      await prisma.$transaction(async (tx) => {
+        for (const round of batch.rounds) {
+          await attachOrdersForRound(tx, round.id, batch.id);
+        }
+      });
+    }
+
+    const roundIds = batch.rounds.map((r) => r.id);
+    const [activeIds, omittedIds] = await Promise.all([
+      findOrderIdsForBatch(prisma, batch.id, roundIds, false),
+      findOrderIdsForBatch(prisma, batch.id, roundIds, true),
+    ]);
+    const allIds = [...new Set([...activeIds, ...omittedIds])];
+    const [stats, orderRows] = await Promise.all([
+      roundStats(roundIds),
+      allIds.length === 0
+        ? Promise.resolve([])
+        : prisma.order.findMany({
+            where: { id: { in: allIds } },
+            include: {
+              customer: { select: { id: true, name: true, phone: true } },
+              items: {
+                where: { cancelledAt: null },
+                select: { qty: true, roundId: true },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          }),
+    ]);
+
+    const serializeOrder = (order: (typeof orderRows)[number]) => {
+      const state = paymentState(computeTotals(order));
+      return {
+        id: order.id,
+        code: order.code,
+        status: order.status,
+        statusLabel: orderStatusLabel(order.status),
+        subtotal: order.subtotal,
+        dueAmount: order.dueAmount,
+        paidAmount: order.paidAmount,
+        paymentState: state,
+        paymentStateLabel: PAYMENT_STATE_LABEL[state],
+        batchOmittedAt: order.batchOmittedAt?.toISOString() ?? null,
+        itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
+        customer: { id: order.customer.id, name: order.customer.name, phone: order.customer.phone },
+        createdAt: order.createdAt.toISOString(),
+      };
+    };
+
+    const activeSet = new Set(activeIds);
+    const orders = orderRows.filter((o) => activeSet.has(o.id)).map(serializeOrder);
+    const omittedOrders = orderRows
+      .filter((o) => o.batchOmittedAt != null)
+      .map(serializeOrder);
 
     res.json({
       data: {
         ...batchSummary(batch)!,
         nextStage: nextBatchStage(batch.stage),
-        orders: batch.orders.map((order) => ({
-          id: order.id,
-          code: order.code,
-          status: order.status,
-          statusLabel: orderStatusLabel(order.status),
-          subtotal: order.subtotal,
-          dueAmount: order.dueAmount,
-          itemCount: order.items
-            .filter((i) => i.cancelledAt === null)
-            .reduce((sum, i) => sum + i.qty, 0),
-          customer: { id: order.customer.id, name: order.customer.name, phone: order.customer.phone },
-          createdAt: order.createdAt.toISOString(),
-        })),
-        /** Энэ багцад зориулж гаргасан бараанууд — тойрог тус бүрээр. */
+        previousStage: previousBatchStage(batch.stage),
+        orders,
+        omittedOrders,
         products: batch.rounds.map((round) => {
           const s = stats.get(round.id);
           return {
@@ -129,8 +176,8 @@ adminBatchesRouter.get(
             customerCount: s?.customerCount ?? 0,
           };
         }),
-        totalValue: batch.orders.reduce((sum, o) => sum + o.subtotal, 0),
-        totalDue: batch.orders.reduce((sum, o) => sum + Math.max(0, o.dueAmount), 0),
+        totalValue: orders.reduce((sum, o) => sum + o.subtotal, 0),
+        totalDue: orders.reduce((sum, o) => sum + Math.max(0, o.dueAmount), 0),
         createdAt: batch.createdAt.toISOString(),
       },
     });
@@ -535,6 +582,28 @@ adminBatchesRouter.post(
       data: {
         ...batchSummary(result.batch)!,
         nextStage: nextBatchStage(result.batch.stage),
+        previousStage: previousBatchStage(result.batch.stage),
+        ordersMoved: result.ordersMoved,
+        ordersSkipped: result.ordersSkipped,
+      },
+    });
+  }),
+);
+
+/**
+ * POST /batches/:id/stage/revert — өмнөх шат руу нэг алхам буцаана.
+ */
+adminBatchesRouter.post(
+  '/:id/stage/revert',
+  validate({ params: idParams }),
+  asyncHandler(async (req, res) => {
+    const result = await revertBatch(param(req, 'id'), actorOf(req));
+
+    res.json({
+      data: {
+        ...batchSummary(result.batch)!,
+        nextStage: nextBatchStage(result.batch.stage),
+        previousStage: previousBatchStage(result.batch.stage),
         ordersMoved: result.ordersMoved,
         ordersSkipped: result.ordersSkipped,
       },
@@ -573,14 +642,14 @@ adminBatchesRouter.post(
               batchId: null,
               status: { in: ['CONFIRMED', 'IN_BATCH'] },
             },
-            data: { batchId: batch.id },
+            data: { batchId: batch.id, batchOmittedAt: null },
           })
         : { count: 0 };
 
       const removed = remove.length
         ? await tx.order.updateMany({
             where: { id: { in: remove }, batchId: batch.id },
-            data: { batchId: null },
+            data: { batchId: null, batchOmittedAt: null },
           })
         : { count: 0 };
 
@@ -596,5 +665,35 @@ adminBatchesRouter.post(
     });
 
     res.json({ data: result });
+  }),
+);
+
+/**
+ * POST /batches/:id/orders/:orderId/omit — багцаас хасах (төлбөр дутуу гэх мэт).
+ * Хаагдсан / цуглуулж байгаа үед.
+ */
+adminBatchesRouter.post(
+  '/:id/orders/:orderId/omit',
+  validate({
+    params: z.object({ id: z.string().min(1), orderId: z.string().min(1) }),
+  }),
+  asyncHandler(async (req, res) => {
+    await omitOrderFromBatch(param(req, 'id'), param(req, 'orderId'), actorOf(req));
+    res.json({ data: { omitted: true } });
+  }),
+);
+
+/**
+ * POST /batches/:id/orders/:orderId/reinstate — хассанг дахин оруулах.
+ * Төлбөр бүрэн орсон үед (хоцорсон ч OK).
+ */
+adminBatchesRouter.post(
+  '/:id/orders/:orderId/reinstate',
+  validate({
+    params: z.object({ id: z.string().min(1), orderId: z.string().min(1) }),
+  }),
+  asyncHandler(async (req, res) => {
+    await reinstateOrderInBatch(param(req, 'id'), param(req, 'orderId'), actorOf(req));
+    res.json({ data: { reinstated: true } });
   }),
 );

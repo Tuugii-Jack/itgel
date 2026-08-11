@@ -105,6 +105,8 @@ export default function SettingsPage() {
       <PageHead title="Тохиргоо" hint="Дэлгүүрийн мэдээлэл, төлбөр, хүргэлт" />
 
       <div className="flex flex-col gap-4">
+        <AdminPasswordCard />
+
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Дэлгүүр</div>
           <Field label="Нэр">
@@ -329,6 +331,80 @@ const ACTION_LABEL: Record<string, string> = {
   ITEM_CANCEL: "Мөр цуцалсан",
   STALE_ORDERS_REPORT: "Удаан хүлээсэн захиалгын тайлан",
 };
+
+function AdminPasswordCard() {
+  const toast = useToast();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    if (newPassword.length < 6) {
+      setError("Шинэ нууц үг хамгийн багадаа 6 тэмдэгт.");
+      return;
+    }
+    if (newPassword !== confirm) {
+      setError("Шинэ нууц үг таарахгүй байна.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await adminApi.changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirm("");
+      toast.success("Нууц үг солигдлоо.");
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : "Солиж чадсангүй.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="text-[15px] font-medium">Админ нууц үг</div>
+      <p className="m-0 text-[13px] text-ink-2">
+        Нууц үгээ эндээс солино. Солисны дараа гараад шинэ нууц үгээрээ нэвтэрнэ үү.
+      </p>
+      <Field label="Одоогийн нууц үг">
+        <Input
+          value={currentPassword}
+          onChange={setCurrentPassword}
+          type="password"
+          placeholder="••••••"
+        />
+      </Field>
+      <Field label="Шинэ нууц үг">
+        <Input
+          value={newPassword}
+          onChange={setNewPassword}
+          type="password"
+          placeholder="••••••"
+        />
+      </Field>
+      <Field label="Шинэ нууц үг (давтах)">
+        <Input value={confirm} onChange={setConfirm} type="password" placeholder="••••••" />
+      </Field>
+      {error && <ErrorNote>{error}</ErrorNote>}
+      <div>
+        <Button
+          size="sm"
+          loading={busy}
+          disabled={!currentPassword || newPassword.length < 6 || !confirm}
+          onClick={save}
+        >
+          Нууц үг солих
+        </Button>
+      </div>
+    </Card>
+  );
+}
 
 const ENTITY_LABEL: Record<string, string> = {
   Order: "Захиалга",

@@ -47,3 +47,34 @@ adminAuthRouter.get(
     res.json({ data: { id: user.id, email: user.email, name: user.name, role: user.role } });
   }),
 );
+
+/** POST /admin/auth/password — админ өөрийн нууц үг солих. */
+adminAuthRouter.post(
+  '/password',
+  requireStaff,
+  validate({
+    body: z.object({
+      currentPassword: z.string().min(6).max(100),
+      newPassword: z.string().min(6).max(100),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword: string;
+      newPassword: string;
+    };
+
+    const user = await prisma.adminUser.findUnique({ where: { id: req.auth!.sub } });
+    if (!user?.isActive) throw unauthorized();
+
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!ok) throw unauthorized('Одоогийн нууц үг буруу байна.');
+
+    await prisma.adminUser.update({
+      where: { id: user.id },
+      data: { passwordHash: await bcrypt.hash(newPassword, 10) },
+    });
+
+    res.json({ data: { ok: true } });
+  }),
+);

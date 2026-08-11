@@ -24,12 +24,14 @@ import {
   Spinner,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import { useToast } from "@/lib/toast";
 import { dayLabel, money, rangeLabel } from "@/lib/format";
 import type {
   AdminBatch,
   AdminBatchDetail,
   AdminProduct,
+  BatchOrderRow,
   BatchStage,
 } from "@/lib/types";
 
@@ -335,6 +337,21 @@ function BatchDetail({
     }
   };
 
+  const revert = async () => {
+    if (!batch?.previousStage) return;
+    setBusyKey("revert");
+    try {
+      await adminApi.revertBatchStage(batch.id);
+      await load(true);
+      onListChanged();
+      toast.success(`Багц «${BATCH_STAGE_LABEL[batch.previousStage]}» шат руу буцлаа.`);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Шат буцааж чадсангүй.");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const removeProduct = async (roundId: string, name: string) => {
     setBusyKey(`remove:${roundId}`);
     try {
@@ -376,6 +393,36 @@ function BatchDetail({
   }
 
   const collecting = batch.stage === "COLLECTING";
+  const canOmit = batch.stage === "COLLECTING" || batch.stage === "CLOSED";
+  const unpaidCount = batch.orders.filter((o) => o.dueAmount > 0).length;
+
+  const omitOrder = async (order: BatchOrderRow) => {
+    setBusyKey(`omit:${order.id}`);
+    try {
+      await adminApi.omitBatchOrder(batchId, order.id);
+      toast.success(`${order.code} багцаас хаслаа.`);
+      await load(true);
+      onListChanged();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Хасаж чадсангүй.");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const reinstateOrder = async (order: BatchOrderRow) => {
+    setBusyKey(`reinstate:${order.id}`);
+    try {
+      await adminApi.reinstateBatchOrder(batchId, order.id);
+      toast.success(`${order.code} дахин орлоо — хүлээж авахад бэлэн.`);
+      await load(true);
+      onListChanged();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Оруулж чадсангүй.");
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   return (
     <div>
@@ -387,6 +434,11 @@ function BatchDetail({
           <Button size="sm" variant="outline" onClick={() => setEditing((v) => !v)}>
             {editing ? "Болих" : "Засах"}
           </Button>
+          {batch.previousStage && (
+            <Button size="sm" variant="outline" onClick={revert} loading={busyKey === "revert"}>
+              «{BATCH_STAGE_LABEL[batch.previousStage]}» руу буцаах
+            </Button>
+          )}
           {batch.nextStage && (
             <Button size="sm" onClick={advance} loading={busyKey === "advance"}>
               {BATCH_STAGE_LABEL[batch.nextStage]} рүү шилжүүлэх
@@ -567,6 +619,14 @@ function BatchDetail({
 
       {/* --- Багцын захиалгууд --- */}
       <h2 className="mt-6 mb-2 text-[16px] font-medium">Захиалгууд</h2>
+      {unpaidCount > 0 && (
+        <Card className="mb-3 border-warn bg-warn-bg p-3">
+          <div className="text-[13px] text-warn">
+            <span className="tnum font-medium">{unpaidCount}</span> захиалгын төлбөр дутуу
+            {batch.stage === "CLOSED" && " — нийлүүлэгчид оруулахгүй бол «Хасах»."}
+          </div>
+        </Card>
+      )}
       {batch.orders.length === 0 ? (
         <Empty>Захиалга алга. Барааны захиалгууд баталгаажихдаа энд орж ирнэ.</Empty>
       ) : (
@@ -576,7 +636,9 @@ function BatchDetail({
               <Th>Код</Th>
               <Th>Харилцагч</Th>
               <Th className="text-right">Дүн</Th>
+              <Th>Төлбөр</Th>
               <Th>Төлөв</Th>
+              {canOmit && <Th className="text-right" />}
             </tr>
           </thead>
           <tbody>
@@ -599,13 +661,105 @@ function BatchDetail({
                   <span className="tnum">{money(order.subtotal)}</span>
                   <div className="text-[12px] text-muted">{order.itemCount} ш</div>
                 </Td>
+                <Td onClick={(e) => e.stopPropagation()}>
+                  <Badge tone={PAYMENT_TONE[order.paymentState]}>
+                    {PAYMENT_LABEL_SHORT[order.paymentState]}
+                  </Badge>
+                  {order.dueAmount > 0 && (
+                    <div className="tnum mt-0.5 text-[12px] text-warn">
+                      үлдэгдэл {money(order.dueAmount)}
+                    </div>
+                  )}
+                </Td>
                 <Td>
                   <OrderBadge status={order.status} />
                 </Td>
+                {canOmit && (
+                  <Td className="text-right" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={busyKey === `omit:${order.id}`}
+                      disabled={busyKey !== null}
+                      onClick={() => omitOrder(order)}
+                    >
+                      Хасах
+                    </Button>
+                  </Td>
+                )}
               </tr>
             ))}
           </tbody>
         </Table>
+      )}
+
+      {/* --- Хассан захиалгууд --- */}
+      {(batch.omittedOrders?.length ?? 0) > 0 && (
+        <>
+          <h2 className="mt-6 mb-1 text-[16px] font-medium">Хассан захиалгууд</h2>
+          <p className="mt-0 mb-2 text-[13px] text-ink-2">
+            Төлбөр ороогүй тул нийлүүлэгчид оруулаагүй. Мөнгө орвол (хоцорсон ч) дахин оруулж
+            бэлдэнэ.
+          </p>
+          <Table>
+            <thead>
+              <tr>
+                <Th>Код</Th>
+                <Th>Харилцагч</Th>
+                <Th className="text-right">Дүн</Th>
+                <Th>Төлбөр</Th>
+                <Th className="text-right" />
+              </tr>
+            </thead>
+            <tbody>
+              {batch.omittedOrders.map((order) => {
+                const canReinstate = order.dueAmount <= 0 && batch.stage !== "DONE";
+                return (
+                  <tr
+                    key={order.id}
+                    onClick={() => onOpenOrder(order.id)}
+                    className="cursor-pointer transition-colors hover:bg-surface"
+                  >
+                    <Td>
+                      <span className="tnum text-[13px] underline underline-offset-2">
+                        {order.code}
+                      </span>
+                    </Td>
+                    <Td>
+                      <div className="text-[14px]">{order.customer.name ?? "Нэргүй"}</div>
+                      <div className="tnum text-[12px] text-muted">{order.customer.phone}</div>
+                    </Td>
+                    <Td className="text-right">
+                      <span className="tnum">{money(order.subtotal)}</span>
+                    </Td>
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <Badge tone={PAYMENT_TONE[order.paymentState]}>
+                        {PAYMENT_LABEL_SHORT[order.paymentState]}
+                      </Badge>
+                      {order.dueAmount > 0 ? (
+                        <div className="tnum mt-0.5 text-[12px] text-warn">
+                          үлдэгдэл {money(order.dueAmount)}
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 text-[12px] text-ok">Төлбөр орсон — оруулж болно</div>
+                      )}
+                    </Td>
+                    <Td className="text-right" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        size="sm"
+                        disabled={!canReinstate || busyKey !== null}
+                        loading={busyKey === `reinstate:${order.id}`}
+                        onClick={() => reinstateOrder(order)}
+                      >
+                        Дахин оруулах
+                      </Button>
+                    </Td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Table>
+        </>
       )}
     </div>
   );

@@ -253,6 +253,8 @@ model Order {
   dueAmount      Int @default(0)
 
   batchId     String?
+  /// Багцаас түр хассан (ихэвчлэн төлбөр дутуу). batchId хэвээр — дахин оруулж болно.
+  batchOmittedAt DateTime?
   fulfilment  Fulfilment? // бараа ирсний дараа хэрэглэгч сонгоно
   note        String?
   createdAt   DateTime    @default(now())

@@ -121,6 +121,10 @@ async function main() {
       autoCloseOnDeadline: true,
       deliveryFees: DEFAULT_DELIVERY_FEES,
       deliveryDailyLimit: 20,
+      bankName: 'Хаан банк',
+      bankAccountNumber: '5005123456',
+      bankAccountName: 'ИТГЭЛ ХХК',
+      paymentNote: 'Гүйлгээний утгад захиалгын кодоо бичнэ үү.',
     },
   });
 

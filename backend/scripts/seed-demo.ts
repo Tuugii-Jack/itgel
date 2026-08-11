@@ -12,6 +12,7 @@ import 'dotenv/config';
 import { generateOrderCode } from '../src/lib/code.js';
 import { addDays, startOfUbDay } from '../src/lib/date.js';
 import { subtotalOf } from '../src/lib/money.js';
+import { attachOrdersForRound } from '../src/services/batches.js';
 import { DEFAULT_DELIVERY_FEES } from '../src/services/settings.js';
 
 const prisma = new PrismaClient();
@@ -246,6 +247,10 @@ async function main() {
       autoCloseOnDeadline: true,
       deliveryFees: DEFAULT_DELIVERY_FEES,
       deliveryDailyLimit: 20,
+      bankName: 'Хаан банк',
+      bankAccountNumber: '5005123456',
+      bankAccountName: 'ИТГЭЛ ХХК',
+      paymentNote: 'Гүйлгээний утгад захиалгын кодоо бичнэ үү.',
       storageFreeDays: 7,
       storageFeePerDay: 1000,
     },
@@ -381,23 +386,27 @@ async function main() {
   }
 
   // ≤10 захиалга — төлөв бүрээс жишээ.
+  // Урьдчилсан бараа (0,1,2) → цуглуулж буй багц; бэлэн (3,4) → багцгүй.
   type Plan = {
     customer: number;
     items: [number, number][];
     status: OrderStatus;
-    batch: number | null;
+    /** null = автоматаар урьдчилсан барааны багц / бэлэн бол null */
+    batch: number | null | 'auto';
     daysAgo: number;
+    /** true бол төлбөр дутуу үлдээнэ (багцаас хасах демо). */
+    unpaid?: boolean;
   };
 
   const plan: Plan[] = [
     { customer: 0, items: [[0, 1]], status: 'NEW', batch: null, daysAgo: 0 },
     { customer: 1, items: [[3, 2]], status: 'CONFIRMED', batch: null, daysAgo: 1 },
-    { customer: 2, items: [[1, 1]], status: 'IN_BATCH', batch: 0, daysAgo: 3 },
-    { customer: 3, items: [[2, 1], [4, 1]], status: 'IN_TRANSIT', batch: 1, daysAgo: 8 },
-    { customer: 4, items: [[1, 1]], status: 'IN_TRANSIT', batch: 1, daysAgo: 9 },
+    { customer: 2, items: [[1, 1]], status: 'IN_BATCH', batch: 'auto', daysAgo: 3 },
+    { customer: 3, items: [[2, 1]], status: 'IN_BATCH', batch: 'auto', daysAgo: 4, unpaid: true },
+    { customer: 4, items: [[1, 1]], status: 'IN_BATCH', batch: 'auto', daysAgo: 5 },
     { customer: 0, items: [[3, 1]], status: 'ARRIVED', batch: null, daysAgo: 5 },
     { customer: 1, items: [[4, 2]], status: 'ARRIVED', batch: null, daysAgo: 6 },
-    { customer: 2, items: [[0, 1]], status: 'HANDED_OVER', batch: 1, daysAgo: 18 },
+    { customer: 2, items: [[0, 1]], status: 'IN_BATCH', batch: 'auto', daysAgo: 2 },
   ];
 
   const orderCodes: string[] = [];
@@ -431,9 +440,16 @@ async function main() {
     });
 
     const subtotal = subtotalOf(items);
-    const paid = entry.status === 'NEW' ? 0 : subtotal;
+    const paid = entry.status === 'NEW' || entry.unpaid ? 0 : subtotal;
     const code = generateOrderCode();
     orderCodes.push(code);
+
+    const batchId =
+      entry.batch === 'auto'
+        ? batches[0]!.id
+        : entry.batch === null
+          ? null
+          : batches[entry.batch]!.id;
 
     await createOrder({
       code,
@@ -441,11 +457,29 @@ async function main() {
       status: entry.status,
       subtotal,
       paidAmount: paid,
-      batchId: entry.batch === null ? null : batches[entry.batch]!.id,
+      batchId,
       createdAt: addDays(now, -entry.daysAgo),
       items,
     });
   }
+
+  // batchId-гүй ч тойрогт захиалсан захиалгуудыг хавсаргана (NEW-ээс бусад).
+  await prisma.$transaction(async (tx) => {
+    for (const p of products) {
+      const round = p.rounds[0]!;
+      if (round.batchId) await attachOrdersForRound(tx, round.id, round.batchId);
+    }
+  });
+
+  // Зам дээрх багцын жишээ — цуглуулсан багцын нэгийг ахиулсан мэт тусдаа багц.
+  // (Демод 2 багц харагдахын тулд хоосон биш — жин/ETA-тай.)
+  await prisma.batch.update({
+    where: { id: batches[1]!.id },
+    data: {
+      name: 'Өвлийн багц — зам дээр',
+      stage: 'IN_TRANSIT',
+    },
+  });
 
   // Ирсэн захиалгын нэгийг хүргэлттэй болгоно.
   const arrived = await prisma.order.findFirst({

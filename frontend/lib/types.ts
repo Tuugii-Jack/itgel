@@ -497,6 +497,7 @@ export interface AdminBatch extends BatchSummary {
   orderCount: number;
   totalValue: number;
   nextStage: BatchStage | null;
+  previousStage?: BatchStage | null;
   createdAt: string;
 }
 
@@ -522,6 +523,10 @@ export interface BatchOrderRow {
   statusLabel: string;
   subtotal: number;
   dueAmount: number;
+  paidAmount?: number;
+  paymentState: PaymentState;
+  paymentStateLabel: string;
+  batchOmittedAt?: string | null;
   itemCount: number;
   customer: { id: string; name: string | null; phone: string };
   createdAt: string;
@@ -529,7 +534,9 @@ export interface BatchOrderRow {
 
 export interface AdminBatchDetail extends BatchSummary {
   nextStage: BatchStage | null;
+  previousStage?: BatchStage | null;
   orders: BatchOrderRow[];
+  omittedOrders: BatchOrderRow[];
   products: BatchProduct[];
   totalValue: number;
   totalDue: number;

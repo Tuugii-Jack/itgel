@@ -4,6 +4,8 @@ const ADMIN_SESSION_COOKIE = "itgel_admin_session";
 
 /**
  * Админ хэсэг — session cookie байхгүй бол /admin/login руу.
+ * Login хуудсыг cookie-гоор ХЭЗЭЭ Ч бүү хаа: cookie үлдсэн ч JWT байхгүй
+ * үед дахин нэвтрэх боломжгүй болдог байсан.
  * Жинхэнэ эрх JWT + backend `requireStaff`-аар баталгаажина.
  */
 export function middleware(request: NextRequest) {
@@ -11,18 +13,12 @@ export function middleware(request: NextRequest) {
   if (!pathname.startsWith("/admin")) return NextResponse.next();
 
   const isLogin = pathname === "/admin/login";
-  const hasSession = request.cookies.get(ADMIN_SESSION_COOKIE)?.value === "1";
+  if (isLogin) return NextResponse.next();
 
-  if (!hasSession && !isLogin) {
+  const hasSession = request.cookies.get(ADMIN_SESSION_COOKIE)?.value === "1";
+  if (!hasSession) {
     const url = request.nextUrl.clone();
     url.pathname = "/admin/login";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
-  if (hasSession && isLogin) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/admin";
     url.search = "";
     return NextResponse.redirect(url);
   }

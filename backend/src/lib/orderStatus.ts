@@ -106,3 +106,9 @@ export function nextBatchStage(stage: BatchStage): BatchStage | null {
   const i = BATCH_STAGES.indexOf(stage);
   return i === -1 || i === BATCH_STAGES.length - 1 ? null : BATCH_STAGES[i + 1]!;
 }
+
+/** Өмнөх шат — эхний шатанд null. */
+export function previousBatchStage(stage: BatchStage): BatchStage | null {
+  const i = BATCH_STAGES.indexOf(stage);
+  return i <= 0 ? null : BATCH_STAGES[i - 1]!;
+}

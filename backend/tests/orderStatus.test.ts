@@ -5,6 +5,7 @@ import {
   nextBatchStage,
   ORDER_FLOW,
   orderStatusForBatchStage,
+  previousBatchStage,
   stepsToStatus,
 } from '../src/lib/orderStatus.js';
 
@@ -48,6 +49,13 @@ describe('Багцын шат', () => {
     expect(nextBatchStage('COLLECTING')).toBe('CLOSED');
     expect(nextBatchStage('IN_TRANSIT')).toBe('AT_WAREHOUSE');
     expect(nextBatchStage('DONE')).toBeNull();
+  });
+
+  it('буцах дараалал зөв', () => {
+    expect(previousBatchStage('COLLECTING')).toBeNull();
+    expect(previousBatchStage('CLOSED')).toBe('COLLECTING');
+    expect(previousBatchStage('AT_WAREHOUSE')).toBe('IN_TRANSIT');
+    expect(previousBatchStage('DONE')).toBe('AT_WAREHOUSE');
   });
 
   it('шат бүр 6 ширхэг, 0–5', () => {

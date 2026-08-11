@@ -86,11 +86,13 @@ export function readToken(kind: keyof typeof TOKEN_KEYS): string | null {
 
 function syncAdminSessionCookie(token: string | null): void {
   if (typeof document === "undefined") return;
+  const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
   if (token) {
     // 30 хоног — JWT-ийн хугацаатай ойролцоо; гарахад cookie арилна.
-    document.cookie = `${ADMIN_SESSION_COOKIE}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+    document.cookie = `${ADMIN_SESSION_COOKIE}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax${secure}`;
   } else {
-    document.cookie = `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+    // Max-Age=0 + Expires — бүх browser дээр найдвартай арилгана.
+    document.cookie = `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax${secure}`;
   }
 }
 
@@ -378,6 +380,13 @@ export const adminApi = {
       "/admin/auth/me",
       adminAuth,
     ).then((r) => r.data),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: boolean }>("/admin/auth/password", {
+      ...adminAuth,
+      method: "POST",
+      body: { currentPassword, newPassword },
+    }).then((r) => r.data),
 
   summary: () =>
     request<AdminSummary>("/admin/reports/summary", adminAuth).then((r) => r.data),
@@ -701,11 +710,29 @@ export const adminApi = {
       method: "POST",
     }).then((r) => r.data),
 
+  revertBatchStage: (id: string) =>
+    request<AdminBatch & { ordersMoved: number }>(`/admin/batches/${id}/stage/revert`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
   updateBatchOrders: (id: string, body: { add?: string[]; remove?: string[] }) =>
     request<{ added: number; removed: number }>(`/admin/batches/${id}/orders`, {
       ...adminAuth,
       method: "POST",
       body,
+    }).then((r) => r.data),
+
+  omitBatchOrder: (batchId: string, orderId: string) =>
+    request<{ omitted: boolean }>(`/admin/batches/${batchId}/orders/${orderId}/omit`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
+  reinstateBatchOrder: (batchId: string, orderId: string) =>
+    request<{ reinstated: boolean }>(`/admin/batches/${batchId}/orders/${orderId}/reinstate`, {
+      ...adminAuth,
+      method: "POST",
     }).then((r) => r.data),
 
   /** Багцад бараа нэмнэ — шинэ тойрог, эсвэл `roundId`-аар одоогийн урьдчилсан гаргалт. */

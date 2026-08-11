@@ -8,6 +8,7 @@ import {
   canTransition,
   nextBatchStage,
   orderStatusForBatchStage,
+  previousBatchStage,
   stepsToStatus,
 } from '../lib/orderStatus.js';
 import { notifyArrival, markItemsArrivedForBatch, promoteOrdersToArrived } from './orders.js';
@@ -26,6 +27,57 @@ const STATUS_TIMESTAMP: Partial<Record<OrderStatus, string>> = {
 const FROZEN_ORDER_STATUSES: OrderStatus[] = ['CANCELLED', 'HANDED_OVER'];
 
 export type Tx = Prisma.TransactionClient;
+
+/**
+ * Багцын захиалгууд = `Order.batchId` ЭСВЭЛ багцын тойрогт захиалсан мөртэй.
+ * Барааны «X ш · Y хүн» тоотой ижил хамрах хүрээ — жагсаалт зөрөхгүй.
+ *
+ * `omitted: false` (анхдагч) — идэвхтэй (шилжилтэнд орох).
+ * `omitted: true` — багцаас хассан (төлбөр дутуу гэх мэт).
+ * `omitted: 'all'` — хоёулаа.
+ */
+export async function findOrderIdsForBatch(
+  tx: Tx | typeof prisma,
+  batchId: string,
+  roundIds?: string[],
+  omitted: boolean | 'all' = false,
+): Promise<string[]> {
+  const rounds =
+    roundIds ??
+    (
+      await tx.productRound.findMany({
+        where: { batchId, deletedAt: null },
+        select: { id: true },
+      })
+    ).map((r) => r.id);
+
+  const omitFilter =
+    omitted === 'all'
+      ? {}
+      : omitted
+        ? { batchOmittedAt: { not: null } }
+        : { batchOmittedAt: null };
+
+  const byBatch = await tx.order.findMany({
+    where: { batchId, deletedAt: null, status: { not: 'CANCELLED' }, ...omitFilter },
+    select: { id: true },
+  });
+
+  const byRound =
+    rounds.length === 0
+      ? []
+      : await tx.order.findMany({
+          where: {
+            deletedAt: null,
+            status: { not: 'CANCELLED' },
+            ...omitFilter,
+            items: { some: { roundId: { in: rounds }, cancelledAt: null } },
+          },
+          select: { id: true },
+        });
+
+  return [...new Set([...byBatch, ...byRound].map((o) => o.id))];
+}
 
 /**
  * Тойрогт захиалсан (цуцлагдаагүй, гартаа өгөөгүй) захиалгуудыг багцад хавсаргана.
@@ -173,13 +225,25 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
     const batch = await tx.batch.findFirst({
       where: { id: batchId, deletedAt: null },
       include: {
-        orders: {
-          where: { deletedAt: null },
-          select: { id: true, code: true, status: true },
-        },
+        rounds: { where: { deletedAt: null }, select: { id: true } },
       },
     });
     if (!batch) throw notFound('Багц олдсонгүй.');
+
+    // Тойрогт захиалсан ч batchId-гүй захиалгуудыг эхлээд хавсаргана.
+    for (const round of batch.rounds) {
+      await attachOrdersForRound(tx, round.id, batch.id);
+    }
+
+    const orderIds = await findOrderIdsForBatch(
+      tx,
+      batch.id,
+      batch.rounds.map((r) => r.id),
+    );
+    const orders = await tx.order.findMany({
+      where: { id: { in: orderIds } },
+      select: { id: true, code: true, status: true },
+    });
 
     const next = nextBatchStage(batch.stage);
     if (!next) throw conflict('Багц эцсийн шатанд байна.');
@@ -211,19 +275,19 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
       // Ижил төлөвтэй захиалгуудыг бүлэглэж, бүлэг бүрд ганц updateMany +
       // createMany хийнэ. Захиалга бүрд тусдаа хоёр бичилт хийвэл том багц
       // ахиулахад олон секунд зарцуулагддаг байсан.
-      const groups = new Map<OrderStatus, typeof batch.orders>();
-      for (const order of batch.orders) {
+      const groups = new Map<OrderStatus, typeof orders>();
+      for (const order of orders) {
         const list = groups.get(order.status) ?? [];
         list.push(order);
         groups.set(order.status, list);
       }
 
-      for (const [from, orders] of groups) {
-        const sample = orders[0];
+      for (const [from, group] of groups) {
+        const sample = group[0];
         if (!sample) continue;
         const steps = stepsToStatus(from, target);
         if (steps.length === 0) {
-          skipped += orders.length;
+          skipped += group.length;
           continue;
         }
 
@@ -244,12 +308,12 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
         }
 
         await tx.order.updateMany({
-          where: { id: { in: orders.map((o) => o.id) } },
-          data: { status: target, ...timestamps },
+          where: { id: { in: group.map((o) => o.id) } },
+          data: { status: target, batchId: batch.id, ...timestamps },
         });
 
         await tx.auditLog.createMany({
-          data: orders.map((order) => ({
+          data: group.map((order) => ({
             actor,
             action: 'STATUS_CHANGE',
             entity: 'Order',
@@ -262,11 +326,11 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
           })),
         });
 
-        if (target === 'ARRIVED') arrivedOrderIds.push(...orders.map((o) => o.id));
-        moved += orders.length;
+        if (target === 'ARRIVED') arrivedOrderIds.push(...group.map((o) => o.id));
+        moved += group.length;
       }
     } else {
-      skipped = batch.orders.length;
+      skipped = orders.length;
     }
 
     // Мөрөөр ирсэн тэмдэг — Order.batchId-аас гадуур тойрог холбогдсон захиалгад ч.
@@ -312,4 +376,241 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
   }
 
   return result;
+}
+
+/**
+ * Багцыг нэг алхам буцаана (админ санамсаргүй урагшлуулсан үед).
+ * Хүлээлгэн өгсөн / цуцлагдсан захиалгыг хөндөхгүй.
+ */
+export async function revertBatch(batchId: string, actor: string): Promise<AdvanceResult> {
+  return prisma.$transaction(async (tx) => {
+    const batch = await tx.batch.findFirst({
+      where: { id: batchId, deletedAt: null },
+      include: {
+        rounds: { where: { deletedAt: null }, select: { id: true } },
+      },
+    });
+    if (!batch) throw notFound('Багц олдсонгүй.');
+
+    const prev = previousBatchStage(batch.stage);
+    if (!prev) throw conflict('Багц эхний шатанд байна — буцаах боломжгүй.');
+
+    const orderIds = await findOrderIdsForBatch(
+      tx,
+      batch.id,
+      batch.rounds.map((r) => r.id),
+    );
+    const orders = await tx.order.findMany({
+      where: { id: { in: orderIds } },
+      select: { id: true, code: true, status: true },
+    });
+
+    const fromStage = batch.stage;
+    const currentTarget = orderStatusForBatchStage(fromStage);
+    const prevTarget = orderStatusForBatchStage(prev);
+
+    const updatedBatch = await tx.batch.update({
+      where: { id: batch.id },
+      data: {
+        stage: prev,
+        ...(fromStage === 'CLOSED' && prev === 'COLLECTING' ? { closedAt: null } : {}),
+      },
+    });
+
+    // Хаагдсан тойргуудыг дахин нээнэ (цуглуулж байгаа шат руу буцах үед).
+    if (fromStage === 'CLOSED' && prev === 'COLLECTING') {
+      await tx.productRound.updateMany({
+        where: { batchId: batch.id, status: 'CLOSED', deletedAt: null },
+        data: { status: 'ACTIVE' },
+      });
+    }
+
+    let moved = 0;
+    let skipped = 0;
+
+    if (
+      currentTarget &&
+      prevTarget &&
+      currentTarget !== prevTarget
+    ) {
+      const movable = orders.filter((o) => o.status === currentTarget);
+      skipped = orders.length - movable.length;
+
+      if (movable.length > 0) {
+        const clear: Record<string, null> = {};
+        const clearField = STATUS_TIMESTAMP[currentTarget];
+        if (clearField) clear[clearField] = null;
+        if (currentTarget === 'ARRIVED') clear.arrivalNotifiedAt = null;
+
+        await tx.order.updateMany({
+          where: { id: { in: movable.map((o) => o.id) } },
+          data: { status: prevTarget, ...clear },
+        });
+
+        if (currentTarget === 'ARRIVED') {
+          await tx.orderItem.updateMany({
+            where: {
+              orderId: { in: movable.map((o) => o.id) },
+              cancelledAt: null,
+              handedOverAt: null,
+              round: { batchId: batch.id },
+            },
+            data: { arrivedAt: null },
+          });
+        }
+
+        await tx.auditLog.createMany({
+          data: movable.map((order) => ({
+            actor,
+            action: 'STATUS_REVERT',
+            entity: 'Order',
+            entityId: order.id,
+            before: { status: currentTarget },
+            after: {
+              status: prevTarget,
+              reason: `Багц "${batch.name}" ← ${BATCH_STAGE_LABEL[prev]}`,
+            },
+          })),
+        });
+
+        moved = movable.length;
+      }
+    } else {
+      skipped = orders.length;
+    }
+
+    // Агуулахаас буцах үед багцын тойрогт холбоотой мөрүүдийн arrivedAt-ийг цэвэрлэнэ
+    // (дээрх захиалгын жагсаалтад ороогүй ч мөр тэмдэглэгдсэн байж болно).
+    if (fromStage === 'AT_WAREHOUSE') {
+      await tx.orderItem.updateMany({
+        where: {
+          cancelledAt: null,
+          handedOverAt: null,
+          arrivedAt: { not: null },
+          round: { batchId: batch.id },
+          order: {
+            deletedAt: null,
+            status: { notIn: FROZEN_ORDER_STATUSES },
+          },
+        },
+        data: { arrivedAt: null },
+      });
+    }
+
+    await audit(
+      {
+        actor,
+        action: 'REVERT',
+        entity: 'Batch',
+        entityId: batch.id,
+        before: { stage: fromStage },
+        after: { stage: prev, ordersMoved: moved, ordersSkipped: skipped },
+      },
+      tx,
+    );
+
+    return { batch: updatedBatch, ordersMoved: moved, ordersSkipped: skipped };
+  });
+}
+
+/**
+ * Багцаас захиалга хасах (Хаагдсан үед төлбөр дутууг нийлүүлэгчид оруулахгүй).
+ * batchId хэвээр үлдээнэ — төлбөр орвол дахин оруулна.
+ */
+export async function omitOrderFromBatch(
+  batchId: string,
+  orderId: string,
+  actor: string,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const batch = await tx.batch.findFirst({ where: { id: batchId, deletedAt: null } });
+    if (!batch) throw notFound('Багц олдсонгүй.');
+    if (batch.stage !== 'COLLECTING' && batch.stage !== 'CLOSED') {
+      throw conflict('Зам дээр гарсан багцаас захиалга хасах боломжгүй.');
+    }
+
+    const order = await tx.order.findFirst({
+      where: { id: orderId, deletedAt: null, status: { not: 'CANCELLED' } },
+    });
+    if (!order) throw notFound('Захиалга олдсонгүй.');
+    if (order.batchOmittedAt) throw conflict('Захиалга аль хэдийн хассан.');
+
+    const onBatch =
+      order.batchId === batchId ||
+      (await tx.orderItem.count({
+        where: {
+          orderId,
+          cancelledAt: null,
+          round: { batchId, deletedAt: null },
+        },
+      })) > 0;
+    if (!onBatch) throw conflict('Энэ захиалга энэ багцад хамаарахгүй.');
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        batchId: batchId,
+        batchOmittedAt: new Date(),
+      },
+    });
+
+    await audit(
+      {
+        actor,
+        action: 'BATCH_OMIT',
+        entity: 'Order',
+        entityId: orderId,
+        before: { batchId: order.batchId, batchOmittedAt: null },
+        after: { batchId, batchOmittedAt: true, code: order.code },
+      },
+      tx,
+    );
+  });
+}
+
+/**
+ * Хассан захиалгыг дахин оруулах — төлбөр бүрэн (эсвэл илүү) орсон үед.
+ * Хоцорсон төлбөр ч хүлээн авна.
+ */
+export async function reinstateOrderInBatch(
+  batchId: string,
+  orderId: string,
+  actor: string,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    const batch = await tx.batch.findFirst({ where: { id: batchId, deletedAt: null } });
+    if (!batch) throw notFound('Багц олдсонгүй.');
+    if (batch.stage === 'DONE') {
+      throw conflict('Дууссан багцад дахин оруулах боломжгүй.');
+    }
+
+    const order = await tx.order.findFirst({
+      where: { id: orderId, deletedAt: null, batchId, batchOmittedAt: { not: null } },
+    });
+    if (!order) throw notFound('Хассан захиалга олдсонгүй.');
+
+    if (order.dueAmount > 0) {
+      throw conflict(
+        `Төлбөр дутуу (${order.dueAmount}₮). Мөнгө бүрэн орсны дараа дахин оруулна.`,
+        { dueAmount: order.dueAmount },
+      );
+    }
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { batchOmittedAt: null },
+    });
+
+    await audit(
+      {
+        actor,
+        action: 'BATCH_REINSTATE',
+        entity: 'Order',
+        entityId: orderId,
+        before: { batchOmittedAt: order.batchOmittedAt },
+        after: { batchOmittedAt: null, code: order.code, latePayment: true },
+      },
+      tx,
+    );
+  });
 }

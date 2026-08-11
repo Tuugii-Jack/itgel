@@ -65,9 +65,16 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
     if (user && onLoginPage) router.replace("/admin");
   }, [user, loading, onLoginPage, router]);
 
+  // Login дээр JWT байхгүй бол cookie-г цэвэрлэ — stale cookie-оос сэргийлнэ.
+  useEffect(() => {
+    if (onLoginPage && !readToken("admin")) {
+      writeToken("admin", null);
+    }
+  }, [onLoginPage]);
+
   const signIn = useCallback(
     async (email: string, password: string) => {
-      const result = await adminApi.login(email, password);
+      const result = await adminApi.login(email.trim().toLowerCase(), password);
       writeToken("admin", result.token);
       setUser(result.user);
       router.replace("/admin");

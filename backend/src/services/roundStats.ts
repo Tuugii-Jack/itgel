@@ -25,6 +25,7 @@ export async function roundStats(roundIds: string[]): Promise<Map<string, RoundS
       AND oi."cancelledAt" IS NULL
       AND o."deletedAt" IS NULL
       AND o."status" <> 'CANCELLED'
+      AND o."batchOmittedAt" IS NULL
     GROUP BY oi."roundId"
   `;
 
