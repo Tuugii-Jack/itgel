@@ -112,19 +112,43 @@ export default function ProductPage({
         <span className='truncate text-[15px]'>{product.name}</span>
       </div>
 
+      {/* Laptop — дизайны замын мөр */}
+      <nav className='hidden items-center gap-2 px-10 pt-8 text-[13px] text-muted lg:flex'>
+        <Link href='/' className='text-muted no-underline hover:text-ink-2'>
+          Нүүр
+        </Link>
+        <span>/</span>
+        <span>
+          {product.category?.name ??
+            (isOrder ? "Захиалгын бараа" : "Бэлэн бараа")}
+        </span>
+        <span>/</span>
+        <span className='truncate text-ink-2'>{product.name}</span>
+      </nav>
+
       {/*
         Laptop — дизайны хуваарь: зүүн талд зураг (уян), баруун талд мэдээлэл
         440px тогтмол, хооронд 48px зай.
       */}
-      <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10 lg:pt-8'>
+      <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10 lg:pt-6'>
         {/* Зураг — хуудасны хамгийн чухал элемент тул тод, тусдаа орчинтой. */}
-        <div className='lg:sticky lg:top-8'>
-          <div className='border-b border-line bg-surface p-3 sm:p-4 lg:rounded-[12px] lg:border lg:p-0'>
-            <ProductGallery images={product.images} alt={product.name} />
-          </div>
+        <div className='border-b border-line bg-surface p-3 sm:p-4 lg:border-0 lg:bg-transparent lg:p-0'>
+          <ProductGallery
+            images={product.images}
+            alt={product.name}
+            overlay={
+              blocked ? null : (
+                <GalleryChip
+                  product={product}
+                  closeLabel={closeLabel}
+                  soldOut={soldOut}
+                />
+              )
+            }
+          />
         </div>
 
-        <div className='lg:min-w-0'>
+        <div className='lg:flex lg:min-w-0 lg:flex-col lg:gap-6'>
           {blocked && (
             <div className='px-4 pt-4 lg:px-0 lg:pt-0'>
               <div
@@ -158,6 +182,9 @@ export default function ProductPage({
             </div>
           </div>
 
+          {/* Laptop — дизайны 4 алхамын карт, нээлттэй байдлаар */}
+          <FlowCard product={product} />
+
           {/* Худалдан авах шийдвэрт нөлөөлөх гурван зүйл — эхэнд, том. */}
           <KeyFacts
             product={product}
@@ -167,12 +194,13 @@ export default function ProductPage({
           />
 
           {!blocked && product.sizes.length > 0 && (
-            <div className='px-4 lg:px-0 pt-7'>
-              <div className='mb-2.5 flex items-baseline gap-1.5 text-[15px] font-medium'>
+            <div className='px-4 pt-7 lg:px-0 lg:pt-0'>
+              <div className='mb-2 text-[14px] text-ink-2 lg:text-[13px]'>
                 Хэмжээ
-                {size && <span className='tnum text-ink-2'>· {size}</span>}
+                {size && <span className='tnum'> · {size}</span>}
               </div>
               <ChoiceGroup
+                columns={4}
                 options={product.sizes.map((s) => ({ value: s, label: s }))}
                 value={size}
                 onChange={(v) => {
@@ -184,12 +212,13 @@ export default function ProductPage({
           )}
 
           {!blocked && product.colors.length > 0 && (
-            <div className='px-4 lg:px-0 pt-6'>
-              <div className='mb-2.5 flex items-baseline gap-1.5 text-[15px] font-medium'>
+            <div className='px-4 pt-6 lg:px-0 lg:pt-0'>
+              <div className='mb-2 text-[14px] text-ink-2 lg:text-[13px]'>
                 Өнгө
-                {color && <span className='text-ink-2'>· {color}</span>}
+                {color && <span> · {color}</span>}
               </div>
               <ChoiceGroup
+                columns={3}
                 options={product.colors.map((c) => ({ value: c, label: c }))}
                 value={color}
                 onChange={(v) => {
@@ -200,8 +229,9 @@ export default function ProductPage({
             </div>
           )}
 
+          {/* Мобайл дээр тоо ширхэг тусдаа мөр, laptop дээр доод үйлдлийн мөрөнд */}
           {!blocked && (
-            <div className='px-4 lg:px-0 pt-6'>
+            <div className='px-4 pt-6 lg:hidden'>
               <div className='mb-2.5 text-[15px] font-medium'>Тоо ширхэг</div>
               <div className='flex items-center gap-3'>
                 <Stepper
@@ -217,63 +247,114 @@ export default function ProductPage({
           )}
 
           {notice && (
-            <div className='px-4 pt-4 lg:px-0'>
+            <div className='px-4 pt-4 lg:px-0 lg:pt-0'>
               <ErrorNote>{notice}</ErrorNote>
             </div>
           )}
 
           <HowItArrives product={product} />
 
-          {product.description && (
-            <div className='px-4 lg:px-0 pt-7'>
-              <div className='mb-2 text-[15px] font-medium'>Тайлбар</div>
-              <p className='m-0 whitespace-pre-line text-[14px] leading-[1.65] text-ink-2'>
-                {product.description}
-              </p>
-            </div>
-          )}
-
-          {product.sizeChart.length > 0 && (
-            <div className='px-4 lg:px-0 pt-7'>
-              <div className='mb-2 text-[15px] font-medium'>
-                Хэмжээсийн хүснэгт
-              </div>
-              <Card className='overflow-hidden'>
-                <table className='w-full border-collapse text-[13px]'>
-                  <thead>
-                    <tr className='bg-surface text-ink-2'>
-                      <th className='p-2.5 text-left font-normal'>Хэмжээ</th>
-                      <th className='p-2.5 text-left font-normal'>Өндөр</th>
-                      <th className='p-2.5 text-left font-normal'>Цээж</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {product.sizeChart.map((row, i) => (
-                      <tr
-                        key={`${row.size}-${i}`}
-                        className='border-t border-line'
-                      >
-                        <td className='p-2.5'>{row.size}</td>
-                        <td className='tnum p-2.5 text-ink-2'>
-                          {row.heightRange}
-                        </td>
-                        <td className='tnum p-2.5 text-ink-2'>{row.chestCm}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </Card>
-            </div>
-          )}
+          {/* Laptop — дизайны үйлдлийн мөр: тоо, нийт дүн, товч */}
+          <div className='hidden lg:flex lg:flex-col lg:gap-2'>
+            {blocked ? (
+              <Link href='/' className='no-underline'>
+                <Button full size='bar' variant='outline'>
+                  Бусад бараа үзэх
+                </Button>
+              </Link>
+            ) : (
+              <>
+                <div className='flex items-center gap-4'>
+                  <Stepper
+                    qty={qty}
+                    max={isOrder ? 50 : Math.max(1, product.stock)}
+                    onChange={setQty}
+                    size='lg'
+                  />
+                  <div className='min-w-0 flex-1'>
+                    <div className='text-[13px] text-muted'>Нийт</div>
+                    <div className='tnum text-[18px] font-medium'>
+                      {money(total)}
+                    </div>
+                  </div>
+                  <Button size='bar' onClick={addToCart} className='px-8'>
+                    {isOrder ? "Захиалах" : "Сагсанд хийх"}
+                  </Button>
+                </div>
+                <div className='text-[13px] text-muted'>
+                  Захиалахад дүнг бүтнээр төлнө.
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Утсан дээр наалдсан, desktop дээр урсгалын дотор */}
+      {/* Тайлбар ба хэмжээсийн хүснэгт — laptop дээр зураг, мэдээллийн доор */}
+      {(product.description || product.sizeChart.length > 0) && (
+        <>
+          <div className='hidden lg:mx-10 lg:my-12 lg:block lg:h-px lg:bg-line' />
+          <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10'>
+            {product.description && (
+              <div className='px-4 pt-7 lg:px-0 lg:pt-0'>
+                <div className='mb-2 text-[15px] font-medium lg:mb-3 lg:text-[17px]'>
+                  Тайлбар
+                </div>
+                <p className='m-0 max-w-[640px] whitespace-pre-line text-[14px] leading-[1.65] text-ink-2 lg:text-[15px]'>
+                  {product.description}
+                </p>
+              </div>
+            )}
+
+            {product.sizeChart.length > 0 && (
+              <div className='px-4 pt-7 lg:col-start-2 lg:px-0 lg:pt-0'>
+                <div className='mb-2 text-[15px] font-medium lg:mb-3 lg:text-[17px]'>
+                  Хэмжээсийн хүснэгт
+                </div>
+                <Card className='overflow-hidden'>
+                  <table className='w-full border-collapse text-[13px]'>
+                    <thead>
+                      <tr className='bg-surface text-ink-2'>
+                        <th className='px-3 py-2.5 text-left font-normal lg:px-3.5'>
+                          Хэмжээ
+                        </th>
+                        <th className='px-3 py-2.5 text-left font-normal lg:px-3.5'>
+                          Өндөр, см
+                        </th>
+                        <th className='px-3 py-2.5 text-left font-normal lg:px-3.5'>
+                          Цээж, см
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className='text-[14px]'>
+                      {product.sizeChart.map((row, i) => (
+                        <tr
+                          key={`${row.size}-${i}`}
+                          className='border-t border-line'
+                        >
+                          <td className='px-3 py-2.5 lg:px-3.5'>{row.size}</td>
+                          <td className='tnum px-3 py-2.5 text-ink-2 lg:px-3.5'>
+                            {row.heightRange}
+                          </td>
+                          <td className='tnum px-3 py-2.5 text-ink-2 lg:px-3.5'>
+                            {row.chestCm}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Card>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Утсан дээр наалдсан үйлдлийн мөр — laptop дээр баруун баганад байдаг */}
       <div
         className='fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-[560px] items-center gap-3 border-t border-line bg-bg p-4
         shadow-[0_-8px_24px_rgba(20,20,25,0.06)]
-        pb-[calc(1rem+env(safe-area-inset-bottom))]
-        lg:static lg:mx-8 lg:mt-8 lg:max-w-none lg:rounded-[12px] lg:border lg:pb-4 lg:shadow-none'
+        pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden'
       >
         {blocked ? (
           <Link href='/' className='w-full no-underline'>
@@ -300,6 +381,80 @@ export default function ProductPage({
 }
 
 /**
+ * Гол зурган дээрх шошго — дизайнд зүүн доод буланд «Захиалга хаагдах …».
+ * Бэлэн бараанд хаагдах хугацаа байхгүй тул үлдэгдлийг харуулна.
+ */
+function GalleryChip({
+  product,
+  closeLabel,
+  soldOut,
+}: {
+  product: Product;
+  closeLabel: string;
+  soldOut: boolean;
+}) {
+  const isOrder = product.type === "order";
+  if (isOrder && !closeLabel) return null;
+  if (!isOrder && soldOut) return null;
+
+  return (
+    <span
+      className={`absolute bottom-5 left-5 hidden h-8 items-center gap-1.5 rounded-[8px] border border-line bg-bg px-3 lg:inline-flex
+        ${isOrder ? "text-warn" : "text-ok"}`}
+    >
+      <svg
+        width='14'
+        height='14'
+        viewBox='0 0 14 14'
+        fill='none'
+        stroke='currentColor'
+        strokeWidth='1.2'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+        aria-hidden
+      >
+        {isOrder ? FACT_ICONS.clock : FACT_ICONS.box}
+      </svg>
+      <span className='tnum text-[13px]'>
+        {isOrder
+          ? `Захиалга хаагдах ${closeLabel}`
+          : `Үлдэгдэл ${product.stock} ширхэг`}
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Laptop дээрх «Энэ бараа хэрхэн ирэх вэ» — дизайны дагуу нээлттэй, алхам бүр
+ * дээрээ зурвастай. Хар зурвас нь өнөөдөр хаана явааг заана.
+ */
+function FlowCard({ product }: { product: Product }) {
+  const steps = flowSteps(product);
+
+  return (
+    <div className='hidden rounded-[12px] border border-line bg-surface p-5 lg:flex lg:flex-col lg:gap-3.5'>
+      <div className='text-[15px] font-medium'>Энэ бараа хэрхэн ирэх вэ</div>
+      <div
+        className={`grid gap-3 ${steps.length === 4 ? "grid-cols-4" : "grid-cols-3"}`}
+      >
+        {steps.map((step) => (
+          <div key={step.label} className='flex flex-col gap-2'>
+            <div
+              className={`h-1 rounded-full ${step.done ? "bg-ink" : "bg-line"}`}
+            />
+            <span className='text-[13px]'>{step.short}</span>
+            <span className='tnum text-[12px] text-ink-2'>{step.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className='text-[13px] text-ink-2'>
+        Огноо ойролцоо. Өөрчлөгдвөл мэдэгдэнэ.
+      </div>
+    </div>
+  );
+}
+
+/**
  * Худалдан авах шийдвэрт нөлөөлдөг зүйлс — хэзээ гартаа авах, хэзээ хаагдах,
  * хэдэн ширхэг үлдсэн. Эдгээрийг хайж олох биш, шууд харагдах ёстой.
  */
@@ -316,8 +471,9 @@ function KeyFacts({
 }) {
   const isOrder = product.type === "order";
 
+  // Laptop дээр эдгээр нь зурган дээрх шошго ба алхмын карт болж хуваагдана.
   return (
-    <div className='px-4 pt-6 lg:px-0'>
+    <div className='px-4 pt-6 lg:hidden'>
       <div className='divide-y divide-line rounded-[12px] border border-line'>
         <Fact
           icon='truck'
@@ -477,28 +633,37 @@ function Stepper({
   qty,
   max,
   onChange,
+  size = "md",
 }: {
   qty: number;
   max: number;
   onChange: (qty: number) => void;
+  /** md — мобайлын 44px, lg — дизайны laptop дээрх 48px. */
+  size?: "md" | "lg";
 }) {
+  const box = size === "lg" ? "h-12" : "h-11";
+  const key = size === "lg" ? "w-12 text-[18px]" : "w-11 text-[18px]";
+  const value = size === "lg" ? "w-10 text-[16px]" : "w-10 text-[15px]";
+
   return (
-    <div className='flex h-11 items-center rounded-[8px] border border-line'>
+    <div
+      className={`flex shrink-0 items-center rounded-[8px] border border-line ${box}`}
+    >
       <button
         type='button'
         aria-label='Хасах'
         onClick={() => onChange(Math.max(1, qty - 1))}
-        className='h-full w-11 cursor-pointer border-0 bg-transparent text-[18px] text-ink disabled:opacity-30'
+        className={`h-full cursor-pointer border-0 bg-transparent text-ink disabled:opacity-30 ${key}`}
         disabled={qty <= 1}
       >
         −
       </button>
-      <span className='tnum w-10 text-center text-[15px]'>{qty}</span>
+      <span className={`tnum text-center ${value}`}>{qty}</span>
       <button
         type='button'
         aria-label='Нэмэх'
         onClick={() => onChange(Math.min(max, qty + 1))}
-        className='h-full w-11 cursor-pointer border-0 bg-transparent text-[18px] text-ink disabled:opacity-30'
+        className={`h-full cursor-pointer border-0 bg-transparent text-ink disabled:opacity-30 ${key}`}
         disabled={qty >= max}
       >
         +
@@ -507,32 +672,78 @@ function Stepper({
   );
 }
 
+/**
+ * Барааны замын алхмууд. Мобайл дээр timeline, laptop дээр зурвасан карт болж
+ * хоёр газар хэрэглэгдэнэ.
+ *
+ * `short` — laptop-ийн нарийн баганад багтах богино нэр.
+ * `done` — өнөөдрийн байдлаар хүрсэн (эсвэл яг одоо явж буй) алхам.
+ */
+function flowSteps(
+  product: Product,
+): { label: string; short: string; value: string; done: boolean }[] {
+  if (!product.closeAt) {
+    return [
+      { label: "Агуулахад бэлэн", short: "Бэлэн", value: "Одоо", done: true },
+      {
+        label: "Захиалга баталгаажна",
+        short: "Баталгаажна",
+        value: "Тухайн өдөртөө",
+        done: true,
+      },
+      {
+        label: "Гарт очно",
+        short: "Гарт очно",
+        value: arrivalLabel(product),
+        done: false,
+      },
+    ];
+  }
+
+  const steps = [
+    {
+      label: "Захиалга хаагдана",
+      short: "Захиалга хаагдана",
+      value: dayLabel(product.closeAt),
+      at: new Date(product.closeAt).getTime(),
+    },
+    {
+      label: "Нийлүүлэгч рүү явна",
+      short: "Нийлүүлэгч рүү",
+      value: dayLabel(addDays(product.closeAt, 1)),
+      at: new Date(addDays(product.closeAt, 1)).getTime(),
+    },
+    {
+      label: "Тээвэрлэгдэнэ",
+      short: "Тээвэрлэнэ",
+      value: rangeLabel(addDays(product.closeAt, 2), product.arriveFrom),
+      at: new Date(product.arriveFrom).getTime(),
+    },
+    {
+      label: "Гарт очно",
+      short: "Гарт очно",
+      value: rangeLabel(product.arriveFrom, product.arriveTo),
+      at: new Date(product.arriveTo).getTime(),
+    },
+  ];
+
+  // Одоо хаана явааг заана — өнгөрсөн алхмууд ба яг одоогийнх нь хар.
+  const now = Date.now();
+  const current = steps.findIndex((s) => s.at > now);
+  return steps.map(({ label, short, value }, i) => ({
+    label,
+    short,
+    value,
+    done: current === -1 || i <= current,
+  }));
+}
+
 /** Дизайны хамгийн чухал блок — 4 алхамын timeline, тус бүр огноотой. */
 function HowItArrives({ product }: { product: Product }) {
-  const steps = product.closeAt
-    ? [
-        { label: "Захиалга хаагдана", value: dayLabel(product.closeAt) },
-        {
-          label: "Нийлүүлэгч рүү явна",
-          value: dayLabel(addDays(product.closeAt, 1)),
-        },
-        {
-          label: "Тээвэрлэгдэнэ",
-          value: rangeLabel(addDays(product.closeAt, 2), product.arriveFrom),
-        },
-        {
-          label: "Гарт очно",
-          value: rangeLabel(product.arriveFrom, product.arriveTo),
-        },
-      ]
-    : [
-        { label: "Агуулахад бэлэн", value: "Одоо" },
-        { label: "Захиалга баталгаажна", value: "Тухайн өдөртөө" },
-        { label: "Гарт очно", value: arrivalLabel(product) },
-      ];
+  const steps = flowSteps(product);
 
   return (
-    <div className='px-4 pt-7 lg:px-0'>
+    <div className='px-4 pt-7 lg:hidden'>
       {/* Дэлгэрэнгүй явц — сонирхсон хүн нээж үзнэ, эхний харцыг бөглөрүүлэхгүй. */}
       <details className='group rounded-[12px] border border-line bg-surface'>
         <summary className='flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-[15px] font-medium'>
