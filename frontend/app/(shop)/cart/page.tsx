@@ -9,6 +9,8 @@ import { api, ApiError } from "@/lib/api";
 import { useCart, type CartLine } from "@/lib/cart";
 import { useSession } from "@/lib/session";
 import { money, rangeLabel, relativeDay } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
+import { useToast } from "@/lib/toast";
 
 type Step = "phone" | "code" | "verified";
 
@@ -22,6 +24,7 @@ export default function CartPage() {
   const cart = useCart();
   const session = useSession();
   const router = useRouter();
+  const toast = useToast();
 
   const [buyerName, setBuyerName] = useState("");
   const [note, setNote] = useState("");
@@ -82,8 +85,11 @@ export default function CartPage() {
       setDevCode(result.devCode ?? null);
       setCooldown(result.resendAfterSec);
       setStep("code");
+      toast.success("Код илгээлээ.");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Код илгээж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Код илгээж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -96,8 +102,11 @@ export default function CartPage() {
       const result = await api.verifyOtp(phone, code, buyerName.trim() || undefined);
       await session.signIn(result.token);
       setStep("verified");
+      toast.success("Утас баталгаажлаа.");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Код шалгаж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Код шалгаж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -114,14 +123,18 @@ export default function CartPage() {
         items: cart.lines.map((line) => ({
           productId: line.productId,
           qty: line.qty,
+          selections: line.selections ?? undefined,
           size: line.size ?? undefined,
           color: line.color ?? undefined,
         })),
       });
       cart.clear();
+      toast.success("Захиалга үүслээ.");
       router.push(`/success/${order.code}`);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Захиалга үүсгэж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Захиалга үүсгэж чадсангүй.";
+      setError(message);
+      toast.error(message);
       setBusy(false);
     }
   };
@@ -152,7 +165,7 @@ export default function CartPage() {
           <div className="overflow-hidden rounded-[12px] border border-line">
             {group.lines.map(({ line, index }) => (
               <CartRow
-                key={`${line.productId}-${line.size}-${line.color}`}
+                key={`${line.productId}-${JSON.stringify(line.selections)}`}
                 line={line}
                 onQty={(qty) => cart.setQty(index, qty)}
                 onRemove={() => cart.remove(index)}
@@ -360,7 +373,7 @@ function CartRow({
   onQty: (qty: number) => void;
   onRemove: () => void;
 }) {
-  const options = [line.size, line.color].filter(Boolean).join(" · ");
+  const options = formatSelections(line.selections, line.size, line.color);
   const max = line.type === "ready" && line.stock > 0 ? line.stock : 50;
 
   const qtyControl = (size: "sm" | "lg") => (

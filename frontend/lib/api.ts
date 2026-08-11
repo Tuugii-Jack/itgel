@@ -2,6 +2,7 @@ import type {
   Ad,
   AdminAd,
   AdminBatch,
+  AdminBatchDetail,
   AdminCategory,
   AdminCustomer,
   AdminDelivery,
@@ -16,6 +17,8 @@ import type {
   ArchiveProduct,
   ArchiveSearch,
   AuditLog,
+  BatchProduct,
+  BatchSummary,
   Category,
   CreatedOrder,
   Me,
@@ -190,7 +193,13 @@ export const api = {
     phone: string;
     name?: string;
     note?: string;
-    items: { productId: string; qty: number; size?: string; color?: string }[];
+    items: {
+      productId: string;
+      qty: number;
+      selections?: Record<string, string>;
+      size?: string;
+      color?: string;
+    }[];
   }) =>
     request<CreatedOrder>("/orders", { method: "POST", body }).then((r) => r.data),
 
@@ -305,7 +314,7 @@ export const adminApi = {
 
   // --- Барааны тойрог («дахин гаргах») ---
 
-  /** Шинэ тойрог. Үнэ, хүлээх хоногийг өгөхгүй бол сүүлийн тойргийнхыг авна. */
+  /** Шинэ гаргалт. Үнэ, хүлээх хоногийг өгөхгүй бол сүүлийн гаргалтынхыг авна. */
   createRound: (
     productId: string,
     body?: {
@@ -317,6 +326,7 @@ export const adminApi = {
       leadMaxDays?: number;
       status?: string;
       note?: string;
+      batchId?: string | null;
     },
   ) =>
     request<AdminProduct>(`/admin/products/${productId}/rounds`, {
@@ -336,6 +346,7 @@ export const adminApi = {
       leadMaxDays: number;
       status: string;
       note: string | null;
+      batchId: string | null;
     }>,
   ) =>
     request<AdminRound>(`/admin/rounds/${roundId}`, {
@@ -516,23 +527,35 @@ export const adminApi = {
     request<AdminBatch[]>("/admin/batches", { ...adminAuth, query }),
 
   batch: (id: string) =>
-    request<
-      AdminBatch & {
-        orders: {
-          id: string;
-          code: string;
-          status: string;
-          subtotal: number;
-          itemCount: number;
-          customer: { name: string | null; phone: string };
-        }[];
-      }
-    >(`/admin/batches/${id}`, adminAuth).then((r) => r.data),
+    request<AdminBatchDetail>(`/admin/batches/${id}`, adminAuth).then((r) => r.data),
 
-  createBatch: (body: { name: string; orderIds?: string[]; weightKg?: number }) =>
+  createBatch: (body: {
+    name: string;
+    deadline?: string | null;
+    orderIds?: string[];
+    weightKg?: number;
+    etaFrom?: string;
+    etaTo?: string;
+  }) =>
     request<AdminBatch>("/admin/batches", { ...adminAuth, method: "POST", body }).then(
       (r) => r.data,
     ),
+
+  updateBatch: (
+    id: string,
+    body: Partial<{
+      name: string;
+      deadline: string | null;
+      weightKg: number | null;
+      etaFrom: string | null;
+      etaTo: string | null;
+    }>,
+  ) =>
+    request<BatchSummary>(`/admin/batches/${id}`, {
+      ...adminAuth,
+      method: "PATCH",
+      body,
+    }).then((r) => r.data),
 
   advanceBatch: (id: string) =>
     request<AdminBatch & { ordersMoved: number }>(`/admin/batches/${id}/advance`, {
@@ -546,6 +569,37 @@ export const adminApi = {
       method: "POST",
       body,
     }).then((r) => r.data),
+
+  /** Багцад бараа нэмнэ — шинэ тойрог, эсвэл `roundId`-аар одоогийн урьдчилсан гаргалт. */
+  addBatchProduct: (
+    batchId: string,
+    body: {
+      productId?: string;
+      roundId?: string;
+      costPrice?: number;
+      sellPrice?: number;
+      closeAt?: string;
+      leadMinDays?: number;
+      leadMaxDays?: number;
+      note?: string;
+      status?: "ACTIVE" | "DRAFT" | "HIDDEN";
+    },
+  ) =>
+    request<BatchProduct>(`/admin/batches/${batchId}/products`, {
+      ...adminAuth,
+      method: "POST",
+      body,
+    }).then((r) => r.data),
+
+  /** Багцаас бараа салгах — захиалгатай бол зөвхөн unlink. */
+  removeBatchProduct: (batchId: string, roundId: string) =>
+    request<{ removed: boolean; unlinked?: boolean }>(
+      `/admin/batches/${batchId}/products/${roundId}`,
+      {
+        ...adminAuth,
+        method: "DELETE",
+      },
+    ).then((r) => r.data),
 
   handoverLookup: (code: string) =>
     request<AdminOrderDetail & { canHandOver: boolean; blockReason: string | null }>(

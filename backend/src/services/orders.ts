@@ -62,6 +62,14 @@ export async function changeOrderStatus(
     const data: Prisma.OrderUpdateInput = { status: to };
     if (timestampField) (data as Record<string, unknown>)[timestampField] = now;
 
+    // Багц-түрүүлэх урсгал: захиалгын урьдчилсан барааны бүх мөр нэг багцын
+    // тойргоос бол баталгаажихдаа тэр багц руу автоматаар орно. Хоёр өөр
+    // багцын бараа холилдсон ховор тохиолдолд админ гараар багцална.
+    if (to === 'CONFIRMED' && !order.batchId) {
+      const autoBatchId = await batchForOrder(tx, orderId);
+      if (autoBatchId) data.batch = { connect: { id: autoBatchId } };
+    }
+
     const next = await tx.order.update({ where: { id: orderId }, data });
 
     // Захиалга бүтнээрээ цуцлагдвал бэлэн барааны үлдэгдлийг буцаана.
@@ -83,8 +91,45 @@ export async function changeOrderStatus(
     return next;
   });
 
-  if (to === 'ARRIVED') await notifyArrival(updated);
+  // SMS-ийг хүлээхгүй — админы «Ирсэн болгох» товч провайдерээс хамаарч
+  // гацахгүй. Илгээгдээгүй нь `arrivalNotifiedAt`-аар тэмдэглэгдэж, cron барина.
+  if (to === 'ARRIVED') {
+    void notifyArrival(updated).catch((e) =>
+      console.warn(`[sms] ${updated.code} ирсэн мэдэгдэл алдаа:`, e),
+    );
+  }
   return updated;
+}
+
+/**
+ * Захиалга аль багцад орох ёстойг тодорхойлно.
+ *
+ * Идэвхтэй, урьдчилсан (closeAt заасан) мөрүүдийн тойргууд бүгд НЭГ багцад
+ * харьяалагдаж, тэр багц нь захиалга хүлээн авах шатандаа байвал тэр багцын
+ * id-г буцаана. Бусад тохиолдолд null — одоогийн гар аргын урсгал хэвээр.
+ */
+async function batchForOrder(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<string | null> {
+  const items = await tx.orderItem.findMany({
+    where: { orderId, cancelledAt: null },
+    select: { round: { select: { batchId: true, closeAt: true } } },
+  });
+
+  const preorder = items.filter((i) => i.round.closeAt !== null);
+  if (preorder.length === 0) return null;
+
+  const batchIds = new Set(preorder.map((i) => i.round.batchId));
+  if (batchIds.size !== 1) return null;
+  const [batchId] = batchIds;
+  if (!batchId) return null;
+
+  const batch = await tx.batch.findFirst({
+    where: { id: batchId, deletedAt: null, stage: { in: ['COLLECTING', 'CLOSED'] } },
+    select: { id: true },
+  });
+  return batch?.id ?? null;
 }
 
 /**

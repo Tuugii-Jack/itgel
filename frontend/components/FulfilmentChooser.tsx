@@ -5,6 +5,8 @@ import { Button, ErrorNote, Input, Textarea } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { money, weekdayShort } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
+import { useToast } from "@/lib/toast";
 import type { PublicOrder, Slot, Store } from "@/lib/types";
 
 /**
@@ -23,21 +25,32 @@ export function FulfilmentChooser({
   onDone: () => void;
 }) {
   const session = useSession();
+  const toast = useToast();
   const [type, setType] = useState<"PICKUP" | "DELIVERY">("PICKUP");
   const [district, setDistrict] = useState<string | null>(null);
   const [khoroo, setKhoroo] = useState("");
   const [address, setAddress] = useState("");
   const [day, setDay] = useState<string | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [slotsError, setSlotsError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadSlots = () => {
     api
       .slots(9)
       .then((data) => setSlots(data.slots))
-      .catch(() => undefined);
-  }, []);
+      .catch(() => setSlotsError(true));
+  };
+
+  const retrySlots = () => {
+    setSlotsError(false);
+    loadSlots();
+  };
+
+  // Хүргэлтийн өдрүүд ачаалагдаагүй бол сонголт хоосон харагдана —
+  // алдааг нуулгүй, дахин оролдох боломж өгнө.
+  useEffect(loadSlots, []);
 
   // Хадгалсан хаяг байвал автоматаар оруулна.
   useEffect(() => {
@@ -61,7 +74,9 @@ export function FulfilmentChooser({
   const submit = async () => {
     setError(null);
     if (type === "DELIVERY" && (!district || !day)) {
-      setError("Дүүрэг болон хүргэлтийн өдрөө сонгоно уу.");
+      const message = "Дүүрэг болон хүргэлтийн өдрөө сонгоно уу.";
+      setError(message);
+      toast.error(message);
       return;
     }
     setBusy(true);
@@ -83,9 +98,12 @@ export function FulfilmentChooser({
           })
           .catch(() => undefined);
       }
+      toast.success(type === "DELIVERY" ? "Хүргэлт сонгогдлоо." : "Авах арга хадгалагдлаа.");
       onDone();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хадгалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
+      setError(message);
+      toast.error(message);
       setBusy(false);
     }
   };
@@ -122,8 +140,8 @@ export function FulfilmentChooser({
               <span className="min-w-0 flex-1">
                 <span className="block text-[14px]">{item.name}</span>
                 <span className="block text-[13px] text-muted">
-                  {[item.size, item.color].filter(Boolean).join(" · ")}
-                  {[item.size, item.color].filter(Boolean).length > 0 ? " · " : ""}
+                  {formatSelections(item.selections, item.size, item.color)}
+                  {formatSelections(item.selections, item.size, item.color) ? " · " : ""}
                   {item.qty} ш
                 </span>
               </span>
@@ -194,6 +212,18 @@ export function FulfilmentChooser({
           </Field>
 
           <Field label="Хүргэлтийн өдөр">
+            {slotsError && (
+              <div className="flex items-center justify-between gap-3 rounded-[8px] border border-line bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
+                <span>Хүргэлтийн өдрүүдийг ачаалж чадсангүй.</span>
+                <button
+                  type="button"
+                  onClick={retrySlots}
+                  className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-danger underline"
+                >
+                  Дахин оролдох
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-3 gap-2 lg:max-w-[520px]">
               {slots.map((slot) => {
                 const active = day === slot.day;

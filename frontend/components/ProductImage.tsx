@@ -1,9 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import { ImagePlaceholder } from "@/components/ui";
 
-// Minimal ProductImage component to avoid circular import.
-function ProductImage({
+/**
+ * Барааны зураг. Зураггүй эсвэл ачаалагдаагүй үед эвдэрсэн зургийн дүрс
+ * харуулахын оронд шугаман placeholder харуулна.
+ */
+export function ProductImage({
   src,
   alt,
   className = "",
@@ -12,65 +16,22 @@ function ProductImage({
   alt: string;
   className?: string;
 }) {
+  // Алдаа өгсөн src-г санана — src солигдвол (галерейд өөр зураг сонгоход)
+  // автоматаар дахин оролдоно.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+
+  if (!src || failedSrc === src) {
+    return <ImagePlaceholder className={className} />;
+  }
+
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={src ?? "/placeholder.png"}
+      src={src}
       alt={alt}
-      className={className + " object-cover bg-muted"}
+      loading="lazy"
+      onError={() => setFailedSrc(src)}
+      className={`${className} bg-surface object-cover`}
     />
   );
 }
-
-/**
- * Барааны олон зурагтай галерей.
- * Эхний зураг (эсвэл сонгосон) том харагдана, бусад нь доор жижиг мөр болж жагсана.
- * Тухайн жижиг зураг дээр дарахад тэр нь том зураг болж солигдоно.
- */
-export function ProductGallery({
-  images,
-  alt,
-  className = "",
-}: {
-  images: (string | null | undefined)[];
-  alt: string;
-  className?: string;
-}) {
-  const list = images.length > 0 ? images : [null];
-  const [active, setActive] = useState(0);
-  const index = Math.min(active, list.length - 1);
-
-  return (
-    <div className={`flex flex-col gap-2.5 ${className}`}>
-      {/* Гол зураг */}
-      <div className='relative aspect-square w-full overflow-hidden rounded-[12px] border border-line bg-surface'>
-        <ProductImage src={list[index]} alt={alt} className='h-full w-full' />
-      </div>
-
-      {/* Thumbnail мөр — 2-с дээш зурагтай үед л харуулна */}
-      {list.length > 1 && (
-        <div className='no-scrollbar flex gap-2 overflow-x-auto'>
-          {list.map((src, i) => (
-            <button
-              key={i}
-              type='button'
-              onClick={() => setActive(i)}
-              aria-label={`${alt} — зураг ${i + 1}`}
-              aria-current={i === index}
-              className={`h-16 w-16 shrink-0 overflow-hidden rounded-[8px] border transition-colors
-                ${i === index ? "border-primary" : "border-line hover:border-primary-muted"}`}
-            >
-              <ProductImage
-                src={src}
-                alt={`${alt} ${i + 1}`}
-                className='h-full w-full'
-              />
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-export { ProductImage };
-

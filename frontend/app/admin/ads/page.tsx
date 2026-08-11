@@ -14,9 +14,11 @@ import {
   Spinner,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 import type { AdminAd } from "@/lib/types";
 
 export default function AdsPage() {
+  const toast = useToast();
   const [rows, setRows] = useState<AdminAd[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -28,11 +30,13 @@ export default function AdsPage() {
     try {
       setRows(await adminApi.ads());
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     void load();
@@ -43,9 +47,12 @@ export default function AdsPage() {
     setError(null);
     try {
       await adminApi.updateAd(row.id, { isActive: !row.isActive });
+      toast.success(row.isActive ? "Баннер нуугдлаа." : "Баннер идэвхжлээ.");
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хадгалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -57,9 +64,12 @@ export default function AdsPage() {
     try {
       await adminApi.deleteAd(row.id);
       if (editing?.id === row.id) setEditing(null);
+      toast.success("Баннер устлаа.");
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Устгаж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Устгаж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -81,9 +91,13 @@ export default function AdsPage() {
           onCancel={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
+            toast.success(editing ? "Баннер хадгалагдлаа." : "Баннер үүслээ.");
             await load();
           }}
-          onError={setError}
+          onError={(message) => {
+            setError(message);
+            if (message) toast.error(message);
+          }}
           setBusy={setBusy}
         />
       </Card>
@@ -198,6 +212,7 @@ function AdForm({
 
       setImageUrl(presigned.publicUrl);
       await adminApi.updateAd(adId, { imageUrl: presigned.publicUrl });
+      onError(null);
     } catch (e) {
       onError(e instanceof ApiError ? e.message : "Зураг байршуулж чадсангүй.");
     } finally {

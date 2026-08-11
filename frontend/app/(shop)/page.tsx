@@ -2,28 +2,51 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
 import { ProductCard } from "@/components/ProductCard";
-import { Button, Divider, Empty, ErrorNote, Spinner } from "@/components/ui";
+import { Button, Divider, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import type { Ad, Category, Product, Store } from "@/lib/types";
 
-// const GUTTER = "px-4 sm:px-6 lg:px-8 xl:px-12 2xl:px-16";
 const GUTTER = "mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8 xl:px-10";
 
+const PAGE_SIZE = 20;
+
+/** Нэг төрлийн барааны жагсаалт + хуудаслалт. */
+interface SectionData {
+  items: Product[];
+  total: number;
+  page: number;
+  pages: number;
+}
+
+const EMPTY_SECTION: SectionData = { items: [], total: 0, page: 1, pages: 1 };
+
 export default function HomePage() {
+  // useSearchParams нь Suspense хүрээ шаарддаг.
+  return (
+    <Suspense fallback={null}>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+function HomeContent() {
   const cart = useCart();
+  const searchParams = useSearchParams();
   const [store, setStore] = useState<Store | null>(null);
   const [ads, setAds] = useState<Ad[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [orderItems, setOrderItems] = useState<Product[]>([]);
-  const [readyItems, setReadyItems] = useState<Product[]>([]);
+  const [orderData, setOrderData] = useState<SectionData>(EMPTY_SECTION);
+  const [readyData, setReadyData] = useState<SectionData>(EMPTY_SECTION);
   const [category, setCategory] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState(searchParams.get("q") ?? "");
+  const [query, setQuery] = useState(searchParams.get("q")?.trim() ?? "");
   const [loading, setLoading] = useState(true);
+  const [moreLoading, setMoreLoading] = useState<"order" | "ready" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,38 +59,57 @@ export default function HomePage() {
       .catch((e: ApiError) => setError(e.message));
   }, []);
 
+  // Толгойн хайлтаас /?q=... гэж ирэхэд утгыг нь авна.
+  // Render дундаа тохируулна — эффект хэрэглэвэл нэг илүү render үүсдэг.
+  const urlQ = searchParams.get("q") ?? "";
+  const [lastUrlQ, setLastUrlQ] = useState(urlQ);
+  if (urlQ !== lastUrlQ) {
+    setLastUrlQ(urlQ);
+    setSearch(urlQ);
+    setQuery(urlQ.trim());
+  }
+
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
+
+  const fetchSection = useCallback(
+    async (type: "order" | "ready", page: number) => {
+      const result = await api.products({
+        type,
+        category: category ?? undefined,
+        q: query || undefined,
+        page,
+        pageSize: PAGE_SIZE,
+        sort: type === "order" ? "closing" : undefined,
+      });
+      return {
+        items: result.data,
+        total: result.meta?.total ?? result.data.length,
+        page: result.meta?.page ?? page,
+        pages: result.meta?.pages ?? 1,
+      };
+    },
+    [category, query],
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [order, ready] = await Promise.all([
-        api.products({
-          type: "order",
-          category: category ?? undefined,
-          q: query || undefined,
-          pageSize: 20,
-          sort: "closing",
-        }),
-        api.products({
-          type: "ready",
-          category: category ?? undefined,
-          q: query || undefined,
-          pageSize: 20,
-        }),
+        fetchSection("order", 1),
+        fetchSection("ready", 1),
       ]);
-      setOrderItems(order.data);
-      setReadyItems(ready.data);
+      setOrderData(order);
+      setReadyData(ready);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.");
     } finally {
       setLoading(false);
     }
-  }, [category, query]);
+  }, [fetchSection]);
 
   useEffect(() => {
     (async () => {
@@ -75,8 +117,23 @@ export default function HomePage() {
     })();
   }, [load]);
 
+  /** «Цааш үзэх» — дараагийн хуудсыг одоогийнх дээр нэмнэ. */
+  const loadMore = async (type: "order" | "ready") => {
+    const data = type === "order" ? orderData : readyData;
+    const set = type === "order" ? setOrderData : setReadyData;
+    setMoreLoading(type);
+    try {
+      const next = await fetchSection(type, data.page + 1);
+      set({ ...next, items: [...data.items, ...next.items] });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.");
+    } finally {
+      setMoreLoading(null);
+    }
+  };
+
   const nothing =
-    !loading && orderItems.length === 0 && readyItems.length === 0;
+    !loading && orderData.items.length === 0 && readyData.items.length === 0;
   const filtering = category !== null || query !== "";
 
   return (
@@ -89,9 +146,14 @@ export default function HomePage() {
         </div>
       )}
 
+      {/* Хайлт — нүүр дээрээс шууд бараа хайна. */}
+      <div className={`${GUTTER} pt-4 lg:pt-6`}>
+        <SearchBox value={search} onChange={setSearch} />
+      </div>
+
       {/* Category chips — soft blue active state */}
       <div
-        className={`no-scrollbar flex gap-2 overflow-x-auto ${GUTTER} pt-4 lg:pt-6`}
+        className={`no-scrollbar flex gap-2 overflow-x-auto ${GUTTER} pt-3 lg:pt-4`}
       >
         <Chip active={category === null} onClick={() => setCategory(null)}>
           Бүгд
@@ -113,29 +175,35 @@ export default function HomePage() {
         </div>
       )}
 
-      {loading && (
-        <div className='flex justify-center py-20'>
-          <Spinner className='text-primary' />
-        </div>
+      {loading && <SectionSkeleton />}
+
+      {nothing && (
+        <Empty>
+          {query
+            ? `«${query}» гэсэн хайлтад тохирох бараа олдсонгүй.`
+            : "Энэ ангилалд одоогоор бараа алга."}
+        </Empty>
       )}
 
-      {nothing && <Empty>Энэ ангилалд одоогоор бараа алга.</Empty>}
-
-      {!loading && orderItems.length > 0 && (
+      {!loading && orderData.items.length > 0 && (
         <Section
           id='order'
           title='Захиалгын бараа'
           hint='Одоо захиалж, 2-3 долоо хоногийн дараа авна'
-          items={orderItems}
+          data={orderData}
+          moreLoading={moreLoading === "order"}
+          onMore={() => loadMore("order")}
         />
       )}
 
-      {!loading && readyItems.length > 0 && (
+      {!loading && readyData.items.length > 0 && (
         <Section
           id='ready'
           title='Бэлэн бараа'
           hint='Агуулахад байгаа, шууд авах боломжтой'
-          items={readyItems}
+          data={readyData}
+          moreLoading={moreLoading === "ready"}
+          onMore={() => loadMore("ready")}
         />
       )}
 
@@ -300,17 +368,101 @@ function Chip({
   );
 }
 
+function SearchBox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className='flex h-11 max-w-[480px] items-center gap-2 rounded-[8px] border border-line bg-surface px-3 transition-colors focus-within:border-primary-muted'>
+      <svg
+        width='16'
+        height='16'
+        viewBox='0 0 18 18'
+        fill='none'
+        stroke='#A8A29E'
+        strokeWidth='1.3'
+        strokeLinecap='round'
+        className='shrink-0'
+        aria-hidden
+      >
+        <circle cx='8' cy='8' r='5.5' />
+        <path d='M12.2 12.2 16 16' />
+      </svg>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder='Бараа хайх'
+        aria-label='Бараа хайх'
+        className='h-full w-full bg-transparent text-[14px] outline-none placeholder:text-muted'
+      />
+      {value && (
+        <button
+          type='button'
+          onClick={() => onChange("")}
+          aria-label='Хайлт цэвэрлэх'
+          className='flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-muted hover:text-ink'
+        >
+          <svg
+            width='12'
+            height='12'
+            viewBox='0 0 12 12'
+            fill='none'
+            stroke='currentColor'
+            strokeWidth='1.4'
+            strokeLinecap='round'
+            aria-hidden
+          >
+            <path d='M2 2 L10 10 M10 2 L2 10' />
+          </svg>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Ачаалж буй үед барааны картын хэлбэртэй skeleton — хоосон дэлгэцээс дээр. */
+function SectionSkeleton() {
+  return (
+    <div className='pt-8 lg:pt-12'>
+      <div className={GUTTER}>
+        <Skeleton className='h-7 w-44' />
+        <Skeleton className='mt-2 h-4 w-64' />
+      </div>
+      <div
+        className={`grid grid-cols-2 gap-4 pt-5 sm:grid-cols-3 lg:grid-cols-4 ${GUTTER}`}
+      >
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className='flex flex-col gap-2.5'>
+            <Skeleton className='aspect-square w-full rounded-[12px]' />
+            <Skeleton className='h-4 w-4/5' />
+            <Skeleton className='h-5 w-2/5' />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Section({
   id,
   title,
   hint,
-  items,
+  data,
+  moreLoading,
+  onMore,
 }: {
   id: string;
   title: string;
   hint: string;
-  items: Product[];
+  data: SectionData;
+  moreLoading: boolean;
+  onMore: () => void;
 }) {
+  const hasMore = data.page < data.pages;
+
   return (
     <section id={id} className='scroll-mt-20 pt-8 lg:pt-12'>
       <div className={`flex items-end justify-between gap-4 ${GUTTER}`}>
@@ -323,7 +475,7 @@ function Section({
           </p>
         </div>
         <span className='hidden shrink-0 whitespace-nowrap rounded-full bg-primary-soft px-3 py-1 text-[13px] font-medium text-primary sm:inline lg:text-[14px]'>
-          {items.length} бараа
+          {data.total} бараа
         </span>
       </div>
 
@@ -331,10 +483,18 @@ function Section({
       <div
         className={`grid grid-cols-2 gap-4 pt-5 sm:grid-cols-3 lg:grid-cols-4 ${GUTTER}`}
       >
-        {items.map((product) => (
+        {data.items.map((product) => (
           <ProductCard key={product.id} product={product} />
         ))}
       </div>
+
+      {hasMore && (
+        <div className={`flex justify-center pt-6 ${GUTTER}`}>
+          <Button variant='outline' onClick={onMore} loading={moreLoading}>
+            Цааш үзэх · {data.total - data.items.length} бараа
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

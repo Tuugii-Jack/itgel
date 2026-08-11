@@ -2,25 +2,28 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { DELIVERY_STATUS_LABEL, Metric, PageHead, Select } from "@/components/admin/shared";
-import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayKey, dayLabel, money, phoneLabel, relativeDay } from "@/lib/format";
+import { useToast } from "@/lib/toast";
 import type { AdminDelivery, DeliveryStatus } from "@/lib/types";
 
 const STATUSES: DeliveryStatus[] = ["PENDING", "ASSIGNED", "DELIVERED"];
 
 export default function DeliveriesPage() {
+  const toast = useToast();
   const [day, setDay] = useState("");
   const [status, setStatus] = useState("");
   const [rows, setRows] = useState<AdminDelivery[]>([]);
   const [couriers, setCouriers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    setRefreshing(true);
     try {
       const list = await adminApi.deliveries({
         day: day || undefined,
@@ -31,11 +34,14 @@ export default function DeliveriesPage() {
         Object.fromEntries(list.map((d) => [d.id, d.courierName ?? ""])),
       );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [day, status]);
+  }, [day, status, toast]);
 
   useEffect(() => {
     void load();
@@ -46,9 +52,27 @@ export default function DeliveriesPage() {
     setError(null);
     try {
       await adminApi.updateDelivery(id, patch);
-      await load();
+      // Жагсаалтыг дахин татахын оронд мөрийг шууд шинэчилнэ.
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id !== id
+            ? r
+            : {
+                ...r,
+                courierName: patch.courierName !== undefined ? patch.courierName : r.courierName,
+                status: (patch.status as DeliveryStatus | undefined) ?? r.status,
+              },
+        ),
+      );
+      toast.success(
+        patch.status
+          ? `Төлөв «${DELIVERY_STATUS_LABEL[patch.status as DeliveryStatus]}» боллоо.`
+          : "Хүргэлт хадгалагдлаа.",
+      );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хадгалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(null);
     }
@@ -74,7 +98,7 @@ export default function DeliveriesPage() {
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <input
           type="date"
           value={day}
@@ -101,6 +125,9 @@ export default function DeliveriesPage() {
             Цэвэрлэх
           </Button>
         )}
+        {refreshing && (
+          <span className="text-[13px] text-muted">Шинэчилж байна…</span>
+        )}
       </div>
 
       {error && (
@@ -109,9 +136,11 @@ export default function DeliveriesPage() {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <Spinner className="text-muted" />
+      {loading && rows.length === 0 ? (
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 w-full rounded-[12px]" />
+          ))}
         </div>
       ) : rows.length === 0 ? (
         <Empty>Хүргэлт олдсонгүй.</Empty>

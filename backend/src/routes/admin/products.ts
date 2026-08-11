@@ -6,7 +6,9 @@ import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
-import { adminProduct, type RoundStats } from '../../services/serialize.js';
+import { variantRowsFromOptions, type ProductOption } from '../../lib/options.js';
+import { roundStats } from '../../services/roundStats.js';
+import { adminProduct } from '../../services/serialize.js';
 import { getSettings } from '../../services/settings.js';
 import { presignProductImage } from '../../services/storage.js';
 
@@ -37,8 +39,18 @@ const templateFields = {
   description: z.string().trim().max(4000).optional(),
   categoryId: z.string().min(1),
   images: z.array(z.string().url()).max(12).default([]),
-  sizes: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
-  colors: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
+  options: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(40),
+        values: z.array(z.string().trim().min(1).max(40)).max(40),
+      }),
+    )
+    .max(12)
+    .default([]),
+  /** Хуучин клиент — options руу хөрвүүлнэ. */
+  sizes: z.array(z.string().trim().min(1).max(40)).max(40).optional(),
+  colors: z.array(z.string().trim().min(1).max(40)).max(40).optional(),
   sizeChart: sizeChartSchema.max(30).default([]),
 };
 
@@ -54,8 +66,8 @@ export const roundFields = {
   note: z.string().trim().max(300).optional(),
 };
 
-/** Бараа үүсгэхэд эхний тойргийг хамт үүсгэнэ — хоёр алхам болгохгүй. */
-const createBody = z.object({ ...templateFields, ...roundFields });
+/** Бараа үүсгэх — зөвхөн загвар. Үнэ, огноо нь тусад нь «гаргалт»-аар нэмэгдэнэ. */
+const createBody = z.object(templateFields);
 
 /** Загварыг засах — үнэ, төлөв энд БАЙХГҮЙ, тэдгээр нь тойрог дээр. */
 const updateBody = z.object(templateFields).partial();
@@ -77,6 +89,7 @@ const roundInclude = {
   rounds: {
     where: { deletedAt: null },
     orderBy: { roundNo: 'desc' },
+    include: { batch: { select: { id: true, name: true, stage: true } } },
   },
 } satisfies Prisma.ProductInclude;
 
@@ -126,44 +139,6 @@ adminProductsRouter.get(
   }),
 );
 
-/**
- * Тойрог бүрд хэдэн хүн, хэдэн ширхэг авсныг НЭГ асуулгаар бодно.
- * Тойрог бүрээр давталт хийвэл N+1 болно.
- *
- * Цуцлагдсан мөр, цуцлагдсан болон устгагдсан захиалгыг тооцохгүй —
- * нийлүүлэгч рүү захиалах тоо нь эдгээрийг агуулах ёсгүй.
- */
-async function roundStats(roundIds: string[]): Promise<Map<string, RoundStats>> {
-  const map = new Map<string, RoundStats>();
-  if (roundIds.length === 0) return map;
-
-  const rows = await prisma.orderItem.findMany({
-    where: {
-      roundId: { in: roundIds },
-      cancelledAt: null,
-      order: { deletedAt: null, status: { not: 'CANCELLED' } },
-    },
-    select: { roundId: true, qty: true, order: { select: { customerId: true } } },
-  });
-
-  const customers = new Map<string, Set<string>>();
-  for (const row of rows) {
-    const entry = map.get(row.roundId) ?? { customerCount: 0, qty: 0 };
-    entry.qty += row.qty;
-    map.set(row.roundId, entry);
-
-    const set = customers.get(row.roundId) ?? new Set<string>();
-    set.add(row.order.customerId);
-    customers.set(row.roundId, set);
-  }
-  for (const [roundId, set] of customers) {
-    const entry = map.get(roundId);
-    if (entry) entry.customerCount = set.size;
-  }
-
-  return map;
-}
-
 adminProductsRouter.get(
   '/:id',
   validate({ params: idParams }),
@@ -183,16 +158,13 @@ adminProductsRouter.post(
   validate({ body: createBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof createBody>;
-    const settings = await getSettings();
 
     const category = await prisma.category.findFirst({
       where: { id: body.categoryId, deletedAt: null },
     });
     if (!category) throw badRequest('Ангилал олдсонгүй.');
 
-    const leadMinDays = body.leadMinDays ?? settings.defaultLeadMinDays;
-    const leadMaxDays = body.leadMaxDays ?? settings.defaultLeadMaxDays;
-    if (leadMinDays > leadMaxDays) throw badRequest('leadMinDays нь leadMaxDays-с их байж болохгүй.');
+    const options = resolveOptions(body);
 
     const product = await prisma.product.create({
       data: {
@@ -200,21 +172,8 @@ adminProductsRouter.post(
         description: body.description ?? null,
         categoryId: body.categoryId,
         images: body.images,
-        variants: { create: variantRows(body.sizes, body.colors) },
+        variants: { create: variantRowsFromOptions(options) },
         sizeChart: { create: body.sizeChart.map((row, i) => ({ ...row, sortOrder: i })) },
-        rounds: {
-          create: {
-            roundNo: 1,
-            costPrice: body.costPrice,
-            sellPrice: body.sellPrice,
-            stock: body.stock,
-            closeAt: body.closeAt ?? null,
-            leadMinDays,
-            leadMaxDays,
-            status: body.status,
-            note: body.note ?? null,
-          },
-        },
       },
       include: roundInclude,
     });
@@ -252,16 +211,15 @@ adminProductsRouter.patch(
     }
 
     const after = await prisma.$transaction(async (tx) => {
-      if (body.sizes || body.colors) {
-        const kinds = [
-          ...(body.sizes ? (['SIZE'] as const) : []),
-          ...(body.colors ? (['COLOR'] as const) : []),
-        ];
-        await tx.productVariant.deleteMany({
-          where: { productId: before.id, kind: { in: [...kinds] } },
+      if (body.options !== undefined || body.sizes !== undefined || body.colors !== undefined) {
+        const options = resolveOptions({
+          options: body.options,
+          sizes: body.sizes,
+          colors: body.colors,
         });
+        await tx.productVariant.deleteMany({ where: { productId: before.id } });
         await tx.productVariant.createMany({
-          data: variantRows(body.sizes, body.colors).map((v) => ({ ...v, productId: before.id })),
+          data: variantRowsFromOptions(options).map((v) => ({ ...v, productId: before.id })),
         });
       }
 
@@ -318,15 +276,27 @@ adminProductsRouter.post(
         leadMaxDays: roundFields.leadMaxDays,
         status: productStatus.optional(),
         note: roundFields.note,
+        /** Хоосон үүсгээд дараа нь багцтай холбож болно. */
+        batchId: z.string().min(1).nullable().optional(),
       })
       .default({}),
   }),
   asyncHandler(async (req, res) => {
-    const body = req.body as Partial<z.infer<typeof createBody>>;
+    const body = req.body as {
+      costPrice?: number;
+      sellPrice?: number;
+      stock?: number;
+      closeAt?: Date | null;
+      leadMinDays?: number;
+      leadMaxDays?: number;
+      status?: z.infer<typeof productStatus>;
+      note?: string;
+      batchId?: string | null;
+    };
 
     const product = await prisma.product.findFirst({
       where: { id: req.params.id, deletedAt: null },
-      include: { rounds: { orderBy: { roundNo: 'desc' }, take: 1 } },
+      include: { rounds: { where: { deletedAt: null }, orderBy: { roundNo: 'desc' }, take: 1 } },
     });
     if (!product) throw notFound('Бараа олдсонгүй.');
 
@@ -336,12 +306,20 @@ adminProductsRouter.post(
     const costPrice = body.costPrice ?? last?.costPrice;
     const sellPrice = body.sellPrice ?? last?.sellPrice;
     if (costPrice === undefined || sellPrice === undefined) {
-      throw badRequest('Өмнөх тойрог байхгүй тул үнийг заавал өгнө үү.');
+      throw badRequest('Өмнөх гаргалт байхгүй тул үнийг заавал өгнө үү.');
     }
 
     const leadMinDays = body.leadMinDays ?? last?.leadMinDays ?? settings.defaultLeadMinDays;
     const leadMaxDays = body.leadMaxDays ?? last?.leadMaxDays ?? settings.defaultLeadMaxDays;
     if (leadMinDays > leadMaxDays) throw badRequest('leadMinDays нь leadMaxDays-с их байж болохгүй.');
+
+    let batchId: string | null = body.batchId === undefined ? null : body.batchId;
+    if (batchId) {
+      const batch = await prisma.batch.findFirst({
+        where: { id: batchId, deletedAt: null, stage: 'COLLECTING' },
+      });
+      if (!batch) throw badRequest('Багц олдсонгүй, эсвэл захиалга авах шатнаас гарсан.');
+    }
 
     // Дугаарыг зөвхөн өсгөнө — устгасан тойргийн дугаарыг дахин ашиглахгүй.
     const maxNo = await prisma.productRound.aggregate({
@@ -352,11 +330,12 @@ adminProductsRouter.post(
     const round = await prisma.productRound.create({
       data: {
         productId: product.id,
+        batchId,
         roundNo: (maxNo._max.roundNo ?? 0) + 1,
         costPrice,
         sellPrice,
         stock: body.stock ?? 0,
-        closeAt: body.closeAt === undefined ? (last?.closeAt ?? null) : body.closeAt,
+        closeAt: body.closeAt === undefined ? null : body.closeAt,
         leadMinDays,
         leadMaxDays,
         status: body.status ?? 'DRAFT',
@@ -369,7 +348,13 @@ adminProductsRouter.post(
       action: 'ROUND_CREATE',
       entity: 'ProductRound',
       entityId: round.id,
-      after: { productId: product.id, roundNo: round.roundNo, sellPrice, closeAt: round.closeAt },
+      after: {
+        productId: product.id,
+        roundNo: round.roundNo,
+        sellPrice,
+        closeAt: round.closeAt,
+        batchId,
+      },
     });
 
     const full = await prisma.product.findUniqueOrThrow({
@@ -475,11 +460,19 @@ adminProductsRouter.patch(
   }),
 );
 
-function variantRows(sizes?: string[], colors?: string[]) {
-  return [
-    ...(sizes ?? []).map((value, i) => ({ kind: 'SIZE' as const, value, sortOrder: i })),
-    ...(colors ?? []).map((value, i) => ({ kind: 'COLOR' as const, value, sortOrder: i })),
-  ];
+/** sizes/colors эсвэл options-оос нэгтгэсэн бүлгүүд. */
+function resolveOptions(body: {
+  options?: ProductOption[];
+  sizes?: string[];
+  colors?: string[];
+}): ProductOption[] {
+  if (body.options && body.options.length > 0) {
+    return body.options.filter((o) => o.name.trim() && o.values.some((v) => v.trim()));
+  }
+  const options: ProductOption[] = [];
+  if (body.sizes && body.sizes.length > 0) options.push({ name: 'Хэмжээ', values: body.sizes });
+  if (body.colors && body.colors.length > 0) options.push({ name: 'Өнгө', values: body.colors });
+  return options;
 }
 
 /** Загвар устгахад түүний бүх тойрог хамт хаагдана. */

@@ -8,8 +8,15 @@ import { profitOf } from '../../lib/money.js';
 import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
 import { computeTotals, paymentState } from '../../services/money.js';
+import {
+  attachOrdersForRound,
+  detachOrdersForRound,
+  resyncArrivalsForBatch,
+} from '../../services/batches.js';
 import { adminRound } from '../../services/serialize.js';
 import { productStatus, roundFields } from './products.js';
+import { selectionsOf, sizeColorFromSelections } from '../../lib/options.js';
+import { computeArrival } from '../../lib/date.js';
 
 /**
  * Барааны тойрог — үнэ, хаах огноо, үлдэгдэл, төлөв нь энд байна.
@@ -68,6 +75,15 @@ adminRoundsRouter.get(
 
     const rows = items.map((item) => {
       const cancelled = item.cancelledAt !== null || item.order.status === 'CANCELLED';
+      const selections = (() => {
+        const fromJson = selectionsOf(item.selections);
+        if (Object.keys(fromJson).length > 0) return fromJson;
+        const legacy: Record<string, string> = {};
+        if (item.size) legacy['Хэмжээ'] = item.size;
+        if (item.color) legacy['Өнгө'] = item.color;
+        return legacy;
+      })();
+      const { size, color } = sizeColorFromSelections(selections);
       return {
         orderId: item.order.id,
         code: item.order.code,
@@ -82,8 +98,9 @@ adminRoundsRouter.get(
           name: item.order.customer.name,
           phone: item.order.customer.phone,
         },
-        size: item.size,
-        color: item.color,
+        selections,
+        size: size ?? item.size,
+        color: color ?? item.color,
         qty: item.qty,
         unitPrice: item.unitPrice,
         total: item.unitPrice * item.qty,
@@ -94,11 +111,20 @@ adminRoundsRouter.get(
 
     const live = rows.filter((r) => !r.cancelled);
 
-    // Хэмжээ/өнгөөр задаргаа — нийлүүлэгч рүү явуулах жагсаалт.
-    const variantMap = new Map<string, { size: string | null; color: string | null; qty: number }>();
+    // Сонголтоор задаргаа — нийлүүлэгч рүү явуулах жагсаалт.
+    const variantMap = new Map<
+      string,
+      { selections: Record<string, string>; size: string | null; color: string | null; qty: number }
+    >();
     for (const row of live) {
-      const key = `${row.size ?? ''}|${row.color ?? ''}`;
-      const entry = variantMap.get(key) ?? { size: row.size, color: row.color, qty: 0 };
+      const key = JSON.stringify(row.selections);
+      const entry =
+        variantMap.get(key) ?? {
+          selections: row.selections,
+          size: row.size,
+          color: row.color,
+          qty: 0,
+        };
       entry.qty += row.qty;
       variantMap.set(key, entry);
     }
@@ -150,6 +176,8 @@ const patchBody = z
     leadMaxDays: roundFields.leadMaxDays,
     status: productStatus.optional(),
     note: roundFields.note.nullable(),
+    /** null = багцаас салгах; string = COLLECTING багцад холбох. */
+    batchId: z.string().min(1).nullable().optional(),
   })
   .partial();
 
@@ -185,19 +213,75 @@ adminRoundsRouter.patch(
       );
     }
 
-    const after = await prisma.productRound.update({
-      where: { id: before.id },
-      data: {
-        costPrice: body.costPrice,
-        sellPrice: body.sellPrice,
-        stock: body.stock,
-        closeAt: body.closeAt === undefined ? undefined : body.closeAt,
-        leadMinDays: body.leadMinDays,
-        leadMaxDays: body.leadMaxDays,
-        status: body.status,
-        note: body.note,
-      },
-      include: roundInclude,
+    let batchId: string | null | undefined = body.batchId;
+    if (batchId) {
+      const batch = await prisma.batch.findFirst({
+        where: { id: batchId, deletedAt: null, stage: 'COLLECTING' },
+      });
+      if (!batch) throw badRequest('Багц олдсонгүй, эсвэл захиалга авах шатнаас гарсан.');
+    }
+
+    if (before.closeAt === null && batchId) {
+      throw badRequest('Бэлэн барааг багцад холбох боломжгүй — зөвхөн урьдчилсан.');
+    }
+
+    const after = await prisma.$transaction(async (tx) => {
+      const updated = await tx.productRound.update({
+        where: { id: before.id },
+        data: {
+          costPrice: body.costPrice,
+          sellPrice: body.sellPrice,
+          stock: body.stock,
+          closeAt: body.closeAt === undefined ? undefined : body.closeAt,
+          leadMinDays: body.leadMinDays,
+          leadMaxDays: body.leadMaxDays,
+          status: body.status,
+          note: body.note,
+          ...(batchId !== undefined ? { batchId } : {}),
+        },
+        include: roundInclude,
+      });
+
+      if (batchId !== undefined) {
+        if (batchId) {
+          await attachOrdersForRound(tx, updated.id, batchId);
+        } else if (before.batchId) {
+          await detachOrdersForRound(tx, updated.id, before.batchId);
+        }
+      }
+
+      // Огноо/хүлээх хоног солигдвол захиалсан хүмүүсийн ирэх огноог дагана.
+      const closeChanged = body.closeAt !== undefined;
+      const leadChanged = body.leadMinDays !== undefined || body.leadMaxDays !== undefined;
+      if ((closeChanged || leadChanged) && updated.closeAt) {
+        const { arriveFrom, arriveTo } = computeArrival(
+          updated.closeAt,
+          updated.leadMinDays,
+          updated.leadMaxDays,
+        );
+        await tx.orderItem.updateMany({
+          where: {
+            roundId: updated.id,
+            cancelledAt: null,
+            order: {
+              deletedAt: null,
+              status: { notIn: ['CANCELLED', 'HANDED_OVER'] },
+            },
+          },
+          data: { arriveFrom, arriveTo },
+        });
+      } else if (batchId && updated.closeAt) {
+        await resyncArrivalsForBatch(tx, { id: batchId }, [
+          {
+            id: updated.id,
+            closeAt: updated.closeAt,
+            leadMinDays: updated.leadMinDays,
+            leadMaxDays: updated.leadMaxDays,
+          },
+        ]);
+      }
+
+      return updated;
     });
 
     await audit({

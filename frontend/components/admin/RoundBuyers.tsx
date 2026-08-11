@@ -5,6 +5,7 @@ import { Metric, OrderBadge, PageHead, Table, Td, Th } from "@/components/admin/
 import { Badge, Button, Card, Empty, ErrorNote, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
 import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import type { RoundOrders } from "@/lib/types";
 
@@ -117,7 +118,7 @@ export function RoundBuyers({
                 className="flex items-baseline gap-2 rounded-[8px] border border-line bg-surface px-3 py-2"
               >
                 <span className="text-[14px]">
-                  {[v.size, v.color].filter(Boolean).join(" · ") || "Сонголтгүй"}
+                  {formatSelections(v.selections, v.size, v.color) || "Сонголтгүй"}
                 </span>
                 <span className="tnum text-[15px] font-medium">{v.qty} ш</span>
               </div>
@@ -138,7 +139,7 @@ export function RoundBuyers({
       )}
 
       {orders.length === 0 ? (
-        <Empty>Энэ гаргалтыг хэн ч авaaгүй байна.</Empty>
+        <Empty>Энэ гаргалтыг хэн ч аваагүй байна.</Empty>
       ) : (
         <>
           <div className="mb-2 text-[15px] font-medium">
@@ -186,7 +187,7 @@ export function RoundBuyers({
                       )}
                     </Td>
                     <Td className="text-[13px]">
-                      {[o.size, o.color].filter(Boolean).join(" · ") || "—"}
+                      {formatSelections(o.selections, o.size, o.color) || "—"}
                     </Td>
                     <Td className="tnum">{o.qty} ш</Td>
                     <Td className="tnum whitespace-nowrap">{money(o.total)}</Td>
@@ -233,7 +234,7 @@ export function RoundBuyers({
                 </div>
                 <div className="mt-2 flex items-baseline justify-between gap-2 text-[13px]">
                   <span className="text-muted">
-                    {[o.size, o.color].filter(Boolean).join(" · ") || "Сонголтгүй"} · {o.qty} ш
+                    {formatSelections(o.selections, o.size, o.color) || "Сонголтгүй"} · {o.qty} ш
                   </span>
                   <span className="tnum">{money(o.total)}</span>
                 </div>

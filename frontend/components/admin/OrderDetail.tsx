@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ORDER_STATUS_LABEL, OrderBadge, PageHead, Select } from "@/components/admin/shared";
 import {
@@ -14,7 +15,9 @@ import {
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
 import { PAYMENT_TONE } from "@/lib/payment";
+import { useToast } from "@/lib/toast";
 import type {
   AdminOrderDetail,
   OrderStatus,
@@ -64,8 +67,11 @@ export function OrderDetail({
   const [order, setOrder] = useState<AdminOrderDetail | null>(null);
   const [ledger, setLedger] = useState<PaymentLedger | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  /** Аль үйлдэл явж байгааг заана — зөвхөн тухайн товч spinner-тэй харагдана. */
+  const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const busy = busyKey !== null;
   /** Төлбөр дутуу гэж 409 өгсөн үед force-оор давах саналыг харуулна. */
   const [shortfall, setShortfall] = useState<{ status: OrderStatus; missing: number } | null>(
     null,
@@ -92,18 +98,21 @@ export function OrderDetail({
     void load();
   }, [load]);
 
-  const run = async (action: () => Promise<unknown>) => {
-    setBusy(true);
+  const run = async (key: string, action: () => Promise<unknown>, okMessage: string) => {
+    setBusyKey(key);
     setError(null);
     setShortfall(null);
     try {
       await action();
+      toast.success(okMessage);
       await load();
       onChanged();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Гүйцэтгэж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Гүйцэтгэж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
-      setBusy(false);
+      setBusyKey(null);
     }
   };
 
@@ -112,25 +121,29 @@ export function OrderDetail({
    * `force`-оор давах сонголтыг санал болгоно.
    */
   const changeStatus = async (status: OrderStatus, force?: boolean) => {
-    setBusy(true);
+    setBusyKey(`status:${status}`);
     setError(null);
     setShortfall(null);
     try {
       await adminApi.setOrderStatus(orderId, status, undefined, force);
+      toast.success(`Төлөв «${ORDER_STATUS_LABEL[status]}» боллоо.`);
       await load();
       onChanged();
     } catch (e) {
       if (e instanceof ApiError) {
         setError(e.message);
+        toast.error(e.message);
         const missing = (e.details as { missing?: number } | undefined)?.missing;
         if (e.status === 409 && typeof missing === "number" && missing > 0) {
           setShortfall({ status, missing });
         }
       } else {
-        setError("Гүйцэтгэж чадсангүй.");
+        const message = "Гүйцэтгэж чадсангүй.";
+        setError(message);
+        toast.error(message);
       }
     } finally {
-      setBusy(false);
+      setBusyKey(null);
     }
   };
 
@@ -148,7 +161,30 @@ export function OrderDetail({
     <div className="max-w-[860px]">
       <PageHead
         title={order.code}
-        hint={`${order.customer.name ?? "Нэргүй"} · ${phoneLabel(order.customer.phone)}`}
+        hint={
+          <span>
+            <Link
+              href={`/admin/customers?id=${order.customer.id}`}
+              className="text-ink no-underline hover:underline"
+              onClick={(e) => {
+                // Customers page opens detail via local state — deep-link via sessionStorage.
+                e.preventDefault();
+                try {
+                  sessionStorage.setItem("itgel.admin.openCustomer", order.customer.id);
+                } catch {
+                  /* ignore */
+                }
+                window.location.href = "/admin/customers";
+              }}
+            >
+              {order.customer.name ?? "Нэргүй"}
+            </Link>
+            {" · "}
+            <a href={`tel:${order.customer.phone}`} className="tnum text-ink no-underline">
+              {phoneLabel(order.customer.phone)}
+            </a>
+          </span>
+        }
         actions={
           <Button variant="ghost" onClick={onClose}>
             Буцах
@@ -159,7 +195,23 @@ export function OrderDetail({
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <OrderBadge status={order.status} />
         <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
-        {order.batch && <Badge tone="info">{order.batch.name}</Badge>}
+        {order.batch && (
+          <Link
+            href="/admin/batches"
+            className="no-underline"
+            onClick={(e) => {
+              e.preventDefault();
+              try {
+                sessionStorage.setItem("itgel.admin.openBatch", order.batch!.id);
+              } catch {
+                /* ignore */
+              }
+              window.location.href = "/admin/batches";
+            }}
+          >
+            <Badge tone="info">{order.batch.name}</Badge>
+          </Link>
+        )}
       </div>
 
       {order.paymentClaimedAt && order.dueAmount > 0 && (
@@ -190,6 +242,7 @@ export function OrderDetail({
               size="sm"
               variant="outline"
               disabled={busy}
+              loading={busyKey === `status:${shortfall.status}`}
               onClick={() => changeStatus(shortfall.status, true)}
             >
               Дутуу ч гэсэн {ORDER_STATUS_LABEL[shortfall.status]} болгох
@@ -213,8 +266,8 @@ export function OrderDetail({
                     {item.name}
                   </div>
                   <div className="text-[13px] text-muted">
-                    {[item.size, item.color].filter(Boolean).join(" · ")}
-                    {[item.size, item.color].filter(Boolean).length > 0 ? " · " : ""}
+                    {formatSelections(item.selections, item.size, item.color)}
+                    {formatSelections(item.selections, item.size, item.color) ? " · " : ""}
                     {item.qty} ш × {money(item.unitPrice)}
                   </div>
                   {item.cancelled && item.cancelReason && (
@@ -231,8 +284,14 @@ export function OrderDetail({
                   {!item.cancelled && order.status !== "HANDED_OVER" && (
                     <CancelItem
                       disabled={busy}
+                      loading={busyKey === `item:${item.id}`}
                       onCancel={(reason, refund) =>
-                        run(() => adminApi.cancelOrderItem(order.id, item.id, { reason, refund }))
+                        run(
+                          `item:${item.id}`,
+                          () =>
+                            adminApi.cancelOrderItem(order.id, item.id, { reason, refund }),
+                          "Мөр цуцлагдлаа.",
+                        )
                       }
                     />
                   )}
@@ -278,6 +337,7 @@ export function OrderDetail({
           <StatusActions
             status={order.status}
             disabled={busy}
+            busyKey={busyKey}
             onChange={changeStatus}
           />
 
@@ -309,7 +369,10 @@ export function OrderDetail({
             <RecordPayment
               suggested={totals.dueAmount}
               disabled={busy}
-              onSubmit={(body) => run(() => adminApi.recordPayment(order.id, body))}
+              loading={busyKey === "payment"}
+              onSubmit={(body) =>
+                run("payment", () => adminApi.recordPayment(order.id, body), "Төлбөр бүртгэгдлээ.")
+              }
             />
           )}
 
@@ -317,7 +380,10 @@ export function OrderDetail({
             <RecordRefund
               max={ledger.maxRefundable}
               disabled={busy}
-              onSubmit={(body) => run(() => adminApi.recordRefund(order.id, body))}
+              loading={busyKey === "refund"}
+              onSubmit={(body) =>
+                run("refund", () => adminApi.recordRefund(order.id, body), "Буцаалт бүртгэгдлээ.")
+              }
             />
           )}
         </div>
@@ -330,10 +396,12 @@ export function OrderDetail({
 function StatusActions({
   status,
   disabled,
+  busyKey,
   onChange,
 }: {
   status: OrderStatus;
   disabled: boolean;
+  busyKey: string | null;
   onChange: (status: OrderStatus) => void;
 }) {
   const next = nextStatus(status);
@@ -348,7 +416,12 @@ function StatusActions({
       </div>
       <div className="flex flex-wrap gap-2">
         {next && (
-          <Button size="sm" disabled={disabled} onClick={() => onChange(next)}>
+          <Button
+            size="sm"
+            disabled={disabled}
+            loading={busyKey === `status:${next}`}
+            onClick={() => onChange(next)}
+          >
             {ORDER_STATUS_LABEL[next]} болгох
           </Button>
         )}
@@ -357,6 +430,7 @@ function StatusActions({
             size="sm"
             variant="outline"
             disabled={disabled}
+            loading={busyKey === "status:CANCELLED"}
             onClick={() => onChange("CANCELLED")}
           >
             Цуцлах
@@ -370,10 +444,12 @@ function StatusActions({
 function RecordPayment({
   suggested,
   disabled,
+  loading,
   onSubmit,
 }: {
   suggested: number;
   disabled: boolean;
+  loading: boolean;
   onSubmit: (body: {
     amount: number;
     method: PaymentMethod;
@@ -411,6 +487,7 @@ function RecordPayment({
       <Button
         full
         disabled={disabled || !amount || Number(amount) <= 0}
+        loading={loading}
         onClick={() =>
           onSubmit({
             amount: Number(amount),
@@ -428,10 +505,12 @@ function RecordPayment({
 function RecordRefund({
   max,
   disabled,
+  loading,
   onSubmit,
 }: {
   max: number;
   disabled: boolean;
+  loading: boolean;
   onSubmit: (body: { amount: number; method: PaymentMethod; note?: string }) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -466,6 +545,7 @@ function RecordRefund({
         <Button
           variant="danger"
           disabled={disabled || !amount || Number(amount) <= 0 || Number(amount) > max}
+          loading={loading}
           onClick={() =>
             onSubmit({
               amount: Number(amount),
@@ -486,9 +566,11 @@ function RecordRefund({
 
 function CancelItem({
   disabled,
+  loading,
   onCancel,
 }: {
   disabled: boolean;
+  loading: boolean;
   onCancel: (reason: string | undefined, refund: boolean) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -515,6 +597,7 @@ function CancelItem({
           size="sm"
           variant="danger"
           disabled={disabled}
+          loading={loading}
           onClick={() => onCancel(reason.trim() || undefined, true)}
         >
           Цуцлаад буцаах

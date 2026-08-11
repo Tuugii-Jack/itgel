@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { ToastProvider } from "@/lib/toast";
 import "./globals.css";
 
 // Кирилл үсэг заавал — ө, ү, ё зөв гарах ёстой.
@@ -25,7 +26,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="mn" className={inter.variable}>
-      <body>{children}</body>
+      <body>
+        <ToastProvider>{children}</ToastProvider>
+      </body>
     </html>
   );
 }

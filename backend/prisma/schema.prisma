@@ -22,11 +22,6 @@ enum ProductStatus {
   ARCHIVED
 }
 
-enum VariantKind {
-  SIZE
-  COLOR
-}
-
 enum OrderStatus {
   NEW
   CONFIRMED
@@ -125,6 +120,12 @@ model ProductRound {
   id        String @id @default(cuid())
   productId String
 
+  /// Аль ачааны багцад зориулж гаргасан бэ. Багц үүсгээд бараагаа сонгоход
+  /// энд холбогдоно; null бол багцаас гадуурх гаргалт (бэлэн бараа, хуучин
+  /// тойрог). Тухайн тойргийн захиалгууд баталгаажихдаа энэ багц руу
+  /// автоматаар орно.
+  batchId String?
+
   /// Хэддэх удаагийн гаргалт бэ — бараа тус бүрд 1-ээс эхэлнэ.
   roundNo Int
 
@@ -144,20 +145,23 @@ model ProductRound {
   deletedAt DateTime?
 
   product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch      Batch?      @relation(fields: [batchId], references: [id])
   orderItems OrderItem[]
 
   @@unique([productId, roundNo])
   @@index([status])
   @@index([closeAt])
   @@index([productId, createdAt])
+  @@index([batchId])
 }
 
 model ProductVariant {
-  id        String      @id @default(cuid())
+  id        String @id @default(cuid())
   productId String
-  kind      VariantKind
+  /// Сонголтын бүлгийн нэр — ж: «Хэмжээ», «Өнгө», «Багтаамж».
+  kind      String
   value     String
-  sortOrder Int         @default(0)
+  sortOrder Int    @default(0)
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
@@ -304,7 +308,11 @@ model OrderItem {
   /// Загварын id — тойргуудыг нийлүүлж тайлаглахад хэрэгтэй тул давхар хадгална.
   productId         String
   nameSnapshot      String
+  /// Сонголтууд — ж: { "Хэмжээ": "M", "Өнгө": "Хар" }.
+  selections        Json    @default("{}")
+  /// Хуучин захиалга / тайлангийн нийцүүлэлт — «Хэмжээ»-ээс синк хийнэ.
   size              String?
+  /// Хуучин захиалга / тайлангийн нийцүүлэлт — «Өнгө»-өөс синк хийнэ.
   color             String?
   qty               Int
   unitPrice         Int
@@ -333,6 +341,11 @@ model Batch {
   id        String     @id @default(cuid())
   name      String
   stage     BatchStage @default(COLLECTING)
+
+  /// Захиалга авах эцсийн хугацаа — багцад бараа нэмэхэд тойргийн closeAt
+  /// нь үүнээс анхдагчаар авна. Хугацаа өнгөрөхөд cron тойргуудыг хаана.
+  deadline DateTime?
+
   closedAt  DateTime?
   weightKg  Int? // граммаар биш, бүхэл кг
   etaFrom   DateTime?
@@ -342,6 +355,7 @@ model Batch {
   deletedAt DateTime?
 
   orders Order[]
+  rounds ProductRound[]
 
   @@index([stage])
 }

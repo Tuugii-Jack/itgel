@@ -65,14 +65,17 @@ export function Button({
     ghost: "bg-transparent text-ink-2 border border-transparent",
     danger: "bg-bg text-danger border border-line",
   };
+  // Ачаалж байхад товч «үхсэн» мэт бүдгэрэхгүй — spinner эргэлдэж,
+  // өнгө нь хэвээр үлдэнэ. Зөвхөн жинхэнэ disabled үед л бүдгэрнэ.
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
       className={`inline-flex items-center justify-center gap-2 rounded-[8px] leading-tight
         ${heights[size]} ${variants[variant]} ${full ? "w-full" : ""}
-        ${disabled || loading ? "opacity-40" : "cursor-pointer"} ${className}`}
+        ${loading ? "opacity-90" : disabled ? "opacity-40" : "cursor-pointer active:opacity-80"} ${className}`}
     >
       {loading && <Spinner />}
       {children}
@@ -85,6 +88,13 @@ export function Spinner({ className = "" }: { className?: string }) {
     <span
       className={`spin inline-block h-4 w-4 rounded-full border-2 border-current border-t-transparent ${className}`}
     />
+  );
+}
+
+/** Ачаалж буй агуулгын оронд харагдах саарал хэлбэр — хоосон дэлгэцээс дээр. */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return (
+    <div aria-hidden className={`shimmer rounded-[8px] bg-surface-2 ${className}`} />
   );
 }
 
@@ -271,11 +281,13 @@ export function Toggle({
   onChange,
   label,
   hint,
+  disabled,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label: string;
   hint?: string;
+  disabled?: boolean;
 }) {
   return (
     <div className='flex items-center justify-between gap-3 py-1'>
@@ -288,9 +300,11 @@ export function Toggle({
         role='switch'
         aria-checked={checked}
         aria-label={label}
+        disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={`relative h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors
-          ${checked ? "border-primary bg-primary" : "border-line bg-surface-2"}`}
+        className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors
+          ${checked ? "border-primary bg-primary" : "border-line bg-surface-2"}
+          ${disabled ? "opacity-50" : "cursor-pointer"}`}
       >
         <span
           className={`absolute top-0.5 h-4.5 w-4.5 rounded-full bg-white transition-all

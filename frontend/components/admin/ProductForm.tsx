@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import {
-  Badge,
   Button,
   Card,
   ErrorNote,
@@ -13,17 +12,14 @@ import {
   Textarea,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { dayKey, money } from "@/lib/format";
-import type { AdminCategory, AdminProduct, ProductStatus, SizeChartRow } from "@/lib/types";
+import { OPTION_PRESETS } from "@/lib/options";
+import { useToast } from "@/lib/toast";
+import type { AdminCategory, AdminProduct, ProductOption, SizeChartRow } from "@/lib/types";
 
-const STATUSES: { value: ProductStatus; label: string }[] = [
-  { value: "DRAFT", label: "Ноорог" },
-  { value: "ACTIVE", label: "Идэвхтэй" },
-  { value: "HIDDEN", label: "Нуусан" },
-  { value: "CLOSED", label: "Хаагдсан" },
-  { value: "SOLD_OUT", label: "Дууссан" },
-];
-
+/**
+ * Каталогийн бараа — үндсэн мэдээлэл + уян хатан сонголт.
+ * Үнэ, огноо, төлөв нь гаргалтаар тусад нь үүснэ.
+ */
 export function ProductForm({
   product,
   categories,
@@ -38,28 +34,19 @@ export function ProductForm({
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? categories[0]?.id ?? "");
-  // Үнэ, огноо, төлөв нь ТОЙРОГ дээр байдаг. Шинэ бараа үүсгэхэд эхний
-  // тойргийг хамт үүсгэх тул энд асууна; засварлахад тэдгээр нь RoundForm дээр.
-  const [costPrice, setCostPrice] = useState("");
-  const [sellPrice, setSellPrice] = useState("");
-  const [stock, setStock] = useState("0");
-  const [isOrder, setIsOrder] = useState(true);
-  const [closeAt, setCloseAt] = useState("");
-  const [leadMin, setLeadMin] = useState("7");
-  const [leadMax, setLeadMax] = useState("14");
-  const [status, setStatus] = useState<ProductStatus>("DRAFT");
-  const [sizes, setSizes] = useState<string[]>(product?.sizes ?? []);
-  const [colors, setColors] = useState<string[]>(product?.colors ?? []);
+  const [options, setOptions] = useState<ProductOption[]>(() => {
+    if (product?.options?.length) return product.options.map((o) => ({ ...o, values: [...o.values] }));
+    const legacy: ProductOption[] = [];
+    if (product?.sizes?.length) legacy.push({ name: "Хэмжээ", values: [...product.sizes] });
+    if (product?.colors?.length) legacy.push({ name: "Өнгө", values: [...product.colors] });
+    return legacy;
+  });
   const [sizeChart, setSizeChart] = useState<SizeChartRow[]>(product?.sizeChart ?? []);
   const [images, setImages] = useState<string[]>(product?.images ?? []);
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const cost = Number(costPrice) || 0;
-  const sell = Number(sellPrice) || 0;
-  const profit = sell - cost;
-  const margin = sell > 0 ? Math.round((profit / sell) * 100) : 0;
 
   const save = async () => {
     setBusy(true);
@@ -70,8 +57,12 @@ export function ProductForm({
         description: description.trim() || undefined,
         categoryId,
         images,
-        sizes,
-        colors,
+        options: options
+          .map((o) => ({
+            name: o.name.trim(),
+            values: o.values.map((v) => v.trim()).filter(Boolean),
+          }))
+          .filter((o) => o.name && o.values.length > 0),
         sizeChart: sizeChart.map((row) => ({
           size: row.size,
           heightRange: row.heightRange,
@@ -79,34 +70,24 @@ export function ProductForm({
         })),
       };
 
-      if (product) {
-        await adminApi.updateProduct(product.id, template);
-      } else {
-        await adminApi.createProduct({
-          ...template,
-          // Эхний гаргалт.
-          costPrice: cost,
-          sellPrice: sell,
-          stock: isOrder ? 0 : Number(stock) || 0,
-          closeAt:
-            isOrder && closeAt ? new Date(`${closeAt}T00:00:00+08:00`).toISOString() : null,
-          leadMinDays: Number(leadMin) || 0,
-          leadMaxDays: Number(leadMax) || 0,
-          status,
-        });
-      }
+      if (product) await adminApi.updateProduct(product.id, template);
+      else await adminApi.createProduct(template);
 
+      toast.success(product ? "Бараа хадгалагдлаа." : "Бараа үүслээ.");
       await onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хадгалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
+      setError(message);
+      toast.error(message);
       setBusy(false);
     }
   };
 
-  /** Presigned URL авч R2 руу шууд PUT хийнэ. */
   const upload = async (file: File) => {
     if (!product) {
-      setError("Зураг нэмэхийн тулд эхлээд барааг хадгална уу.");
+      const message = "Зураг нэмэхийн тулд эхлээд барааг хадгална уу.";
+      setError(message);
+      toast.error(message);
       return;
     }
     setUploading(true);
@@ -122,8 +103,11 @@ export function ProductForm({
       const next = [...images, presigned.publicUrl];
       await adminApi.saveImages(product.id, next);
       setImages(next);
+      toast.success("Зураг нэмэгдлээ.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Зураг байршуулж чадсангүй.");
+      const message = e instanceof Error ? e.message : "Зураг байршуулж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setUploading(false);
     }
@@ -132,13 +116,27 @@ export function ProductForm({
   const removeImage = async (url: string) => {
     const next = images.filter((i) => i !== url);
     setImages(next);
-    if (product) await adminApi.saveImages(product.id, next).catch(() => undefined);
+    if (product) {
+      try {
+        await adminApi.saveImages(product.id, next);
+        toast.success("Зураг хасагдлаа.");
+      } catch (e) {
+        toast.error(e instanceof ApiError ? e.message : "Зураг хасаж чадсангүй.");
+      }
+    }
+  };
+
+  const addOption = (preset?: string) => {
+    const nameHint = preset ?? "";
+    if (preset && options.some((o) => o.name === preset)) return;
+    setOptions((prev) => [...prev, { name: nameHint, values: [] }]);
   };
 
   return (
     <div className="max-w-[760px]">
       <PageHead
         title={product ? "Бараа засах" : "Шинэ бараа"}
+        hint="Зөвхөн каталогийн мэдээлэл. Үнэ, огноог дараа нь гаргалтаар тавина."
         actions={
           <>
             <Button variant="ghost" onClick={onClose}>
@@ -167,116 +165,75 @@ export function ProductForm({
               className="w-full"
             />
           </Field>
-          {!product && (
-            <Field label="Статус">
-              <Select
-                value={status}
-                onChange={(v) => setStatus(v as ProductStatus)}
-                options={STATUSES}
-                className="w-full"
-              />
-            </Field>
-          )}
         </Card>
-
-        {product && (
-          <Card className="p-4 text-[13px] leading-[1.6] text-ink-2">
-            Үнэ, захиалга хаагдах огноо, үлдэгдэл, статус нь <b>гаргалт бүрд</b> өөр
-            байдаг тул энд байхгүй. Барааны жагсаалт дээрх «Дахин гаргах» эсвэл
-            «Тойрог засах»-аас өөрчилнө үү. Энд хийсэн өөрчлөлт (нэр, зураг, хэмжээ)
-            бүх гаргалтад нэгэн зэрэг нөлөөлнө.
-          </Card>
-        )}
-
-        {!product && (
-        <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[15px] font-medium">Үнэ</div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Анхны үнэ (өртөг)">
-              <Input
-                value={costPrice}
-                onChange={(v) => setCostPrice(v.replace(/\D/g, ""))}
-                inputMode="numeric"
-              />
-            </Field>
-            <Field label="Зарах үнэ">
-              <Input
-                value={sellPrice}
-                onChange={(v) => setSellPrice(v.replace(/\D/g, ""))}
-                inputMode="numeric"
-              />
-            </Field>
-          </div>
-          {sell > 0 && (
-            <div className="flex items-center gap-2 text-[13px]">
-              <span className="text-ink-2">Ашиг</span>
-              <span className="tnum">{money(profit)}</span>
-              <Badge tone={margin >= 40 ? "ok" : margin >= 0 ? "neutral" : "danger"}>
-                {margin}%
-              </Badge>
-            </div>
-          )}
-        </Card>
-        )}
-
-        {!product && (
-        <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[15px] font-medium">Төрөл</div>
-          <div className="flex gap-2">
-            <Button variant={isOrder ? "primary" : "outline"} onClick={() => setIsOrder(true)}>
-              Захиалгын бараа
-            </Button>
-            <Button variant={!isOrder ? "primary" : "outline"} onClick={() => setIsOrder(false)}>
-              Бэлэн бараа
-            </Button>
-          </div>
-
-          {isOrder ? (
-            <>
-              <Field label="Захиалга хаагдах өдөр" hint="UB цагаар өдрийн эхэнд хаагдана">
-                <input
-                  type="date"
-                  value={closeAt}
-                  onChange={(e) => setCloseAt(e.target.value)}
-                  className="h-11 w-full rounded-[8px] border border-line bg-bg px-3 text-[15px]"
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Хамгийн бага хоног">
-                  <Input
-                    value={leadMin}
-                    onChange={(v) => setLeadMin(v.replace(/\D/g, ""))}
-                    inputMode="numeric"
-                  />
-                </Field>
-                <Field label="Хамгийн их хоног">
-                  <Input
-                    value={leadMax}
-                    onChange={(v) => setLeadMax(v.replace(/\D/g, ""))}
-                    inputMode="numeric"
-                  />
-                </Field>
-              </div>
-              <p className="m-0 text-[12px] text-muted">
-                Гарт очих огноо = хаагдах өдөр + эдгээр хоног. Хадгалагдахгүй, уншихад бодогдоно.
-              </p>
-            </>
-          ) : (
-            <Field label="Үлдэгдэл">
-              <Input
-                value={stock}
-                onChange={(v) => setStock(v.replace(/\D/g, ""))}
-                inputMode="numeric"
-              />
-            </Field>
-          )}
-        </Card>
-        )}
 
         <Card className="flex flex-col gap-4 p-4">
-          <div className="text-[15px] font-medium">Сонголт</div>
-          <ChipEditor label="Хэмжээ" values={sizes} onChange={setSizes} placeholder="S, M, L…" />
-          <ChipEditor label="Өнгө" values={colors} onChange={setColors} placeholder="Хар, Цагаан…" />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-[15px] font-medium">Сонголт</div>
+              <p className="m-0 text-[13px] text-muted">
+                Бараанд тохирох төрөл нэмнэ үү (хоосон бол сонголтгүй).
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={() => addOption()}>
+              Төрөл нэмэх
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {OPTION_PRESETS.map((preset) => {
+              const used = options.some((o) => o.name === preset);
+              return (
+                <Button
+                  key={preset}
+                  size="sm"
+                  variant="ghost"
+                  disabled={used}
+                  onClick={() => addOption(preset)}
+                >
+                  + {preset}
+                </Button>
+              );
+            })}
+          </div>
+
+          {options.length === 0 && (
+            <p className="m-0 text-[13px] text-muted">Сонголт байхгүй — шууд захиална.</p>
+          )}
+
+          {options.map((opt, index) => (
+            <div key={index} className="rounded-[8px] border border-line p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <div className="flex-1">
+                  <Input
+                    value={opt.name}
+                    onChange={(v) =>
+                      setOptions((prev) =>
+                        prev.map((o, i) => (i === index ? { ...o, name: v } : o)),
+                      )
+                    }
+                    placeholder="Төрлийн нэр (ж: Багтаамж)"
+                  />
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setOptions((prev) => prev.filter((_, i) => i !== index))}
+                >
+                  Хасах
+                </Button>
+              </div>
+              <ChipEditor
+                values={opt.values}
+                onChange={(values) =>
+                  setOptions((prev) =>
+                    prev.map((o, i) => (i === index ? { ...o, values } : o)),
+                  )
+                }
+                placeholder="Утга нэмэх…"
+              />
+            </div>
+          ))}
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">
@@ -292,6 +249,7 @@ export function ProductForm({
               Мөр нэмэх
             </Button>
           </div>
+          <p className="m-0 text-[12px] text-muted">Хувцас гэх мэтэд л хэрэгтэй — хоосон орхиж болно.</p>
           {sizeChart.map((row, index) => (
             <div key={index} className="flex gap-2">
               {(["size", "heightRange", "chestCm"] as const).map((key) => (
@@ -380,14 +338,11 @@ export function ProductForm({
   );
 }
 
-/** Хэмжээ, өнгө — chip-ээр нэмж хасна. */
 function ChipEditor({
-  label,
   values,
   onChange,
   placeholder,
 }: {
-  label: string;
   values: string[];
   onChange: (values: string[]) => void;
   placeholder: string;
@@ -403,7 +358,6 @@ function ChipEditor({
 
   return (
     <div>
-      <div className="mb-1.5 text-[13px] text-ink-2">{label}</div>
       <div className="mb-2 flex flex-wrap gap-2">
         {values.map((value) => (
           <span
@@ -424,7 +378,11 @@ function ChipEditor({
       </div>
       <div className="flex gap-2">
         <div className="flex-1">
-          <Input value={draft} onChange={setDraft} placeholder={placeholder} />
+          <Input
+            value={draft}
+            onChange={setDraft}
+            placeholder={placeholder}
+          />
         </div>
         <Button variant="outline" onClick={add} disabled={!draft.trim()}>
           Нэмэх

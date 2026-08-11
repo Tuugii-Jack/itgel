@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { Qr } from "@/components/Qr";
-import { Button, ErrorNote, Spinner } from "@/components/ui";
+import { Button, ErrorNote, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { money, phoneLabel, rangeLabel } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
+import { useToast } from "@/lib/toast";
+import { usePolling } from "@/lib/usePolling";
 import type { PublicOrder, Store } from "@/lib/types";
 
 /**
@@ -40,6 +43,16 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
     setTrackUrl(`${window.location.origin}/t/${code}`);
   }, [code]);
 
+  const pending =
+    !!order &&
+    order.status !== "CANCELLED" &&
+    awaitingPayment(order.paymentState) &&
+    order.dueAmount > 0;
+
+  // Админ төлбөрийг бүртгэмэгц хуудас өөрөө «Баталгаажлаа» болно —
+  // хэрэглэгч refresh дарах шаардлагагүй.
+  usePolling(load, 10_000, pending);
+
   if (error) {
     return (
       <div className="p-4">
@@ -50,14 +63,16 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
 
   if (!order) {
     return (
-      <div className="flex justify-center py-24">
-        <Spinner className="text-muted" />
+      <div className="px-4 pt-8 lg:mx-auto lg:max-w-[1000px] lg:px-10">
+        <Skeleton className="h-6 w-56" />
+        <Skeleton className="mt-3 h-4 w-72" />
+        <div className="mt-6 flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-8">
+          <Skeleton className="h-56 w-full rounded-[12px]" />
+          <Skeleton className="h-40 w-full rounded-[12px]" />
+        </div>
       </div>
     );
   }
-
-  const pending =
-    order.status !== "CANCELLED" && awaitingPayment(order.paymentState) && order.dueAmount > 0;
 
   return (
     <div className="screen pb-8">
@@ -84,6 +99,7 @@ function Pending({
   const [claimedAt, setClaimedAt] = useState(order.paymentClaimedAt);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
   const bank = store?.bank ?? null;
 
   const claim = async () => {
@@ -92,9 +108,12 @@ function Pending({
     try {
       const result = await api.claimPayment(order.code);
       setClaimedAt(result.paymentClaimedAt);
+      toast.success("Шилжүүлсэн гэж мэдэгдлээ.");
       onClaimed();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Мэдэгдэж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Мэдэгдэж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -232,8 +251,8 @@ function OrderSummary({ order }: { order: PublicOrder }) {
         <div key={item.id} className="flex justify-between gap-3 lg:gap-4">
           <span className={`min-w-0 ${item.cancelled ? "text-muted line-through" : "text-ink-2"}`}>
             {item.name}
-            {[item.size, item.color].filter(Boolean).length > 0 &&
-              ` · ${[item.size, item.color].filter(Boolean).join(" · ")}`}
+            {formatSelections(item.selections, item.size, item.color) &&
+              ` · ${formatSelections(item.selections, item.size, item.color)}`}
             {item.qty > 1 && ` · ${item.qty} ширхэг`}
           </span>
           <span className={item.cancelled ? "text-muted line-through" : ""}>

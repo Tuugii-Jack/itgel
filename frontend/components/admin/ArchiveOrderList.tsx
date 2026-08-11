@@ -3,6 +3,7 @@
 import { OrderBadge } from "@/components/admin/shared";
 import { Badge, Card, Empty } from "@/components/ui";
 import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
 import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import type { ArchiveOrder } from "@/lib/types";
 
@@ -64,10 +65,10 @@ export function ArchiveOrderList({
                 >
                   <span className={`min-w-0 ${item.cancelled ? "text-muted line-through" : ""}`}>
                     {item.name}
-                    {[item.size, item.color].filter(Boolean).length > 0 && (
+                    {formatSelections(item.selections, item.size, item.color) && (
                       <span className="text-muted">
                         {" "}
-                        · {[item.size, item.color].filter(Boolean).join(" · ")}
+                        · {formatSelections(item.selections, item.size, item.color)}
                       </span>
                     )}
                   </span>

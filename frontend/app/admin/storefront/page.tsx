@@ -1,27 +1,30 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
+import { OrderDetail } from "@/components/admin/OrderDetail";
 import { ProductForm } from "@/components/admin/ProductForm";
 import { RoundBuyers } from "@/components/admin/RoundBuyers";
 import { RoundForm } from "@/components/admin/RoundForm";
 import { StorefrontCard, type ShelfItem } from "@/components/admin/StorefrontCard";
 import { ProductImage } from "@/components/ProductImage";
-import { Button, Card, Empty, ErrorNote, Input, Spinner, Toggle } from "@/components/ui";
+import { Button, Card, Empty, ErrorNote, Input, Skeleton, Toggle } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 import type { AdminAd, AdminCategory, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
 /** Хэрэглэгчид үнэхээр харагддаг төлвүүд — backend-ийн VISIBLE_STATUSES. */
 const PUBLIC_STATUSES: ProductStatus[] = ["ACTIVE", "CLOSED", "SOLD_OUT"];
 
 /**
- * Админ доторх дэлгүүр.
+ * Дэлгүүр — хэрэглэгчид харагдаж буй зүйлийн амьд харагдах байдал.
  *
- * Хүснэгт биш, дэлгүүр яг байгаагаараа харагдана: ангилал, «Захиалгын
- * бараа» / «Бэлэн бараа» хэсэг, ижил карт. Ялгаа нь ноорог, нуусан
- * бараа ч энд харагдаж, карт дээрээс шууд гаргах/нуух боломжтой.
+ * Бараа үүсгэх, багцад нэмэх нь энд биш: Бараа / Багц хэсэгт хийнэ.
+ * Эндээс зөвхөн гаргах/нуух, үнэ/огноо засах, хэн авсныг харна.
  */
 export default function StorefrontPage() {
+  const toast = useToast();
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [ads, setAds] = useState<AdminAd[]>([]);
@@ -30,13 +33,15 @@ export default function StorefrontPage() {
   const [query, setQuery] = useState("");
   /** Асаалттай үед зөвхөн хэрэглэгчид харагддагийг үлдээнэ. */
   const [asCustomer, setAsCustomer] = useState(false);
-  const [editing, setEditing] = useState<AdminProduct | "new" | null>(null);
+  const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [roundFor, setRoundFor] = useState<{
     product: AdminProduct;
-    round: AdminRound | null;
+    round: AdminRound;
   } | null>(null);
   const [buyersFor, setBuyersFor] = useState<string | null>(null);
+  const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,8 +51,8 @@ export default function StorefrontPage() {
   }, [search]);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    setRefreshing(true);
     try {
       const [list, cats, adList] = await Promise.all([
         adminApi.products({ q: query || undefined, pageSize: 100 }),
@@ -61,6 +66,7 @@ export default function StorefrontPage() {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [query]);
 
@@ -85,7 +91,6 @@ export default function StorefrontPage() {
         items.push({ round, product, hasActiveRound });
       }
     }
-    // Дэлгүүрийн анхдагч эрэмбэ — шинэ нь эхэнд.
     return items.sort(
       (a, b) => Date.parse(b.round.createdAt) - Date.parse(a.round.createdAt),
     );
@@ -95,16 +100,32 @@ export default function StorefrontPage() {
   const readyItems = shelf.filter((i) => i.round.type === "ready");
   const hiddenCount = shelf.filter((i) => !PUBLIC_STATUSES.includes(i.round.status)).length;
 
-  /** Нэг товчоор гаргах/нуух. */
+  /** Нэг товчоор гаргах/нуух — карт дээр шууд шинэчилнэ, бүх жагсаалтыг дахин татахгүй. */
   const toggleVisible = async (item: ShelfItem) => {
     const next: ProductStatus = item.round.status === "ACTIVE" ? "HIDDEN" : "ACTIVE";
     setBusyId(item.round.id);
     setError(null);
     try {
-      await adminApi.updateRound(item.round.id, { status: next });
-      await load();
+      const updated = await adminApi.updateRound(item.round.id, { status: next });
+      setProducts((prev) =>
+        prev.map((p) =>
+          p.id !== item.product.id
+            ? p
+            : {
+                ...p,
+                rounds: p.rounds.map((r) =>
+                  r.id === item.round.id ? { ...r, ...updated, status: next } : r,
+                ),
+                currentRound:
+                  p.currentRound?.id === item.round.id
+                    ? { ...p.currentRound, ...updated, status: next }
+                    : p.currentRound,
+              },
+        ),
+      );
+      toast.success(next === "ACTIVE" ? "Дэлгүүрт гарлаа." : "Дэлгүүрээс нуугдлаа.");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Солиж чадсангүй.");
+      toast.error(e instanceof ApiError ? e.message : "Солиж чадсангүй.");
     } finally {
       setBusyId(null);
     }
@@ -112,21 +133,44 @@ export default function StorefrontPage() {
 
   const toggleAd = async (ad: AdminAd) => {
     setBusyId(ad.id);
-    setError(null);
     try {
-      await adminApi.updateAd(ad.id, { isActive: !ad.isActive });
-      await load();
+      const updated = await adminApi.updateAd(ad.id, { isActive: !ad.isActive });
+      setAds((prev) => prev.map((a) => (a.id === ad.id ? { ...a, ...updated } : a)));
+      toast.success(ad.isActive ? "Баннер нуугдлаа." : "Баннер идэвхжлээ.");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Солиж чадсангүй.");
+      toast.error(e instanceof ApiError ? e.message : "Солиж чадсангүй.");
     } finally {
       setBusyId(null);
     }
   };
 
+  if (openOrderId) {
+    return (
+      <OrderDetail
+        orderId={openOrderId}
+        onClose={() => setOpenOrderId(null)}
+        onChanged={() => void load()}
+      />
+    );
+  }
+
+  if (buyersFor) {
+    return (
+      <RoundBuyers
+        roundId={buyersFor}
+        onClose={() => setBuyersFor(null)}
+        onOpenOrder={(orderId) => {
+          setBuyersFor(null);
+          setOpenOrderId(orderId);
+        }}
+      />
+    );
+  }
+
   if (editing) {
     return (
       <ProductForm
-        product={editing === "new" ? null : editing}
+        product={editing}
         categories={categories}
         onClose={() => setEditing(null)}
         onSaved={async () => {
@@ -135,10 +179,6 @@ export default function StorefrontPage() {
         }}
       />
     );
-  }
-
-  if (buyersFor) {
-    return <RoundBuyers roundId={buyersFor} onClose={() => setBuyersFor(null)} />;
   }
 
   if (roundFor) {
@@ -159,8 +199,29 @@ export default function StorefrontPage() {
     <div>
       <PageHead
         title="Дэлгүүр"
-        hint="Дэлгүүр яг ийм харагдана. Картан дээрээс шууд гаргаж, нууж, дахин гаргана."
-        actions={<Button onClick={() => setEditing("new")}>Бараа нэмэх</Button>}
+        hint="Хэрэглэгчид яг ингэж харна. Гаргалт удирдах — Урьдчилсан захиалга цэсээс."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/admin/preorders"
+              className="inline-flex h-11 items-center rounded-[8px] border border-line bg-bg px-4 text-[14px] no-underline"
+            >
+              Урьдчилсан захиалга
+            </Link>
+            <Link
+              href="/admin/products"
+              className="inline-flex h-11 items-center rounded-[8px] border border-line bg-bg px-4 text-[14px] no-underline"
+            >
+              Каталог
+            </Link>
+            <Link
+              href="/admin/batches"
+              className="inline-flex h-11 items-center rounded-[8px] bg-ink px-4 text-[14px] text-white no-underline"
+            >
+              Багцад бараа нэмэх
+            </Link>
+          </div>
+        }
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -177,6 +238,7 @@ export default function StorefrontPage() {
           checked={asCustomer}
           onChange={setAsCustomer}
         />
+        {refreshing && <span className="text-[13px] text-muted">Шинэчилж байна…</span>}
       </div>
 
       {error && (
@@ -185,10 +247,8 @@ export default function StorefrontPage() {
         </div>
       )}
 
-      {/* Дэлгүүрийн хамгийн дээд хэсэг — зарын самбар */}
       <AdStrip ads={ads} busyId={busyId} onToggle={toggleAd} asCustomer={asCustomer} />
 
-      {/* Ангиллын чипүүд — дэлгүүртэй ижил */}
       <div className="no-scrollbar mb-5 flex gap-2 overflow-x-auto">
         <Chip active={category === null} onClick={() => setCategory(null)}>
           Бүгд
@@ -200,15 +260,17 @@ export default function StorefrontPage() {
         ))}
       </div>
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <Spinner className="text-muted" />
+      {loading && products.length === 0 ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="aspect-[3/4] rounded-[12px]" />
+          ))}
         </div>
       ) : shelf.length === 0 ? (
         <Empty>
           {asCustomer
-            ? "Хэрэглэгчид харагдах бараа алга. Ноорогоо гаргана уу."
-            : "Бараа алга."}
+            ? "Хэрэглэгчид харагдах бараа алга."
+            : "Дэлгүүрт бараа алга. Багцад бараа нэмээд эхлүүлнэ үү."}
         </Empty>
       ) : (
         <div className="flex flex-col gap-10">
@@ -219,10 +281,8 @@ export default function StorefrontPage() {
             busyId={busyId}
             onToggle={toggleVisible}
             onEditRound={(item) => setRoundFor({ product: item.product, round: item.round })}
-            onNewRound={(item) => setRoundFor({ product: item.product, round: null })}
             onEditProduct={(item) => setEditing(item.product)}
             onOpenBuyers={(item) => setBuyersFor(item.round.id)}
-            onAdd={() => setEditing("new")}
           />
           <Shelf
             title="Бэлэн бараа"
@@ -231,10 +291,8 @@ export default function StorefrontPage() {
             busyId={busyId}
             onToggle={toggleVisible}
             onEditRound={(item) => setRoundFor({ product: item.product, round: item.round })}
-            onNewRound={(item) => setRoundFor({ product: item.product, round: null })}
             onEditProduct={(item) => setEditing(item.product)}
             onOpenBuyers={(item) => setBuyersFor(item.round.id)}
-            onAdd={() => setEditing("new")}
           />
         </div>
       )}
@@ -249,10 +307,8 @@ function Shelf({
   busyId,
   onToggle,
   onEditRound,
-  onNewRound,
   onEditProduct,
   onOpenBuyers,
-  onAdd,
 }: {
   title: string;
   hint: string;
@@ -260,10 +316,8 @@ function Shelf({
   busyId: string | null;
   onToggle: (item: ShelfItem) => void;
   onEditRound: (item: ShelfItem) => void;
-  onNewRound: (item: ShelfItem) => void;
   onEditProduct: (item: ShelfItem) => void;
   onOpenBuyers: (item: ShelfItem) => void;
-  onAdd: () => void;
 }) {
   if (items.length === 0) return null;
 
@@ -284,35 +338,15 @@ function Shelf({
             busy={busyId === item.round.id}
             onToggle={() => onToggle(item)}
             onEditRound={() => onEditRound(item)}
-            onNewRound={() => onNewRound(item)}
             onEditProduct={() => onEditProduct(item)}
             onOpenBuyers={() => onOpenBuyers(item)}
           />
         ))}
-        <AddTile onClick={onAdd} />
       </div>
     </section>
   );
 }
 
-/** Сүүлд нь байрлах «нэмэх» хавтан — дэлгүүр дүүргэх урсгалыг тасалдуулахгүй. */
-function AddTile({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-2
-        rounded-[12px] border border-dashed border-line bg-surface text-ink-2 hover:bg-surface-2"
-    >
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-        <path d="M12 5v14M5 12h14" />
-      </svg>
-      <span className="text-[14px]">Бараа нэмэх</span>
-    </button>
-  );
-}
-
-/** Дэлгүүрийн дээд талын зарууд — хэрэглэгч хамгийн түрүүнд үүнийг хардаг. */
 function AdStrip({
   ads,
   busyId,

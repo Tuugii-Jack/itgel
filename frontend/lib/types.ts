@@ -86,6 +86,12 @@ export interface SizeChartRow {
   chestCm: string;
 }
 
+/** Барааны сонголтын бүлэг — ж: Хэмжээ [S,M,L], Багтаамж [128GB]. */
+export interface ProductOption {
+  name: string;
+  values: string[];
+}
+
 /**
  * Хэрэглэгчийн API — costPrice энд хэзээ ч байхгүй.
  *
@@ -113,6 +119,8 @@ export interface Product {
   arriveFrom: string;
   arriveTo: string;
   images: string[];
+  options: ProductOption[];
+  /** Нийцүүлэлт — options-оос «Хэмжээ»/«Өнгө». */
   sizes: string[];
   colors: string[];
   sizeChart: SizeChartRow[];
@@ -127,6 +135,9 @@ export interface AdminRound extends Omit<Product, "price"> {
   profit: number;
   marginPercent: number;
   note: string | null;
+  /** Аль ачааны багцад зориулж гаргасан бэ — null бол багцаас гадуур. */
+  batchId: string | null;
+  batch: { id: string; name: string; stage: BatchStage; stageLabel: string } | null;
   /** Энэ гаргалтыг хэдэн өөр хүн авсан бэ. */
   customerCount: number;
   /** Захиалагдсан нийт ширхэг (цуцлагдсаныг оруулаагүй). */
@@ -146,6 +157,7 @@ export interface RoundBuyer {
   paymentClaimedAt: string | null;
   createdAt: string;
   customer: { id: string; name: string | null; phone: string };
+  selections: Record<string, string>;
   size: string | null;
   color: string | null;
   qty: number;
@@ -175,14 +187,19 @@ export interface RoundOrders {
     unpaidCount: number;
     cancelledCount: number;
     byStatus: Partial<Record<OrderStatus, number>>;
-    /** Нийлүүлэгч рүү захиалах жагсаалт — хэмжээ/өнгөөр. */
-    byVariant: { size: string | null; color: string | null; qty: number }[];
+    /** Нийлүүлэгч рүү захиалах жагсаалт — сонголтоор. */
+    byVariant: {
+      selections?: Record<string, string>;
+      size: string | null;
+      color: string | null;
+      qty: number;
+    }[];
   };
   orders: RoundBuyer[];
 }
 
 /**
- * Барааны загвар — нэр, зураг, хэмжээ. Үнэ, төлөв нь тойрог дээр байна.
+ * Барааны загвар — нэр, зураг, сонголт. Үнэ, төлөв нь тойрог дээр байна.
  */
 export interface AdminProduct {
   id: string;
@@ -191,6 +208,7 @@ export interface AdminProduct {
   categoryId: string;
   category?: { id: string; name: string };
   images: string[];
+  options: ProductOption[];
   sizes: string[];
   colors: string[];
   sizeChart: SizeChartRow[];
@@ -211,6 +229,7 @@ export interface OrderItem {
   /** Аль тойргоос захиалсан бэ. */
   roundId: string;
   name: string;
+  selections: Record<string, string>;
   size: string | null;
   color: string | null;
   qty: number;
@@ -251,6 +270,8 @@ export interface BatchSummary {
   name: string;
   stage: BatchStage;
   stageLabel: string;
+  /** Захиалга авах эцсийн хугацаа — багцын бараануудын closeAt анхдагч. */
+  deadline: string | null;
   closedAt: string | null;
   weightKg: number | null;
   etaFrom: string | null;
@@ -402,6 +423,42 @@ export interface AdminBatch extends BatchSummary {
   createdAt: string;
 }
 
+/** Багцад зориулж гаргасан нэг бараа (тойрог). */
+export interface BatchProduct {
+  roundId: string;
+  roundNo: number;
+  productId: string;
+  name: string;
+  image: string | null;
+  sellPrice: number;
+  costPrice: number;
+  status: ProductStatus;
+  closeAt: string | null;
+  orderedQty: number;
+  customerCount: number;
+}
+
+export interface BatchOrderRow {
+  id: string;
+  code: string;
+  status: OrderStatus;
+  statusLabel: string;
+  subtotal: number;
+  dueAmount: number;
+  itemCount: number;
+  customer: { id: string; name: string | null; phone: string };
+  createdAt: string;
+}
+
+export interface AdminBatchDetail extends BatchSummary {
+  nextStage: BatchStage | null;
+  orders: BatchOrderRow[];
+  products: BatchProduct[];
+  totalValue: number;
+  totalDue: number;
+  createdAt: string;
+}
+
 export interface AdminDelivery {
   id: string;
   scheduledDay: string;
@@ -537,6 +594,7 @@ export interface ArchiveItem {
   roundId: string;
   productId: string;
   name: string;
+  selections?: Record<string, string>;
   size: string | null;
   color: string | null;
   qty: number;

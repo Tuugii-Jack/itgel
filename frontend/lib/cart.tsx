@@ -20,6 +20,8 @@ export interface CartLine {
   price: number;
   image: string | null;
   type: "order" | "ready";
+  selections: Record<string, string>;
+  /** Нийцүүлэлт. */
   size: string | null;
   color: string | null;
   qty: number;
@@ -29,7 +31,7 @@ export interface CartLine {
   stock: number;
 }
 
-const KEY = "itgel.cart.v1";
+const KEY = "itgel.cart.v2";
 
 interface CartContext {
   lines: CartLine[];
@@ -45,7 +47,33 @@ interface CartContext {
 const Ctx = createContext<CartContext | null>(null);
 
 const sameLine = (a: CartLine, b: CartLine) =>
-  a.productId === b.productId && a.size === b.size && a.color === b.color;
+  a.productId === b.productId &&
+  JSON.stringify(a.selections ?? {}) === JSON.stringify(b.selections ?? {});
+
+function normalizeLine(raw: Partial<CartLine> & { productId: string }): CartLine | null {
+  if (!raw.productId || !raw.name || typeof raw.price !== "number") return null;
+  const selections =
+    raw.selections && typeof raw.selections === "object"
+      ? raw.selections
+      : {
+          ...(raw.size ? { Хэмжээ: raw.size } : {}),
+          ...(raw.color ? { Өнгө: raw.color } : {}),
+        };
+  return {
+    productId: raw.productId,
+    name: raw.name,
+    price: raw.price,
+    image: raw.image ?? null,
+    type: raw.type === "ready" ? "ready" : "order",
+    selections,
+    size: raw.size ?? selections["Хэмжээ"] ?? null,
+    color: raw.color ?? selections["Өнгө"] ?? null,
+    qty: Math.max(1, raw.qty ?? 1),
+    arriveFrom: raw.arriveFrom ?? "",
+    arriveTo: raw.arriveTo ?? "",
+    stock: raw.stock ?? 0,
+  };
+}
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [lines, setLines] = useState<CartLine[]>([]);
@@ -53,8 +81,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem(KEY);
-      if (raw) setLines(JSON.parse(raw) as CartLine[]);
+      const raw = window.localStorage.getItem(KEY) ?? window.localStorage.getItem("itgel.cart.v1");
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown[];
+        if (Array.isArray(parsed)) {
+          setLines(
+            parsed
+              .map((row) => normalizeLine(row as Partial<CartLine> & { productId: string }))
+              .filter((row): row is CartLine => row !== null),
+          );
+        }
+      }
     } catch {
       // Гэмтсэн өгөгдөл — хоосон сагснаас эхэлнэ.
     }

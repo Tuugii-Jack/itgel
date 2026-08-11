@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Badge, type Tone } from "@/components/ui";
-import type { BatchStage, DeliveryStatus, OrderStatus } from "@/lib/types";
+import type { BatchStage, DeliveryStatus, OrderStatus, ProductStatus } from "@/lib/types";
 
 export const ORDER_STATUS_TONE: Record<OrderStatus, Tone> = {
   NEW: "neutral",
@@ -39,6 +39,28 @@ export const DELIVERY_STATUS_LABEL: Record<DeliveryStatus, string> = {
   DELIVERED: "Хүргэсэн",
 };
 
+export const PRODUCT_STATUS_LABEL: Record<ProductStatus, string> = {
+  ACTIVE: "Идэвхтэй",
+  HIDDEN: "Нуусан",
+  DRAFT: "Ноорог",
+  CLOSED: "Хаагдсан",
+  SOLD_OUT: "Дууссан",
+  ARCHIVED: "Архивласан",
+};
+
+export const PRODUCT_STATUS_TONE: Record<ProductStatus, Tone> = {
+  ACTIVE: "ok",
+  HIDDEN: "neutral",
+  DRAFT: "neutral",
+  CLOSED: "warn",
+  SOLD_OUT: "danger",
+  ARCHIVED: "neutral",
+};
+
+export function ProductStatusBadge({ status }: { status: ProductStatus }) {
+  return <Badge tone={PRODUCT_STATUS_TONE[status]}>{PRODUCT_STATUS_LABEL[status]}</Badge>;
+}
+
 export function OrderBadge({ status }: { status: OrderStatus }) {
   return <Badge tone={ORDER_STATUS_TONE[status]}>{ORDER_STATUS_LABEL[status]}</Badge>;
 }
@@ -49,14 +71,14 @@ export function PageHead({
   actions,
 }: {
   title: string;
-  hint?: string;
+  hint?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
     <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 className="m-0 text-[20px] font-medium">{title}</h1>
-        {hint && <p className="mt-0.5 mb-0 text-[13px] text-ink-2">{hint}</p>}
+        {hint && <div className="mt-0.5 text-[13px] text-ink-2">{hint}</div>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>

@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Metric, OrderBadge, PageHead, Select } from "@/components/admin/shared";
+import { Metric, OrderBadge, PageHead, ProductStatusBadge, Select } from "@/components/admin/shared";
 import { ArchiveOrderList } from "@/components/admin/ArchiveOrderList";
 import { ProductImage } from "@/components/ProductImage";
 import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
 import type {
   ArchiveCalendar,
   ArchiveCustomer,
@@ -232,27 +233,56 @@ function ByProduct() {
 
         <div className="mb-2 text-[15px] font-medium">Гаргалтууд</div>
         <Card className="mb-5 divide-y divide-line">
-          {rounds.map((r) => (
-            <div key={r.id} className="flex flex-wrap items-baseline justify-between gap-3 p-3.5">
-              <div>
-                <span className="tnum text-[15px]">#{r.roundNo}</span>
-                <span className="ml-2 text-[13px] text-muted">
-                  {r.closeAt ? `${dayLabel(r.closeAt)}-нд хаагдсан` : "Бэлэн бараа"}
-                </span>
-                {r.deleted && (
-                  <Badge tone="neutral" className="ml-2">
-                    Устгасан
-                  </Badge>
+          {rounds.map((r) => {
+            const roundBuyers = buyers.filter(
+              (b) => b.roundNo === r.roundNo && !b.cancelled && !b.orderDeleted,
+            );
+            const variantMap = new Map<string, { label: string; qty: number }>();
+            for (const b of roundBuyers) {
+              const label =
+                formatSelections(b.selections, b.size, b.color) || "Сонголтгүй";
+              const entry = variantMap.get(label) ?? { label, qty: 0 };
+              entry.qty += b.qty;
+              variantMap.set(label, entry);
+            }
+            const variants = [...variantMap.values()].sort((a, b) => b.qty - a.qty);
+
+            return (
+              <div key={r.id} className="flex flex-col gap-2 p-3.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="tnum text-[15px]">#{r.roundNo}</span>
+                    <ProductStatusBadge status={r.status} />
+                    <span className="text-[13px] text-muted">
+                      {r.closeAt ? `${dayLabel(r.closeAt)}-нд хаагдсан` : "Бэлэн бараа"}
+                    </span>
+                    {r.deleted && (
+                      <Badge tone="neutral">Устгасан</Badge>
+                    )}
+                  </div>
+                  <div className="tnum flex gap-4 text-[13px]">
+                    <span>{money(r.sellPrice)}</span>
+                    <span className="text-ink-2">{r.customerCount} хүн</span>
+                    <span className="text-ink-2">{r.qty} ш</span>
+                    <span>{money(r.revenue)}</span>
+                  </div>
+                </div>
+                {variants.length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-[13px] text-ink-2">
+                    {variants.map((v) => (
+                      <span
+                        key={v.label}
+                        className="rounded-[6px] border border-line bg-surface px-2 py-1"
+                      >
+                        {v.label}
+                        <span className="tnum ml-1.5 text-muted">{v.qty} ш</span>
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
-              <div className="tnum flex gap-4 text-[13px]">
-                <span>{money(r.sellPrice)}</span>
-                <span className="text-ink-2">{r.customerCount} хүн</span>
-                <span className="text-ink-2">{r.qty} ш</span>
-                <span>{money(r.revenue)}</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </Card>
 
         <div className="mb-2 text-[15px] font-medium">
@@ -284,7 +314,7 @@ function ByProduct() {
                 </div>
                 <div className="flex items-center gap-3 text-[13px]">
                   <span className="text-ink-2">
-                    {[b.size, b.color].filter(Boolean).join(" · ") || "—"}
+                    {formatSelections(b.selections, b.size, b.color) || "—"}
                   </span>
                   <span className="tnum">{b.qty} ш</span>
                   <span className="tnum">{money(b.total)}</span>

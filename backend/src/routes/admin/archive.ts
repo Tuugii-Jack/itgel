@@ -10,6 +10,7 @@ import {
   ubDateString,
 } from '../../lib/date.js';
 import { notFound } from '../../lib/errors.js';
+import { selectionsOf } from '../../lib/options.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { computeTotals, paymentState } from '../../services/money.js';
 import { orderStatusLabel } from '../../services/serialize.js';
@@ -35,6 +36,7 @@ type ItemRow = {
   roundId: string;
   productId: string;
   name: string;
+  selections: Record<string, string>;
   size: string | null;
   color: string | null;
   qty: number;
@@ -49,6 +51,7 @@ function itemRow(item: {
   roundId: string;
   productId: string;
   nameSnapshot: string;
+  selections?: unknown;
   size: string | null;
   color: string | null;
   qty: number;
@@ -56,11 +59,20 @@ function itemRow(item: {
   cancelledAt: Date | null;
   cancelReason: string | null;
 }): ItemRow {
+  const selections = (() => {
+    const fromJson = selectionsOf(item.selections);
+    if (Object.keys(fromJson).length > 0) return fromJson;
+    const legacy: Record<string, string> = {};
+    if (item.size) legacy['Хэмжээ'] = item.size;
+    if (item.color) legacy['Өнгө'] = item.color;
+    return legacy;
+  })();
   return {
     id: item.id,
     roundId: item.roundId,
     productId: item.productId,
     name: item.nameSnapshot,
+    selections,
     size: item.size,
     color: item.color,
     qty: item.qty,

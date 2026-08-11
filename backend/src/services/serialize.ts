@@ -11,6 +11,12 @@ import type {
 } from '@prisma/client';
 import { computeArrival, toIso } from '../lib/date.js';
 import { marginPercent } from '../lib/money.js';
+import {
+  optionsFromVariants,
+  selectionsOf,
+  sizeColorCompat,
+  sizeColorFromSelections,
+} from '../lib/options.js';
 import { BATCH_STAGE_LABEL, ORDER_STATUS_LABEL } from '../lib/orderStatus.js';
 
 export type ProductWithRelations = Product & {
@@ -22,6 +28,8 @@ export type ProductWithRelations = Product & {
 /** Тойрог нь өөрийн загвартайгаа — дэлгүүрт харагдах нэгж. */
 export type RoundWithProduct = ProductRound & {
   product: ProductWithRelations;
+  /** Аль багцад зориулж гаргасан бэ — админ жагсаалтад холбоос болно. */
+  batch?: Pick<Batch, 'id' | 'name' | 'stage'> | null;
 };
 
 /**
@@ -33,6 +41,7 @@ export type RoundWithProduct = ProductRound & {
 export function publicProduct(round: RoundWithProduct, now = new Date()) {
   const { product } = round;
   const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
+  const options = optionsFromVariants(product.variants);
   return {
     id: round.id,
     productId: product.id,
@@ -51,8 +60,8 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     arriveFrom: arrival.arriveFrom.toISOString(),
     arriveTo: arrival.arriveTo.toISOString(),
     images: product.images,
-    sizes: (product.variants ?? []).filter((v) => v.kind === 'SIZE').map((v) => v.value),
-    colors: (product.variants ?? []).filter((v) => v.kind === 'COLOR').map((v) => v.value),
+    options,
+    ...sizeColorCompat(options),
     sizeChart: (product.sizeChart ?? []).map((row) => ({
       size: row.size,
       heightRange: row.heightRange,
@@ -84,6 +93,15 @@ export function adminRound(
     profit: round.sellPrice - round.costPrice,
     marginPercent: marginPercent(round.sellPrice, round.costPrice),
     note: round.note,
+    batchId: round.batchId,
+    batch: round.batch
+      ? {
+          id: round.batch.id,
+          name: round.batch.name,
+          stage: round.batch.stage,
+          stageLabel: BATCH_STAGE_LABEL[round.batch.stage],
+        }
+      : null,
     /** Хэн хэн авсныг задалж харахгүйгээр тоог нь мэдэх. */
     customerCount: stats?.customerCount ?? 0,
     orderedQty: stats?.qty ?? 0,
@@ -97,7 +115,9 @@ export function adminRound(
  * Тойргийг шинэ дараалалаар нь өгнө: хамгийн сүүлийнх эхэнд.
  */
 export function adminProduct(
-  product: ProductWithRelations & { rounds?: ProductRound[] },
+  product: ProductWithRelations & {
+    rounds?: (ProductRound & { batch?: Pick<Batch, 'id' | 'name' | 'stage'> | null })[];
+  },
   now = new Date(),
   /** Тойргийн id → захиалгын хураангуй. Нэг асуулгаар бэлдэж дамжуулна. */
   statsByRound?: Map<string, RoundStats>,
@@ -105,6 +125,7 @@ export function adminProduct(
   const rounds = (product.rounds ?? []).map((round) =>
     adminRound({ ...round, product }, now, statsByRound?.get(round.id)),
   );
+  const options = optionsFromVariants(product.variants);
 
   return {
     id: product.id,
@@ -113,8 +134,8 @@ export function adminProduct(
     categoryId: product.categoryId,
     category: product.category ? { id: product.category.id, name: product.category.name } : undefined,
     images: product.images,
-    sizes: (product.variants ?? []).filter((v) => v.kind === 'SIZE').map((v) => v.value),
-    colors: (product.variants ?? []).filter((v) => v.kind === 'COLOR').map((v) => v.value),
+    options,
+    ...sizeColorCompat(options),
     sizeChart: (product.sizeChart ?? []).map((row) => ({
       id: row.id,
       size: row.size,
@@ -132,14 +153,21 @@ export function adminProduct(
 }
 
 export function publicOrderItem(item: OrderItem) {
+  const selections = (() => {
+    const fromJson = selectionsOf(item.selections);
+    if (Object.keys(fromJson).length > 0) return fromJson;
+    return normalizeLegacy(item.size, item.color);
+  })();
+  const { size, color } = sizeColorFromSelections(selections);
   return {
     id: item.id,
     cancelled: item.cancelledAt !== null,
     productId: item.productId,
     roundId: item.roundId,
     name: item.nameSnapshot,
-    size: item.size,
-    color: item.color,
+    selections,
+    size: size ?? item.size,
+    color: color ?? item.color,
     qty: item.qty,
     unitPrice: item.unitPrice,
     total: item.unitPrice * item.qty,
@@ -147,6 +175,13 @@ export function publicOrderItem(item: OrderItem) {
     arriveFrom: toIso(item.arriveFrom),
     arriveTo: toIso(item.arriveTo),
   };
+}
+
+function normalizeLegacy(size: string | null, color: string | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (size) out['Хэмжээ'] = size;
+  if (color) out['Өнгө'] = color;
+  return out;
 }
 
 export function adminOrderItem(item: OrderItem) {
@@ -182,6 +217,7 @@ export function batchSummary(batch: Batch | null | undefined) {
     name: batch.name,
     stage: batch.stage,
     stageLabel: BATCH_STAGE_LABEL[batch.stage],
+    deadline: toIso(batch.deadline),
     closedAt: toIso(batch.closedAt),
     weightKg: batch.weightKg,
     etaFrom: toIso(batch.etaFrom),

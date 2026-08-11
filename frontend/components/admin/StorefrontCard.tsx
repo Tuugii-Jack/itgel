@@ -1,7 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { ProductImage } from "@/components/ProductImage";
-import { Badge, Button, Divider, type Tone } from "@/components/ui";
+import {
+  PRODUCT_STATUS_LABEL,
+  PRODUCT_STATUS_TONE,
+} from "@/components/admin/shared";
+import { Badge, Button, Divider } from "@/components/ui";
 import { arrivalLabel, countdown, money } from "@/lib/format";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -13,40 +18,18 @@ export interface ShelfItem {
   hasActiveRound: boolean;
 }
 
-const STATUS_LABEL: Record<ProductStatus, string> = {
-  ACTIVE: "Идэвхтэй",
-  HIDDEN: "Нуусан",
-  DRAFT: "Ноорог",
-  CLOSED: "Хаагдсан",
-  SOLD_OUT: "Дууссан",
-  ARCHIVED: "Архивласан",
-};
-
-const STATUS_TONE: Record<ProductStatus, Tone> = {
-  ACTIVE: "ok",
-  HIDDEN: "neutral",
-  DRAFT: "neutral",
-  CLOSED: "warn",
-  SOLD_OUT: "danger",
-  ARCHIVED: "neutral",
-};
-
 /** Хэрэглэгчид үнэхээр харагддаг төлвүүд. */
 const PUBLIC: ProductStatus[] = ["ACTIVE", "CLOSED", "SOLD_OUT"];
 
 /**
- * Дэлгүүрийн карт — хэрэглэгчийн `ProductCard`-ын визуалыг давтана,
- * гэхдээ сагсны оронд админы үйлдлүүдтэй.
- *
- * `ProductCard`-ыг шууд ашиглах боломжгүй: тэр нь сагсны контекст
- * шаарддаг ба админд сагс байхгүй.
+ * Дэлгүүрийн карт — хэрэглэгчийн харагдах байдлыг давтана,
+ * сагсны оронд админы хурдан үйлдлүүдтэй.
  */
 export function StorefrontCard({
   item,
   busy,
   onToggle,
   onEditRound,
-  onNewRound,
   onEditProduct,
   onOpenBuyers,
 }: {
@@ -54,7 +37,6 @@ export function StorefrontCard({
   busy: boolean;
   onToggle: () => void;
   onEditRound: () => void;
-  onNewRound: () => void;
   onEditProduct: () => void;
   onOpenBuyers: () => void;
 }) {
@@ -63,7 +45,7 @@ export function StorefrontCard({
   const soldOut = round.status === "SOLD_OUT" || (!isOrder && round.stock <= 0);
   const closed = round.status === "CLOSED";
   const live = PUBLIC.includes(round.status);
-  /** Хугацаа нь дууссан — дахин нээхийн оронд шинэ гаргалт хийх ёстой. */
+  /** Хугацаа нь дууссан — дахин нээхийн оронд шинэ багцад гаргах ёстой. */
   const expired = round.status === "CLOSED" || round.status === "SOLD_OUT";
 
   return (
@@ -78,7 +60,6 @@ export function StorefrontCard({
           className={`h-full w-full ${live ? "" : "opacity-50"}`}
         />
 
-        {/* Хэрэглэгчид харагдахгүйг ил тод хэлнэ. */}
         {!live && (
           <div className="absolute inset-x-2 top-2 rounded-[6px] bg-ink/85 px-2 py-1 text-center text-[12px] text-white">
             Хэрэглэгчид харагдахгүй
@@ -94,9 +75,14 @@ export function StorefrontCard({
 
       <div className="flex flex-1 flex-col gap-2 p-3.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone={STATUS_TONE[round.status]}>{STATUS_LABEL[round.status]}</Badge>
+          <Badge tone={PRODUCT_STATUS_TONE[round.status]}>
+            {PRODUCT_STATUS_LABEL[round.status]}
+          </Badge>
           {product.roundCount > 1 && (
             <Badge tone="info">#{round.roundNo} гаргалт</Badge>
+          )}
+          {round.batch && (
+            <Badge tone="neutral">{round.batch.name}</Badge>
           )}
         </div>
 
@@ -128,7 +114,6 @@ export function StorefrontCard({
           )}
         </div>
 
-        {/* Хэн авсныг задалж харахгүйгээр тоог нь эндээс мэдэнэ. */}
         <button
           type="button"
           onClick={onOpenBuyers}
@@ -147,15 +132,13 @@ export function StorefrontCard({
         </button>
 
         <div className="mt-auto flex flex-col gap-1.5 pt-2">
-          {/*
-            Хаагдсан/дууссан тойргийг ДАХИН НЭЭХГҮЙ: хугацаа нь өнгөрсөн тул
-            ирэх огноо нь ч өнгөрсөн болно, cron дахин хаана. Зөв үйлдэл нь
-            шинэ гаргалт үүсгэх.
-          */}
           {expired ? (
-            <Button full loading={busy} onClick={onNewRound}>
-              Дахин гаргах
-            </Button>
+            <Link
+              href="/admin/batches"
+              className="inline-flex h-11 w-full items-center justify-center rounded-[8px] bg-ink text-[14px] text-white no-underline"
+            >
+              Багцад дахин гаргах
+            </Link>
           ) : (
             <Button
               full
@@ -170,15 +153,10 @@ export function StorefrontCard({
             <Button size="sm" variant="ghost" className="flex-1" onClick={onEditRound}>
               {expired && !isOrder ? "Үлдэгдэл нэмэх" : "Үнэ, огноо"}
             </Button>
-            {!expired && (
-              <Button size="sm" variant="ghost" className="flex-1" onClick={onNewRound}>
-                Дахин гаргах
-              </Button>
-            )}
+            <Button size="sm" variant="ghost" className="flex-1" onClick={onEditProduct}>
+              Нэр, зураг
+            </Button>
           </div>
-          <Button size="sm" variant="ghost" full onClick={onEditProduct}>
-            Нэр, зураг засах
-          </Button>
         </div>
       </div>
     </div>

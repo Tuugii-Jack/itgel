@@ -18,11 +18,12 @@ export default function ReportsPage() {
   const [revenue, setRevenue] = useState<RevenueReport | null>(null);
   const [products, setProducts] = useState<ProductReportRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    setRefreshing(true);
     try {
       const [r, p] = await Promise.all([
         adminApi.revenue(period),
@@ -34,6 +35,7 @@ export default function ReportsPage() {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [period]);
 
@@ -49,7 +51,7 @@ export default function ReportsPage() {
         title="Тайлан, орлого"
         hint="Анхны үнэ ба зарах үнийн зөрүүгээр бодсон. Зөвхөн хүлээлгэн өгсөн захиалга."
         actions={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             {PERIODS.map((p) => (
               <Button
                 key={p.value}
@@ -60,6 +62,9 @@ export default function ReportsPage() {
                 {p.label}
               </Button>
             ))}
+            {refreshing && (
+              <span className="text-[13px] text-muted">Шинэчилж байна…</span>
+            )}
           </div>
         }
       />
@@ -70,10 +75,12 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {loading || !revenue ? (
+      {loading && !revenue ? (
         <div className="flex justify-center py-16">
           <Spinner className="text-muted" />
         </div>
+      ) : !revenue ? (
+        <Empty>Мэдээлэл алга.</Empty>
       ) : (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">

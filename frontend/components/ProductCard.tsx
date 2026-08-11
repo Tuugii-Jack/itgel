@@ -18,7 +18,7 @@ export function ProductCard({ product }: { product: Product }) {
   const soldOut =
     product.status === "SOLD_OUT" || (!isOrder && product.stock <= 0);
   const closed = product.status === "CLOSED";
-  const needsChoice = product.sizes.length > 0 || product.colors.length > 0;
+  const needsChoice = (product.options?.length ?? 0) > 0 || product.sizes.length > 0 || product.colors.length > 0;
 
   return (
     <div className='flex flex-col overflow-hidden rounded-[12px] border border-line bg-bg'>
@@ -87,6 +87,7 @@ export function ProductCard({ product }: { product: Product }) {
                   price: product.price,
                   image: product.images[0] ?? null,
                   type: product.type,
+                  selections: {},
                   size: null,
                   color: null,
                   qty: 1,

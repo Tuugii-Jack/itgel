@@ -15,9 +15,11 @@ import {
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel } from "@/lib/format";
+import { useToast } from "@/lib/toast";
 import type { AuditLog, Settings } from "@/lib/types";
 
 export default function SettingsPage() {
+  const toast = useToast();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [fees, setFees] = useState<[string, string][]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,11 +34,13 @@ export default function SettingsPage() {
       setSettings(data);
       setFees(Object.entries(data.deliveryFees ?? {}).map(([k, v]) => [k, String(v)]));
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     void load();
@@ -83,9 +87,12 @@ export default function SettingsPage() {
       });
       setSettings(updated);
       setSaved(true);
+      toast.success("Тохиргоо хадгалагдлаа.");
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хадгалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }

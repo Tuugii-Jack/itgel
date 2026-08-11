@@ -12,11 +12,12 @@ import {
   Card,
   ChoiceGroup,
   ErrorNote,
-  Spinner,
+  Skeleton,
 } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { arrivalLabel, dayLabel, money, rangeLabel } from "@/lib/format";
+import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
 export default function ProductPage({
@@ -27,11 +28,11 @@ export default function ProductPage({
   const { id } = use(params);
   const router = useRouter();
   const cart = useCart();
+  const toast = useToast();
 
   const [product, setProduct] = useState<Product | null>(null);
   const [store, setStore] = useState<Store | null>(null);
-  const [size, setSize] = useState<string | null>(null);
-  const [color, setColor] = useState<string | null>(null);
+  const [selections, setSelections] = useState<Record<string, string>>({});
   const [qty, setQty] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -41,8 +42,11 @@ export default function ProductPage({
       .then(([p, s]) => {
         setProduct(p);
         setStore(s);
-        if (p.sizes.length === 1) setSize(p.sizes[0]!);
-        if (p.colors.length === 1) setColor(p.colors[0]!);
+        const initial: Record<string, string> = {};
+        for (const opt of p.options ?? []) {
+          if (opt.values.length === 1) initial[opt.name] = opt.values[0]!;
+        }
+        setSelections(initial);
       })
       .catch((e: ApiError) => setError(e.message));
   }, [id]);
@@ -64,8 +68,23 @@ export default function ProductPage({
 
   if (!product || !store) {
     return (
-      <div className='flex justify-center py-24'>
-        <Spinner className='text-muted' />
+      <div className='page pb-28 lg:pb-12'>
+        <div className='sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-2 py-2 lg:hidden'>
+          <BackButton />
+          <Skeleton className='h-4 w-40' />
+        </div>
+        <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10 lg:pt-6'>
+          <div className='p-3 sm:p-4 lg:p-0'>
+            <Skeleton className='aspect-square w-full rounded-[12px]' />
+          </div>
+          <div className='flex flex-col gap-3 px-4 pt-5 lg:px-0 lg:pt-0'>
+            <Skeleton className='h-5 w-28' />
+            <Skeleton className='h-7 w-3/4' />
+            <Skeleton className='h-9 w-40' />
+            <Skeleton className='mt-3 h-24 w-full rounded-[12px]' />
+            <Skeleton className='h-11 w-full rounded-[8px]' />
+          </div>
+        </div>
       </div>
     );
   }
@@ -75,18 +94,16 @@ export default function ProductPage({
     product.status === "SOLD_OUT" || (!isOrder && product.stock <= 0);
   const closed = product.status === "CLOSED";
   const blocked = soldOut || closed;
-  const missing =
-    (product.sizes.length > 0 && !size) ||
-    (product.colors.length > 0 && !color);
+  const options = product.options ?? [];
+  const missingOpt = options.find((o) => !selections[o.name]);
+  const missing = Boolean(missingOpt);
   const total = product.price * qty;
 
   const addToCart = () => {
-    if (missing) {
-      setNotice(
-        product.sizes.length > 0 && !size
-          ? "Хэмжээгээ сонгоно уу."
-          : "Өнгөө сонгоно уу.",
-      );
+    if (missingOpt) {
+      const message = `${missingOpt.name}-г сонгоно уу.`;
+      setNotice(message);
+      toast.error(message);
       return;
     }
     cart.add({
@@ -95,13 +112,15 @@ export default function ProductPage({
       price: product.price,
       image: product.images[0] ?? null,
       type: product.type,
-      size,
-      color,
+      selections: { ...selections },
+      size: selections["Хэмжээ"] ?? null,
+      color: selections["Өнгө"] ?? null,
       qty,
       arriveFrom: product.arriveFrom,
       arriveTo: product.arriveTo,
       stock: product.stock,
     });
+    toast.success("Сагсанд нэмэгдлээ.");
     router.push("/cart");
   };
 
@@ -193,41 +212,27 @@ export default function ProductPage({
             closed={closed}
           />
 
-          {!blocked && product.sizes.length > 0 && (
-            <div className='px-4 pt-7 lg:px-0 lg:pt-0'>
-              <div className='mb-2 text-[14px] text-ink-2 lg:text-[13px]'>
-                Хэмжээ
-                {size && <span className='tnum'> · {size}</span>}
-              </div>
-              <ChoiceGroup
-                columns={4}
-                options={product.sizes.map((s) => ({ value: s, label: s }))}
-                value={size}
-                onChange={(v) => {
-                  setSize(v);
-                  setNotice(null);
-                }}
-              />
-            </div>
-          )}
-
-          {!blocked && product.colors.length > 0 && (
-            <div className='px-4 pt-6 lg:px-0 lg:pt-0'>
-              <div className='mb-2 text-[14px] text-ink-2 lg:text-[13px]'>
-                Өнгө
-                {color && <span> · {color}</span>}
-              </div>
-              <ChoiceGroup
-                columns={3}
-                options={product.colors.map((c) => ({ value: c, label: c }))}
-                value={color}
-                onChange={(v) => {
-                  setColor(v);
-                  setNotice(null);
-                }}
-              />
-            </div>
-          )}
+          {!blocked &&
+            options.map((opt) => {
+              const selected = selections[opt.name] ?? null;
+              return (
+                <div key={opt.name} className='px-4 pt-7 lg:px-0 lg:pt-0'>
+                  <div className='mb-2 text-[14px] text-ink-2 lg:text-[13px]'>
+                    {opt.name}
+                    {selected && <span className='tnum'> · {selected}</span>}
+                  </div>
+                  <ChoiceGroup
+                    columns={opt.values.length > 4 ? 4 : Math.max(2, opt.values.length)}
+                    options={opt.values.map((v) => ({ value: v, label: v }))}
+                    value={selected}
+                    onChange={(v) => {
+                      setSelections((prev) => ({ ...prev, [opt.name]: v }));
+                      setNotice(null);
+                    }}
+                  />
+                </div>
+              );
+            })}
 
           {/* Мобайл дээр тоо ширхэг тусдаа мөр, laptop дээр доод үйлдлийн мөрөнд */}
           {!blocked && (

@@ -4,9 +4,11 @@ import { useState } from "react";
 import { Button, Card, ErrorNote, Field, Input } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { useAdminSession } from "@/lib/admin-session";
+import { useToast } from "@/lib/toast";
 
 export default function AdminLoginPage() {
   const { signIn } = useAdminSession();
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -17,8 +19,11 @@ export default function AdminLoginPage() {
     setError(null);
     try {
       await signIn(email.trim(), password);
+      toast.success("Амжилттай нэвтэрлээ.");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Нэвтэрч чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Нэвтэрч чадсангүй.";
+      setError(message);
+      toast.error(message);
       setBusy(false);
     }
   };

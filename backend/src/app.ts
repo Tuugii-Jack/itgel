@@ -1,3 +1,4 @@
+import compression from 'compression';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
@@ -10,6 +11,8 @@ export function createApp() {
 
   app.set('trust proxy', 1);
   app.use(helmet());
+  // JSON хариуг шахаж илгээнэ — том жагсаалтын хариу олон дахин жижгэрнэ.
+  app.use(compression());
   app.use(
     cors({
       origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(',').map((o) => o.trim()),

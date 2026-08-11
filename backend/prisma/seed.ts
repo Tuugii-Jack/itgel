@@ -171,8 +171,12 @@ async function main() {
         images: [`https://placehold.co/800x800?text=${encodeURIComponent(seed.name)}`],
         variants: {
           create: [
-            ...(seed.sizes ?? []).map((value, i) => ({ kind: 'SIZE' as const, value, sortOrder: i })),
-            ...(seed.colors ?? []).map((value, i) => ({ kind: 'COLOR' as const, value, sortOrder: i })),
+            ...(seed.sizes ?? []).map((value, i) => ({ kind: 'Хэмжээ', value, sortOrder: i })),
+            ...(seed.colors ?? []).map((value, i) => ({
+              kind: 'Өнгө',
+              value,
+              sortOrder: 100 + i,
+            })),
           ],
         },
         sizeChart: {
@@ -247,15 +251,21 @@ async function main() {
   for (const [index, entry] of plan.entries()) {
     const items = entry.items.map(([productIndex, qty]) => {
       const product = products[productIndex]!;
-      const sizes = product.variants.filter((v) => v.kind === 'SIZE');
-      const colors = product.variants.filter((v) => v.kind === 'COLOR');
+      const sizes = product.variants.filter((v) => v.kind === 'Хэмжээ' || v.kind === 'SIZE');
+      const colors = product.variants.filter((v) => v.kind === 'Өнгө' || v.kind === 'COLOR');
       const round = product.rounds[0]!;
+      const size = sizes[index % Math.max(1, sizes.length)]?.value ?? null;
+      const color = colors[index % Math.max(1, colors.length)]?.value ?? null;
+      const selections: Record<string, string> = {};
+      if (size) selections['Хэмжээ'] = size;
+      if (color) selections['Өнгө'] = color;
       return {
         roundId: round.id,
         productId: product.id,
         nameSnapshot: product.name,
-        size: sizes[index % Math.max(1, sizes.length)]?.value ?? null,
-        color: colors[index % Math.max(1, colors.length)]?.value ?? null,
+        selections,
+        size,
+        color,
         qty,
         unitPrice: round.sellPrice,
         costPriceSnapshot: round.costPrice,

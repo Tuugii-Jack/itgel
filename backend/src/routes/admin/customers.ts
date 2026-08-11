@@ -38,28 +38,36 @@ adminCustomersRouter.get(
         orderBy: { createdAt: 'desc' },
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
-        include: {
-          orders: {
-            where: { deletedAt: null, status: { not: 'CANCELLED' } },
-            select: { subtotal: true, createdAt: true },
-          },
-        },
       }),
     ]);
 
+    // Захиалгын тоо, дүнг DB дээр нэгтгэнэ — хэрэглэгч бүрийн бүх
+    // захиалгыг хариунд багтаавал идэвхтэй хэрэглэгчдэд хариу томордог.
+    const stats = customers.length
+      ? await prisma.order.groupBy({
+          by: ['customerId'],
+          where: {
+            customerId: { in: customers.map((c) => c.id) },
+            deletedAt: null,
+            status: { not: 'CANCELLED' },
+          },
+          _count: { _all: true },
+          _sum: { subtotal: true },
+          _max: { createdAt: true },
+        })
+      : [];
+    const statsById = new Map(stats.map((s) => [s.customerId, s]));
+
     res.json({
       data: customers.map((customer) => {
-        const lastAt = customer.orders.reduce<Date | null>(
-          (latest, o) => (!latest || o.createdAt > latest ? o.createdAt : latest),
-          null,
-        );
+        const s = statsById.get(customer.id);
         return {
           id: customer.id,
           phone: customer.phone,
           name: customer.name,
-          orderCount: customer.orders.length,
-          totalSpent: customer.orders.reduce((sum, o) => sum + o.subtotal, 0),
-          lastOrderAt: toIso(lastAt),
+          orderCount: s?._count._all ?? 0,
+          totalSpent: s?._sum.subtotal ?? 0,
+          lastOrderAt: toIso(s?._max.createdAt ?? null),
           createdAt: customer.createdAt.toISOString(),
         };
       }),

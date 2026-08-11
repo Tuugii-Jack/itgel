@@ -4,11 +4,13 @@ import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
 import { FulfilmentChooser } from "@/components/FulfilmentChooser";
 import { PaymentPanel } from "@/components/PaymentPanel";
-import { Badge, Button, ErrorNote, Spinner, type Tone } from "@/components/ui";
+import { Badge, Button, ErrorNote, Skeleton, type Tone } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, relativeDay } from "@/lib/format";
+import { formatSelections } from "@/lib/options";
 import { useSession } from "@/lib/session";
 import { awaitingPayment } from "@/lib/payment";
+import { usePolling } from "@/lib/usePolling";
 import type { MyOrder, OrderStatus, PublicOrder, Store } from "@/lib/types";
 
 const STATUS_TONE: Record<OrderStatus, Tone> = {
@@ -67,6 +69,16 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
     };
   }, [session.me]);
 
+  const unpaid =
+    !!order &&
+    order.status !== "CANCELLED" &&
+    awaitingPayment(order.paymentState) &&
+    order.dueAmount > 0;
+
+  // Төлбөр хүлээгдэж байхад төлөвийг автоматаар шинэчилнэ —
+  // админ бүртгэмэгц «Төлөгдсөн» гэж харагдана.
+  usePolling(load, 15_000, unpaid);
+
   if (error) {
     return (
       <div className="p-4">
@@ -80,16 +92,27 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
 
   if (!order || !store) {
     return (
-      <div className="flex justify-center py-24">
-        <Spinner className="text-muted" />
+      <div className="screen pb-8">
+        <div className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
+          <span className="text-[15px] font-medium">Захиалга хянах</span>
+        </div>
+        <div className="px-4 pt-5 lg:px-10 lg:pt-8">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="mt-2 h-4 w-28" />
+          <div className="mt-6 grid grid-cols-3 gap-2">
+            <Skeleton className="h-1 w-full rounded-full" />
+            <Skeleton className="h-1 w-full rounded-full" />
+            <Skeleton className="h-1 w-full rounded-full" />
+          </div>
+          <Skeleton className="mt-5 h-28 w-full rounded-[12px]" />
+          <Skeleton className="mt-6 h-40 w-full rounded-[12px]" />
+        </div>
       </div>
     );
   }
 
   const stages = buildStages(order);
   const eta = etaOf(order);
-  const unpaid =
-    order.status !== "CANCELLED" && awaitingPayment(order.paymentState) && order.dueAmount > 0;
 
   return (
     <div className="screen pb-8">
@@ -266,8 +289,8 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                     {item.name}
                   </div>
                   <div className="text-[13px] text-muted">
-                    {[item.size, item.color].filter(Boolean).join(" · ")}
-                    {[item.size, item.color].filter(Boolean).length > 0 ? " · " : ""}
+                    {formatSelections(item.selections, item.size, item.color)}
+                    {formatSelections(item.selections, item.size, item.color) ? " · " : ""}
                     {item.qty} ш
                   </div>
                 </div>

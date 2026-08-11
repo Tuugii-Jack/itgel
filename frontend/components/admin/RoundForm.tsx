@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import { Badge, Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayKey, money } from "@/lib/format";
-import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
+import { useToast } from "@/lib/toast";
+import type { AdminBatch, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
 const STATUSES: { value: ProductStatus; label: string }[] = [
   { value: "DRAFT", label: "Ноорог" },
@@ -13,15 +14,11 @@ const STATUSES: { value: ProductStatus; label: string }[] = [
   { value: "HIDDEN", label: "Нуусан" },
   { value: "CLOSED", label: "Хаагдсан" },
   { value: "SOLD_OUT", label: "Дууссан" },
+  { value: "ARCHIVED", label: "Архивласан" },
 ];
 
 /**
- * Барааны нэг гаргалт — үнэ, хаах огноо, үлдэгдэл, төлөв.
- *
- * `round` нь null бол ШИНЭ гаргалт («дахин гаргах»): сүүлийн тойргийн утгууд
- * анхдагчаар орох тул ихэнхдээ зөвхөн шинэ хаах огноогоо тавихад хангалттай.
- * Хуучин тойрог огт хөндөгдөхгүй — түүнээс захиалсан хүмүүсийн үнэ, амласан
- * огноо хэвээрээ үлдэнэ.
+ * Барааны нэг гаргалт — үнэ, хаах огноо, үлдэгдэл, төлөв, багц.
  */
 export function RoundForm({
   product,
@@ -34,7 +31,6 @@ export function RoundForm({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
-  // Шинэ тойрогт өмнөхийнх нь утгыг санал болгоно.
   const base = round ?? product.currentRound;
 
   const [costPrice, setCostPrice] = useState(String(base?.costPrice ?? ""));
@@ -46,8 +42,19 @@ export function RoundForm({
   const [leadMax, setLeadMax] = useState(String(base?.leadMaxDays ?? 14));
   const [status, setStatus] = useState<ProductStatus>(round?.status ?? "ACTIVE");
   const [note, setNote] = useState(round?.note ?? "");
+  const [batchId, setBatchId] = useState(round?.batchId ?? "");
+  const [batches, setBatches] = useState<AdminBatch[]>([]);
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void adminApi
+      .batches({ stage: "COLLECTING", pageSize: 50 })
+      .then((list) => setBatches(list.data))
+      .catch(() => undefined);
+  }, []);
 
   const cost = Number(costPrice) || 0;
   const sell = Number(sellPrice) || 0;
@@ -68,40 +75,65 @@ export function RoundForm({
         leadMaxDays: Number(leadMax) || 0,
         status,
         note: note.trim() || null,
+        ...(isOrder ? { batchId: batchId.trim() ? batchId : null } : {}),
       };
 
       if (round) await adminApi.updateRound(round.id, body);
-      else await adminApi.createRound(product.id, { ...body, note: body.note ?? undefined });
+      else
+        await adminApi.createRound(product.id, {
+          ...body,
+          note: body.note ?? undefined,
+          batchId: isOrder ? body.batchId : undefined,
+        });
 
+      toast.success(round ? "Гаргалт хадгалагдлаа." : "Гаргалт үүслээ.");
       await onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хадгалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
+      setError(message);
+      toast.error(message);
       setBusy(false);
     }
   };
 
   const remove = async () => {
     if (!round) return;
-    setBusy(true);
+    setDeleting(true);
     setError(null);
     try {
       await adminApi.deleteRound(round.id);
+      toast.success("Гаргалт устлаа.");
       await onSaved();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Устгаж чадсангүй.");
-      setBusy(false);
+      const message = e instanceof ApiError ? e.message : "Устгаж чадсангүй.";
+      setError(message);
+      toast.error(message);
+      setDeleting(false);
     }
   };
 
   const nextNo = (product.rounds[0]?.roundNo ?? 0) + 1;
 
+  const batchOptions = [
+    ...batches.map((b) => ({ value: b.id, label: b.name })),
+    ...(round?.batchId &&
+    round.batch &&
+    !batches.some((b) => b.id === round.batchId)
+      ? [{ value: round.batch.id, label: `${round.batch.name} (хаагдсан)` }]
+      : []),
+  ];
+
   return (
     <div className="max-w-[640px]">
       <PageHead
-        title={round ? `${product.name} — #${round.roundNo} гаргалт` : `${product.name} — дахин гаргах`}
+        title={
+          round
+            ? `${product.name} — #${round.roundNo} гаргалт`
+            : `${product.name} — дахин гаргах`
+        }
         hint={
           round
-            ? "Энэ гаргалтын үнэ, огноог засна. Бусад гаргалт хөндөгдөхгүй."
+            ? "Үнэ, огноо, багц. Багцад холбоход захиалгууд дагана; огноо солигдвол ирэх өдөр шинэчлэгдэнэ."
             : `#${nextNo} гаргалт үүснэ. Өмнөх гаргалт болон түүний захиалгууд хэвээрээ үлдэнэ.`
         }
         actions={
@@ -109,7 +141,7 @@ export function RoundForm({
             <Button variant="ghost" onClick={onClose}>
               Болих
             </Button>
-            <Button onClick={save} loading={busy} disabled={sell <= 0}>
+            <Button onClick={save} loading={busy} disabled={deleting || sell <= 0}>
               {round ? "Хадгалах" : "Гаргах"}
             </Button>
           </>
@@ -185,10 +217,18 @@ export function RoundForm({
                   />
                 </Field>
               </div>
-              <p className="m-0 text-[12px] text-muted">
-                Гарт очих огноо = хаагдах өдөр + эдгээр хоног. Захиалга өгөх мөчид
-                тухайн захиалганд царцаж хадгалагдана.
-              </p>
+              <Field
+                label="Ачааны багц"
+                hint="Холбоход энэ гаргалтын захиалгууд багцад орно."
+              >
+                <Select
+                  value={batchId}
+                  onChange={setBatchId}
+                  options={batchOptions}
+                  placeholder="Багцгүй"
+                  className="w-full"
+                />
+              </Field>
             </>
           ) : (
             <Field label="Үлдэгдэл">
@@ -220,7 +260,7 @@ export function RoundForm({
             <div className="text-[13px] text-ink-2">
               Захиалгагүй гаргалтыг л устгана. Захиалгатай бол статусыг «Архивласан» болгоно уу.
             </div>
-            <Button variant="danger" size="sm" onClick={remove} disabled={busy}>
+            <Button variant="danger" size="sm" onClick={remove} disabled={busy} loading={deleting}>
               Гаргалт устгах
             </Button>
           </Card>

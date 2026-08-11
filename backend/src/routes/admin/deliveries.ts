@@ -16,6 +16,8 @@ const listQuery = z.object({
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   status: z.enum(['PENDING', 'ASSIGNED', 'DELIVERED']).optional(),
   district: z.string().trim().min(1).max(60).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(100),
 });
 
 adminDeliveriesRouter.get(
@@ -37,11 +39,27 @@ adminDeliveriesRouter.get(
       ...(q.district ? { district: q.district } : {}),
     };
 
-    const deliveries = await prisma.delivery.findMany({
-      where,
-      orderBy: [{ scheduledDay: 'asc' }, { district: 'asc' }],
-      include: { order: { include: { customer: true } } },
-    });
+    // Хуудаслалт — шүүлтгүй үед бүх түүхийг нэг дор татахаас сэргийлнэ.
+    const [total, deliveries] = await Promise.all([
+      prisma.delivery.count({ where }),
+      prisma.delivery.findMany({
+        where,
+        orderBy: [{ scheduledDay: 'asc' }, { district: 'asc' }],
+        skip: (q.page - 1) * q.pageSize,
+        take: q.pageSize,
+        include: {
+          order: {
+            select: {
+              id: true,
+              code: true,
+              status: true,
+              dueAmount: true,
+              customer: { select: { name: true, phone: true } },
+            },
+          },
+        },
+      }),
+    ]);
 
     res.json({
       data: deliveries.map((d) => ({
@@ -61,7 +79,7 @@ adminDeliveriesRouter.get(
           customer: { name: d.order.customer.name, phone: d.order.customer.phone },
         },
       })),
-      meta: { total: deliveries.length },
+      meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
     });
   }),
 );

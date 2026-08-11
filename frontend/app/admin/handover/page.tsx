@@ -6,12 +6,14 @@ import { OrderBadge, PageHead } from "@/components/admin/shared";
 import { Button, Card, Divider, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { money, phoneLabel } from "@/lib/format";
+import { useToast } from "@/lib/toast";
 import type { AdminOrderDetail, AdminOrderRow } from "@/lib/types";
 
 type Found = AdminOrderDetail & { canHandOver: boolean; blockReason: string | null };
 
 /** Ажилтан нөгөө гартаа хайрцаг барьж байгаа — товч доод талд, том. */
 export default function HandoverPage() {
+  const toast = useToast();
   const [pending, setPending] = useState<AdminOrderRow[]>([]);
   const [found, setFound] = useState<Found | null>(null);
   const [code, setCode] = useState("");
@@ -29,11 +31,13 @@ export default function HandoverPage() {
       const list = await adminApi.orders({ status: "ARRIVED", pageSize: 100 });
       setPending(list.data);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     void loadPending();
@@ -54,11 +58,13 @@ export default function HandoverPage() {
       setFound(await adminApi.handoverLookup(value));
     } catch (e) {
       setFound(null);
-      setError(e instanceof ApiError ? e.message : "Хайж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хайж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [toast]);
 
   const complete = async () => {
     if (!found) return;
@@ -74,12 +80,15 @@ export default function HandoverPage() {
           : { collectedAmount: 0 },
       );
       setDone(result.code);
+      toast.success(`${result.code} хүлээлгэж өглөө.`);
       setFound(null);
       setCode("");
       setCashTaken(false);
       await loadPending();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хүлээлгэн өгч чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хүлээлгэн өгч чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }

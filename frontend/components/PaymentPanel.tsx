@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Badge, Button, Card, Divider } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { money } from "@/lib/format";
+import { useToast } from "@/lib/toast";
 import type { PublicOrder, Store } from "@/lib/types";
 
 /**
@@ -22,6 +23,7 @@ export function PaymentPanel({
   /** Мэдэгдэл амжилттай явсны дараа захиалгыг дахин ачаалах. */
   onClaimed?: () => void;
 }) {
+  const toast = useToast();
   const [claimedAt, setClaimedAt] = useState(order.paymentClaimedAt);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,9 +52,12 @@ export function PaymentPanel({
     try {
       const result = await api.claimPayment(order.code);
       setClaimedAt(result.paymentClaimedAt);
+      toast.success("Шилжүүлсэн гэж мэдэгдлээ.");
       onClaimed?.();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Мэдэгдэж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Мэдэгдэж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }

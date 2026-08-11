@@ -11,6 +11,7 @@ import {
   ErrorNote,
   Field,
   Input,
+  Skeleton,
   Spinner,
   Textarea,
   Toggle,
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
+import { useToast } from "@/lib/toast";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { awaitingPayment, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
 import type { MyOrder, OrderStatus, Store } from "@/lib/types";
@@ -64,6 +66,7 @@ export default function ProfilePage() {
 /** Утас → код → нэвтрэлт. Бүртгэл үүсгэх шаардлагагүй. */
 function SignIn() {
   const session = useSession();
+  const toast = useToast();
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
@@ -86,8 +89,11 @@ function SignIn() {
       setDevCode(result.devCode ?? null);
       setCooldown(result.resendAfterSec);
       setSent(true);
+      toast.success("Код илгээлээ.");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Код илгээж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Код илгээж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -99,8 +105,11 @@ function SignIn() {
     try {
       const result = await api.verifyOtp(phone, code);
       await session.signIn(result.token);
+      toast.success("Амжилттай нэвтэрлээ.");
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Код шалгаж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Код шалгаж чадсангүй.";
+      setError(message);
+      toast.error(message);
       setBusy(false);
     }
   };
@@ -185,14 +194,18 @@ function Profile() {
   const [totals, setTotals] = useState({ totalSpent: 0, activeCount: 0 });
   const [store, setStore] = useState<Store | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [result, s] = await Promise.all([api.myOrders(), api.store()]);
       setOrders(result.data);
       setTotals({ totalSpent: result.meta.totalSpent, activeCount: result.meta.activeCount });
       setStore(s);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
     } finally {
       setLoading(false);
     }
@@ -267,9 +280,25 @@ function Profile() {
       </div>
 
       <div className="lg:min-w-0">
+        {error && (
+          <div className="px-4 pt-4 lg:px-0 lg:pt-0">
+            <ErrorNote>
+              {error}{" "}
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="cursor-pointer border-0 bg-transparent p-0 text-danger underline"
+              >
+                Дахин оролдох
+              </button>
+            </ErrorNote>
+          </div>
+        )}
         {loading ? (
-          <div className="flex justify-center py-16">
-            <Spinner className="text-muted" />
+          <div className="flex flex-col gap-3 px-4 pt-4 lg:grid lg:grid-cols-2 lg:gap-4 lg:px-0 lg:pt-0">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-44 w-full rounded-[12px]" />
+            ))}
           </div>
         ) : tab === "orders" ? (
           <OrdersTab orders={orders} activeCount={totals.activeCount} />
@@ -478,11 +507,14 @@ function PaymentsTab({
 
 function InfoTab() {
   const session = useSession();
+  const toast = useToast();
   const me = session.me!;
   const [name, setName] = useState(me.name ?? "");
   const [district, setDistrict] = useState(me.address.district ?? "");
   const [khoroo, setKhoroo] = useState(me.address.khoroo ?? "");
   const [addressText, setAddressText] = useState(me.address.addressText ?? "");
+  /* Шилжүүлэгчийг оптимист шинэчилнэ — дарахад шууд хөдөлж, алдаа гарвал буцна. */
+  const [notif, setNotif] = useState(me.notifications);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -499,20 +531,31 @@ function InfoTab() {
       });
       await session.refresh();
       setSaved(true);
+      toast.success("Мэдээлэл хадгалагдлаа.");
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хадгалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
   };
 
-  const toggle = async (key: "notifyPayment" | "notifyArrival" | "notifyPromo", value: boolean) => {
+  const toggle = async (
+    key: "notifyPayment" | "notifyArrival" | "notifyPromo",
+    field: "payment" | "arrival" | "promo",
+    value: boolean,
+  ) => {
+    const prev = notif;
+    setNotif({ ...notif, [field]: value });
     try {
       await api.updateMe({ [key]: value });
-      await session.refresh();
+      void session.refresh();
+      toast.success("Тохиргоо хадгалагдлаа.");
     } catch {
-      setError("Тохиргоог хадгалж чадсангүй.");
+      setNotif(prev);
+      toast.error("Тохиргоог хадгалж чадсангүй. Дахин оролдоно уу.");
     }
   };
 
@@ -570,22 +613,22 @@ function InfoTab() {
         <Toggle
           label="Төлбөр баталгаажсан"
           hint="SMS-ээр мэдэгдэнэ"
-          checked={me.notifications.payment}
-          onChange={(v) => toggle("notifyPayment", v)}
+          checked={notif.payment}
+          onChange={(v) => toggle("notifyPayment", "payment", v)}
         />
         <Divider />
         <Toggle
           label="Бараа ирсэн"
           hint="SMS-ээр мэдэгдэнэ"
-          checked={me.notifications.arrival}
-          onChange={(v) => toggle("notifyArrival", v)}
+          checked={notif.arrival}
+          onChange={(v) => toggle("notifyArrival", "arrival", v)}
         />
         <Divider />
         <Toggle
           label="Шинэ бараа, урамшуулал"
           hint="Сард 1-2 удаа"
-          checked={me.notifications.promo}
-          onChange={(v) => toggle("notifyPromo", v)}
+          checked={notif.promo}
+          onChange={(v) => toggle("notifyPromo", "promo", v)}
         />
       </Card>
 

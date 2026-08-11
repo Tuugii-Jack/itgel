@@ -15,6 +15,11 @@ import { computeTotals, paymentState, recalcOrderTotals } from '../../services/m
 import { deliveryFeeFor, getSettings } from '../../services/settings.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { claimDeliverySlot } from '../../services/delivery.js';
+import {
+  normalizeSelections,
+  optionsFromVariants,
+  sizeColorFromSelections,
+} from '../../lib/options.js';
 
 export const publicOrdersRouter = Router();
 
@@ -32,6 +37,8 @@ const createBody = z.object({
       z.object({
         productId: z.string().min(1),
         qty: z.coerce.number().int().min(1).max(50),
+        selections: z.record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(40)).optional(),
+        /** Хуучин клиент. */
         size: z.string().trim().max(40).optional(),
         color: z.string().trim().max(40).optional(),
       }),
@@ -73,13 +80,20 @@ publicOrdersRouter.post(
       if (round.closeAt === null && round.stock < item.qty) {
         throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${round.stock}).`);
       }
-      const sizes = round.product.variants.filter((v) => v.kind === 'SIZE').map((v) => v.value);
-      const colors = round.product.variants.filter((v) => v.kind === 'COLOR').map((v) => v.value);
-      if (sizes.length > 0 && (!item.size || !sizes.includes(item.size))) {
-        throw badRequest(`"${name}" барааны хэмжээг сонгоно уу.`, { sizes });
-      }
-      if (colors.length > 0 && (!item.color || !colors.includes(item.color))) {
-        throw badRequest(`"${name}" барааны өнгийг сонгоно уу.`, { colors });
+      const options = optionsFromVariants(round.product.variants);
+      const selections = normalizeSelections({
+        selections: item.selections,
+        size: item.size,
+        color: item.color,
+      });
+      for (const opt of options) {
+        const value = selections[opt.name];
+        if (!value || !opt.values.includes(value)) {
+          throw badRequest(`"${name}" барааны ${opt.name}-г сонгоно уу.`, {
+            option: opt.name,
+            values: opt.values,
+          });
+        }
       }
     }
 
@@ -88,12 +102,23 @@ publicOrdersRouter.post(
       // Ирэх огноог ЭНД царцаана. Тойрог дараа дахин гарсан ч энэ захиалгын
       // амлалт хөдлөхгүй.
       const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
+      const options = optionsFromVariants(round.product.variants);
+      const raw = normalizeSelections({
+        selections: item.selections,
+        size: item.size,
+        color: item.color,
+      });
+      const selections = Object.fromEntries(
+        options.map((opt) => [opt.name, raw[opt.name]!]),
+      );
+      const { size, color } = sizeColorFromSelections(selections);
       return {
         roundId: round.id,
         productId: round.productId,
         nameSnapshot: round.product.name,
-        size: item.size ?? null,
-        color: item.color ?? null,
+        selections,
+        size,
+        color,
         qty: item.qty,
         unitPrice: round.sellPrice,
         costPriceSnapshot: round.costPrice,
@@ -153,7 +178,14 @@ publicOrdersRouter.post(
       return created;
     });
 
-    await sms.send({ phone: body.phone, text: smsTemplates.orderCreated(order.code, subtotal) });
+    // SMS-ийг хүлээхгүй — провайдер удаашрахад «Захиалах» товч гацахгүй.
+    // Илгээгдээгүй ч захиалга үүссэн; хэрэглэгч кодоо дэлгэцээс харна.
+    void sms
+      .send({ phone: body.phone, text: smsTemplates.orderCreated(order.code, subtotal) })
+      .then((r) => {
+        if (!r.ok) console.warn(`[sms] ${order.code} захиалгын мэдэгдэл илгээгдсэнгүй: ${r.error}`);
+      })
+      .catch((e) => console.warn(`[sms] ${order.code} захиалгын мэдэгдэл алдаа:`, e));
 
     res.status(201).json({
       data: {

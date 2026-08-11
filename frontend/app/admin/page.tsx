@@ -12,9 +12,10 @@ import {
   Td,
   Th,
 } from "@/components/admin/shared";
-import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { adminApi, ApiError } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import type { AdminBatch, AdminOrderRow, AdminSummary, OrderStatus } from "@/lib/types";
@@ -29,9 +30,13 @@ const STATUSES: OrderStatus[] = [
   "CANCELLED",
 ];
 
+const ORDERS_PAGE_SIZE = 100;
+
 export default function AdminOrdersPage() {
+  const toast = useToast();
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
+  const [pageMeta, setPageMeta] = useState({ page: 1, pages: 1, total: 0 });
   const [batches, setBatches] = useState<AdminBatch[]>([]);
   const [status, setStatus] = useState("");
   const [batch, setBatch] = useState("");
@@ -40,37 +45,76 @@ export default function AdminOrdersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openId, setOpenId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  /** Аль үйлдэл явж байгааг заана — тухайн товч л spinner-тэй харагдана. */
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const busy = busyAction !== null;
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
 
+  const fetchOrders = useCallback(
+    (page: number) =>
+      adminApi.orders({
+        status: status || undefined,
+        batch: batch || undefined,
+        q: query || undefined,
+        page,
+        pageSize: ORDERS_PAGE_SIZE,
+      }),
+    [status, batch, query],
+  );
+
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    setRefreshing(true);
     try {
       const [s, list, b] = await Promise.all([
         adminApi.summary(),
-        adminApi.orders({ status: status || undefined, batch: batch || undefined, q: query || undefined, pageSize: 100 }),
+        fetchOrders(1),
         adminApi.batches({ pageSize: 100 }),
       ]);
       setSummary(s);
       setOrders(list.data);
+      setPageMeta({
+        page: list.meta?.page ?? 1,
+        pages: list.meta?.pages ?? 1,
+        total: list.meta?.total ?? list.data.length,
+      });
       setBatches(b.data);
       setSelected(new Set());
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [status, batch, query]);
+  }, [fetchOrders]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadMore = async () => {
+    setMoreLoading(true);
+    try {
+      const list = await fetchOrders(pageMeta.page + 1);
+      setOrders((prev) => [...prev, ...list.data]);
+      setPageMeta({
+        page: list.meta?.page ?? pageMeta.page + 1,
+        pages: list.meta?.pages ?? pageMeta.pages,
+        total: list.meta?.total ?? pageMeta.total,
+      });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+    } finally {
+      setMoreLoading(false);
+    }
+  };
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -83,7 +127,7 @@ export default function AdminOrdersPage() {
 
   /** Сонгосон захиалгуудыг нэг хүсэлтээр шилжүүлнэ. */
   const advanceSelected = async (target: OrderStatus) => {
-    setBusy(true);
+    setBusyAction(target);
     setError(null);
 
     let message: string | null = null;
@@ -93,11 +137,17 @@ export default function AdminOrdersPage() {
         message =
           `${result.succeeded} амжилттай, ${result.failed.length} алдаатай — ` +
           result.failed.map((f) => `${f.code ?? f.id}: ${f.message}`).join(" · ");
+        toast.error(message);
+      } else {
+        toast.success(
+          `${result.succeeded} захиалга ${ORDER_STATUS_LABEL[target].toLowerCase()} боллоо.`,
+        );
       }
     } catch (e) {
       message = e instanceof ApiError ? e.message : "Гүйцэтгэж чадсангүй.";
+      toast.error(message);
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
 
     // `load()` нь алдааг цэвэрлэдэг тул мэдэгдлийг түүний дараа тавина.
@@ -106,14 +156,18 @@ export default function AdminOrdersPage() {
   };
 
   const addToBatch = async (batchId: string) => {
-    setBusy(true);
+    setBusyAction("batch");
+    const count = selected.size;
     try {
       await adminApi.updateBatchOrders(batchId, { add: [...selected] });
+      toast.success(`${count} захиалга багцад нэмэгдлээ.`);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Багцад нэмж чадсангүй.");
+      const msg = e instanceof ApiError ? e.message : "Багцад нэмж чадсангүй.";
+      setError(msg);
+      toast.error(msg);
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -151,7 +205,7 @@ export default function AdminOrdersPage() {
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Select
           value={status}
           onChange={setStatus}
@@ -171,16 +225,31 @@ export default function AdminOrdersPage() {
             placeholder="Код, нэр, утасны сүүлийн 4 орон"
           />
         </div>
+        {refreshing && (
+          <span className="text-[13px] text-muted">Шинэчилж байна…</span>
+        )}
       </div>
 
       {selected.size > 0 && (
         <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
           <span className="text-[14px]">{selected.size} захиалга сонгосон</span>
           <div className="ml-auto flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => advanceSelected("CONFIRMED")} disabled={busy}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => advanceSelected("CONFIRMED")}
+              disabled={busy}
+              loading={busyAction === "CONFIRMED"}
+            >
               Баталгаажуулах
             </Button>
-            <Button size="sm" variant="outline" onClick={() => advanceSelected("CANCELLED")} disabled={busy}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => advanceSelected("CANCELLED")}
+              disabled={busy}
+              loading={busyAction === "CANCELLED"}
+            >
               Цуцлах
             </Button>
             <Select
@@ -205,9 +274,11 @@ export default function AdminOrdersPage() {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <Spinner className="text-muted" />
+      {loading && orders.length === 0 ? (
+        <div className="flex flex-col gap-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-[12px]" />
+          ))}
         </div>
       ) : orders.length === 0 ? (
         <Empty>Захиалга олдсонгүй.</Empty>
@@ -342,9 +413,17 @@ export default function AdminOrdersPage() {
                   )}
                   {order.batch && <Badge tone="info">{order.batch.name}</Badge>}
                 </div>
-              </Card>
+                </Card>
             ))}
           </div>
+
+          {pageMeta.page < pageMeta.pages && (
+            <div className="flex justify-center pt-4">
+              <Button variant="outline" onClick={loadMore} loading={moreLoading}>
+                Цааш үзэх · {pageMeta.total - orders.length} захиалга
+              </Button>
+            </div>
+          )}
         </>
       )}
     </div>

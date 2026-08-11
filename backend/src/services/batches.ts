@@ -1,6 +1,7 @@
-import type { Batch, Order, OrderStatus } from '@prisma/client';
+import type { Batch, Order, OrderStatus, Prisma, ProductRound } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
+import { computeArrival } from '../lib/date.js';
 import { conflict, notFound } from '../lib/errors.js';
 import {
   BATCH_STAGE_LABEL,
@@ -20,6 +21,133 @@ const STATUS_TIMESTAMP: Partial<Record<OrderStatus, string>> = {
   HANDED_OVER: 'handedOverAt',
   CANCELLED: 'cancelledAt',
 };
+
+/** Багцад холбохдоо/салгахдаа хөндөхгүй захиалгын төлөв. */
+const FROZEN_ORDER_STATUSES: OrderStatus[] = ['CANCELLED', 'HANDED_OVER'];
+
+export type Tx = Prisma.TransactionClient;
+
+/**
+ * Тойрогт захиалсан (цуцлагдаагүй, гартаа өгөөгүй) захиалгуудыг багцад хавсаргана.
+ * Аль хэдийн өөр багцад байгааг хөндөхгүй.
+ */
+export async function attachOrdersForRound(
+  tx: Tx,
+  roundId: string,
+  batchId: string,
+): Promise<number> {
+  const items = await tx.orderItem.findMany({
+    where: {
+      roundId,
+      cancelledAt: null,
+      order: {
+        deletedAt: null,
+        status: { notIn: FROZEN_ORDER_STATUSES },
+        OR: [{ batchId: null }, { batchId }],
+      },
+    },
+    select: { orderId: true },
+  });
+  const orderIds = [...new Set(items.map((i) => i.orderId))];
+  if (orderIds.length === 0) return 0;
+
+  const result = await tx.order.updateMany({
+    where: {
+      id: { in: orderIds },
+      deletedAt: null,
+      status: { notIn: FROZEN_ORDER_STATUSES },
+      OR: [{ batchId: null }, { batchId }],
+    },
+    data: { batchId },
+  });
+  return result.count;
+}
+
+/**
+ * Тойрог багцаас салахад: зөвхөн энэ тойргоор багцад орсон захиалгын
+ * batchId-г цэвэрлэнэ (бусад тойрог нь тэр багцад үлдээсэн бол үлдээнэ).
+ */
+export async function detachOrdersForRound(
+  tx: Tx,
+  roundId: string,
+  batchId: string,
+): Promise<number> {
+  const items = await tx.orderItem.findMany({
+    where: {
+      roundId,
+      cancelledAt: null,
+      order: { deletedAt: null, batchId },
+    },
+    select: { orderId: true },
+  });
+  const candidateIds = [...new Set(items.map((i) => i.orderId))];
+  if (candidateIds.length === 0) return 0;
+
+  // Бусад тойрог нь энэ багцад байгаа эсэхийг шалгана.
+  const stillLinked = await tx.orderItem.findMany({
+    where: {
+      orderId: { in: candidateIds },
+      cancelledAt: null,
+      roundId: { not: roundId },
+      round: { batchId, deletedAt: null },
+      order: { deletedAt: null },
+    },
+    select: { orderId: true },
+  });
+  const keep = new Set(stillLinked.map((i) => i.orderId));
+  const clearIds = candidateIds.filter((id) => !keep.has(id));
+  if (clearIds.length === 0) return 0;
+
+  const result = await tx.order.updateMany({
+    where: {
+      id: { in: clearIds },
+      batchId,
+      status: { notIn: FROZEN_ORDER_STATUSES },
+    },
+    data: { batchId: null },
+  });
+  return result.count;
+}
+
+/**
+ * Багцын тойргуудын closeAt + lead-ээс захиалгын мөрүүдийн ирэх огноог дахин тооцно.
+ * Цуцлагдсан мөр / гартаа өгсөн захиалгыг хөндөхгүй.
+ */
+export async function resyncArrivalsForBatch(
+  tx: Tx,
+  batch: Pick<Batch, 'id'> & { deadline?: Date | null },
+  rounds?: Pick<ProductRound, 'id' | 'closeAt' | 'leadMinDays' | 'leadMaxDays'>[],
+): Promise<number> {
+  const list =
+    rounds ??
+    (await tx.productRound.findMany({
+      where: { batchId: batch.id, deletedAt: null, closeAt: { not: null } },
+      select: { id: true, closeAt: true, leadMinDays: true, leadMaxDays: true },
+    }));
+
+  let updated = 0;
+  for (const round of list) {
+    if (!round.closeAt) continue;
+    const { arriveFrom, arriveTo } = computeArrival(
+      round.closeAt,
+      round.leadMinDays,
+      round.leadMaxDays,
+    );
+    const result = await tx.orderItem.updateMany({
+      where: {
+        roundId: round.id,
+        cancelledAt: null,
+        order: {
+          deletedAt: null,
+          status: { notIn: FROZEN_ORDER_STATUSES },
+        },
+      },
+      data: { arriveFrom, arriveTo },
+    });
+    updated += result.count;
+  }
+  return updated;
+}
 
 export interface AdvanceResult {
   batch: Batch;
@@ -64,6 +192,15 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
       },
     });
 
+    // Багц захиалга авахаа болиход түүнд зориулж гаргасан, идэвхтэй хэвээр
+    // байгаа тойргууд хамт хаагдана — дэлгүүрт «Захиалга хаагдсан» болно.
+    if (next === 'CLOSED') {
+      await tx.productRound.updateMany({
+        where: { batchId: batch.id, status: 'ACTIVE', deletedAt: null },
+        data: { status: 'CLOSED' },
+      });
+    }
+
     const target = orderStatusForBatchStage(next);
     let moved = 0;
     let skipped = 0;
@@ -71,21 +208,34 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
     if (target) {
       const now = new Date();
 
+      // Ижил төлөвтэй захиалгуудыг бүлэглэж, бүлэг бүрд ганц updateMany +
+      // createMany хийнэ. Захиалга бүрд тусдаа хоёр бичилт хийвэл том багц
+      // ахиулахад олон секунд зарцуулагддаг байсан.
+      const groups = new Map<OrderStatus, typeof batch.orders>();
       for (const order of batch.orders) {
-        const steps = stepsToStatus(order.status, target);
+        const list = groups.get(order.status) ?? [];
+        list.push(order);
+        groups.set(order.status, list);
+      }
+
+      for (const [from, orders] of groups) {
+        const sample = orders[0];
+        if (!sample) continue;
+        const steps = stepsToStatus(from, target);
         if (steps.length === 0) {
-          skipped += 1;
+          skipped += orders.length;
           continue;
         }
 
-        // Гинжин алхам бүр зөвшөөрөгдсөн эсэхийг шалгана.
-        let current = order.status;
+        // Гинжин алхам бүр зөвшөөрөгдсөн эсэхийг шалгана — бүлэг доторх
+        // захиалгууд ижил төлөвтэй тул нэг л удаа шалгахад хангалттай.
+        let current = from;
         const timestamps: Record<string, Date> = {};
         for (const step of steps) {
           if (!canTransition(current, step)) {
             throw conflict(
-              `${order.code} захиалгыг "${step}" руу шилжүүлэх боломжгүй.`,
-              { orderCode: order.code, from: current, to: step },
+              `${sample.code} захиалгыг "${step}" руу шилжүүлэх боломжгүй.`,
+              { orderCode: sample.code, from: current, to: step },
             );
           }
           const field = STATUS_TIMESTAMP[step];
@@ -93,28 +243,27 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
           current = step;
         }
 
-        await tx.order.update({
-          where: { id: order.id },
+        await tx.order.updateMany({
+          where: { id: { in: orders.map((o) => o.id) } },
           data: { status: target, ...timestamps },
         });
 
-        await audit(
-          {
+        await tx.auditLog.createMany({
+          data: orders.map((order) => ({
             actor,
             action: 'STATUS_CHANGE',
             entity: 'Order',
             entityId: order.id,
-            before: { status: order.status },
+            before: { status: from },
             after: {
               status: target,
               reason: `Багц "${batch.name}" → ${BATCH_STAGE_LABEL[next]}`,
             },
-          },
-          tx,
-        );
+          })),
+        });
 
-        if (target === 'ARRIVED') arrivedOrderIds.push(order.id);
-        moved += 1;
+        if (target === 'ARRIVED') arrivedOrderIds.push(...orders.map((o) => o.id));
+        moved += orders.length;
       }
     } else {
       skipped = batch.orders.length;
@@ -136,10 +285,14 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
   });
 
   // Мэдэгдэл нь транзакцын гадна — SMS амжилтгүй болсон ч төлөв буцахгүй.
-  // Илгээгдээгүй нь `arrivalNotifiedAt` -аар тэмдэглэгдэж, cron барина.
-  for (const orderId of arrivedOrderIds) {
-    const order = await prisma.order.findUnique({ where: { id: orderId } });
-    if (order) await notifyArrival(order as Order);
+  // Хүлээхгүй илгээнэ: олон захиалгатай багцад «Шат ахиулах» товч SMS
+  // провайдерээс хамаарч гацахгүй. Илгээгдээгүй нь `arrivalNotifiedAt`-аар
+  // тэмдэглэгдэж, cron барина.
+  if (arrivedOrderIds.length > 0) {
+    void (async () => {
+      const orders = await prisma.order.findMany({ where: { id: { in: arrivedOrderIds } } });
+      for (const order of orders) await notifyArrival(order as Order);
+    })().catch((e) => console.warn('[sms] багцын ирсэн мэдэгдэл алдаа:', e));
   }
 
   return result;

@@ -78,7 +78,16 @@ adminOrdersRouter.get(
         orderBy: { createdAt: 'desc' },
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
-        include: { customer: true, items: true, batch: true, delivery: true },
+        // Жагсаалтад мөр бүрийн бүх талбар хэрэггүй — тоолол, ашгийн
+        // тооцоонд шаардлагатай баганыг л татна. 100 захиалгатай хуудсанд
+        // энэ нь хариуг олон дахин хөнгөлнө.
+        include: {
+          customer: { select: { id: true, name: true, phone: true } },
+          items: {
+            select: { qty: true, unitPrice: true, costPriceSnapshot: true, cancelledAt: true },
+          },
+          batch: true,
+        },
       }),
     ]);
 
@@ -208,13 +217,33 @@ adminOrdersRouter.post(
     };
     const actor = actorOf(req);
 
+    // Код, төлбөрийн дүнг НЭГ асуулгаар урьдчилж татна — захиалга бүрд
+    // тусдаа асуулга хийвэл олон захиалгад мэдэгдэхүйц удаашрална.
+    const orders = await prisma.order.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        code: true,
+        subtotal: true,
+        deliveryFee: true,
+        paidAmount: true,
+        refundedAmount: true,
+      },
+    });
+    const byId = new Map(orders.map((o) => [o.id, o]));
+
     const succeeded: string[] = [];
     const failed: { id: string; code?: string; message: string }[] = [];
 
     for (const id of ids) {
+      const order = byId.get(id);
+      if (!order) {
+        failed.push({ id, message: 'Захиалга олдсонгүй.' });
+        continue;
+      }
       try {
         if (status === 'CONFIRMED' && !force) {
-          const totals = await loadOrderTotals(id);
+          const totals = computeTotals(order);
           if (!fullyPaid(totals)) {
             throw conflict(`Төлбөр дутуу: ${totals.subtotal - totals.netPaid}₮ ороогүй байна.`);
           }
@@ -222,13 +251,9 @@ adminOrdersRouter.post(
         await changeOrderStatus(id, status, { actor, reason });
         succeeded.push(id);
       } catch (error) {
-        const order = await prisma.order.findUnique({
-          where: { id },
-          select: { code: true },
-        });
         failed.push({
           id,
-          code: order?.code,
+          code: order.code,
           message: error instanceof AppError ? error.message : 'Тодорхойгүй алдаа.',
         });
       }
