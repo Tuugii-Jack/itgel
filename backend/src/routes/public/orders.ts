@@ -3,16 +3,18 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
-import { generateOrderCode, normalizePhone, PHONE_RE } from '../../lib/code.js';
+import { generateOrderCode } from '../../lib/code.js';
 import { computeArrival, parseUbDay, startOfUbDay } from '../../lib/date.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
+import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, recalcOrderTotals } from '../../services/money.js';
 import { deliveryFeeFor, getSettings } from '../../services/settings.js';
+import { syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { claimDeliverySlot } from '../../services/delivery.js';
 import {
@@ -23,13 +25,7 @@ import {
 
 export const publicOrdersRouter = Router();
 
-const phoneSchema = z
-  .string()
-  .transform(normalizePhone)
-  .refine((v) => PHONE_RE.test(v), 'Утасны дугаар буруу байна (8 орон).');
-
 const createBody = z.object({
-  phone: phoneSchema,
   name: z.string().trim().min(1).max(80).optional(),
   note: z.string().trim().max(500).optional(),
   items: z
@@ -47,15 +43,20 @@ const createBody = z.object({
     .max(30),
 });
 
-/** POST /api/orders — IP-ээр 10 минутад 10 захиалга. */
+/** POST /api/orders — нэвтэрсэн хэрэглэгч. IP-ээр 10 минутад 10 захиалга. */
 publicOrdersRouter.post(
   '/',
+  requireCustomer,
   ipRateLimit(10, 10 * 60 * 1000),
   validate({ body: createBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof createBody>;
-    const settings = await getSettings();
+    const customerId = req.auth!.sub;
     const now = new Date();
+
+    const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+    if (!customer) throw notFound('Хэрэглэгч олдсонгүй.');
+    if (!customer.emailVerifiedAt) throw badRequest('И-мэйлээ баталгаажуулсны дараа захиална уу.');
 
     // `productId` нь дэлгүүрийн зүгээс ТОЙРГИЙН id — /products тэрийг буцаадаг.
     const rounds = await prisma.productRound.findMany({
@@ -99,8 +100,6 @@ publicOrdersRouter.post(
 
     const items = body.items.map((item) => {
       const round = byId.get(item.productId)!;
-      // Ирэх огноог ЭНД царцаана. Тойрог дараа дахин гарсан ч энэ захиалгын
-      // амлалт хөдлөхгүй.
       const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
       const options = optionsFromVariants(round.product.variants);
       const raw = normalizeSelections({
@@ -127,18 +126,13 @@ publicOrdersRouter.post(
       };
     });
 
-    // Төлбөр 100% — захиалга өгөхөд бүтнээр шилжүүлнэ. Мөнгө хараахан
-    // ороогүй тул `paidAmount` нь 0; админ шалгаад дэвтэрт бүртгэнэ.
     const subtotal = subtotalOf(items);
 
     const order = await prisma.$transaction(async (tx) => {
-      const customer = await tx.customer.upsert({
-        where: { phone: body.phone },
-        create: { phone: body.phone, name: body.name ?? null },
-        update: body.name ? { name: body.name } : {},
-      });
+      if (body.name && body.name !== customer.name) {
+        await tx.customer.update({ where: { id: customerId }, data: { name: body.name } });
+      }
 
-      // Бэлэн барааны үлдэгдлийг тухайн тойргоос хасна.
       for (const item of body.items) {
         const round = byId.get(item.productId)!;
         if (round.closeAt !== null) continue;
@@ -158,7 +152,7 @@ publicOrdersRouter.post(
       }
 
       const created = await createWithUniqueCode(tx, {
-        customerId: customer.id,
+        customerId,
         subtotal,
         note: body.note ?? null,
         items,
@@ -166,7 +160,7 @@ publicOrdersRouter.post(
 
       await audit(
         {
-          actor: `customer:${customer.id}`,
+          actor: actorOf(req),
           action: 'CREATE',
           entity: 'Order',
           entityId: created.id,
@@ -178,14 +172,14 @@ publicOrdersRouter.post(
       return created;
     });
 
-    // SMS-ийг хүлээхгүй — провайдер удаашрахад «Захиалах» товч гацахгүй.
-    // Илгээгдээгүй ч захиалга үүссэн; хэрэглэгч кодоо дэлгэцээс харна.
-    void sms
-      .send({ phone: body.phone, text: smsTemplates.orderCreated(order.code, subtotal) })
-      .then((r) => {
-        if (!r.ok) console.warn(`[sms] ${order.code} захиалгын мэдэгдэл илгээгдсэнгүй: ${r.error}`);
-      })
-      .catch((e) => console.warn(`[sms] ${order.code} захиалгын мэдэгдэл алдаа:`, e));
+    if (customer.phone) {
+      void sms
+        .send({ phone: customer.phone, text: smsTemplates.orderCreated(order.code, subtotal) })
+        .then((r) => {
+          if (!r.ok) console.warn(`[sms] ${order.code} захиалгын мэдэгдэл илгээгдсэнгүй: ${r.error}`);
+        })
+        .catch((e) => console.warn(`[sms] ${order.code} захиалгын мэдэгдэл алдаа:`, e));
+    }
 
     res.status(201).json({
       data: {
@@ -193,7 +187,6 @@ publicOrdersRouter.post(
         status: order.status,
         statusLabel: orderStatusLabel(order.status),
         subtotal,
-        /** Шилжүүлэх дүн — бараа бүтнээрээ. */
         dueAmount: subtotal,
         createdAt: order.createdAt.toISOString(),
       },
@@ -265,26 +258,49 @@ publicOrdersRouter.get(
 
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
+    const storage = await syncOrderStorageFee(order.id);
+    const fresh = await prisma.order.findUniqueOrThrow({
+      where: { id: order.id },
+      include: {
+        items: { include: { product: true } },
+        batch: true,
+        delivery: true,
+        customer: true,
+      },
+    });
+
     res.json({
       data: {
-        code: order.code,
-        status: order.status,
-        statusLabel: orderStatusLabel(order.status),
-        subtotal: order.subtotal,
-        deliveryFee: order.deliveryFee,
-        paidAmount: order.paidAmount,
-        refundedAmount: order.refundedAmount,
-        dueAmount: order.dueAmount,
-        paymentState: paymentState(computeTotals(order)),
-        paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
-        fulfilment: order.fulfilment,
-        createdAt: order.createdAt.toISOString(),
-        customer: { name: order.customer.name, phone: maskPhone(order.customer.phone) },
-        items: order.items.map(publicOrderItem),
-        batch: batchSummary(order.batch),
-        delivery: publicDelivery(order.delivery),
-        timeline: buildTimeline(order),
-        canChooseFulfilment: order.status === 'ARRIVED' && order.fulfilment === null,
+        code: fresh.code,
+        status: fresh.status,
+        statusLabel: orderStatusLabel(fresh.status),
+        subtotal: fresh.subtotal,
+        deliveryFee: fresh.deliveryFee,
+        storageFee: fresh.storageFee,
+        storage: {
+          freeDays: storage.freeDays,
+          feePerDay: storage.feePerDay,
+          freeDaysLeft: storage.freeDaysLeft,
+          billableItemDays: storage.billableItemDays,
+          fee: storage.fee,
+        },
+        paidAmount: fresh.paidAmount,
+        refundedAmount: fresh.refundedAmount,
+        dueAmount: fresh.dueAmount,
+        paymentState: paymentState(computeTotals(fresh)),
+        paymentClaimedAt: fresh.paymentClaimedAt?.toISOString() ?? null,
+        fulfilment: fresh.fulfilment,
+        createdAt: fresh.createdAt.toISOString(),
+        customer: {
+          name: fresh.customer.name,
+          phone: maskPhone(fresh.customer.phone),
+          email: fresh.customer.email,
+        },
+        items: fresh.items.map(publicOrderItem),
+        batch: batchSummary(fresh.batch),
+        delivery: publicDelivery(fresh.delivery),
+        timeline: buildTimeline(fresh),
+        canChooseFulfilment: fresh.status === 'ARRIVED' && fresh.fulfilment === null,
       },
     });
   }),
@@ -442,6 +458,7 @@ publicOrdersRouter.post(
   }),
 );
 
-function maskPhone(phone: string): string {
+function maskPhone(phone: string | null): string | null {
+  if (!phone) return null;
   return phone.length <= 4 ? phone : `${phone.slice(0, 4)}****`;
 }

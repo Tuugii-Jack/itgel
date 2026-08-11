@@ -95,6 +95,16 @@ export function PaymentPanel({
             шилжүүлээгүй бол захиалга цуцлагдана.
           </>
         )}
+        {store.storageFeePerDay > 0 && (
+          <>
+            {" "}
+            Бараа ирснээс хойш{" "}
+            <span className="tnum">{store.storageFreeDays}</span> хоног үнэгүй
+            хадгална; дараа нь өдөр бүр{" "}
+            <span className="tnum">{store.storageFeePerDay.toLocaleString("en-US")}</span>
+            ₮ агуулахын хураамж нэмэгдэнэ.
+          </>
+        )}
         {bank.note && <> {bank.note}</>}
       </p>
 

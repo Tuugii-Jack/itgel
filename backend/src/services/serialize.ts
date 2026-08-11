@@ -159,6 +159,15 @@ export function publicOrderItem(item: OrderItem) {
     return normalizeLegacy(item.size, item.color);
   })();
   const { size, color } = sizeColorFromSelections(selections);
+  const arrived = item.arrivedAt !== null;
+  const handedOver = item.handedOverAt !== null;
+  const itemStatus = item.cancelledAt
+    ? ('cancelled' as const)
+    : handedOver
+      ? ('handed_over' as const)
+      : arrived
+        ? ('arrived' as const)
+        : ('waiting' as const);
   return {
     id: item.id,
     cancelled: item.cancelledAt !== null,
@@ -174,6 +183,10 @@ export function publicOrderItem(item: OrderItem) {
     /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
     arriveFrom: toIso(item.arriveFrom),
     arriveTo: toIso(item.arriveTo),
+    arrivedAt: toIso(item.arrivedAt),
+    handedOverAt: toIso(item.handedOverAt),
+    /** waiting | arrived | handed_over | cancelled */
+    itemStatus,
   };
 }
 

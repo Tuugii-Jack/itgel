@@ -1,12 +1,11 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { env } from '../env.js';
 import { prisma } from '../prisma.js';
-import { normalizePhone, PHONE_RE } from './code.js';
 import type { AdminToken, CustomerToken, TokenPayload } from './jwt.js';
 
 /**
  * Supabase Auth-ийн олгосон access token-ыг JWKS-ээр шалгана.
- * Манай өөрийн OTP урсгал хэвээр ажиллана — энэ нь нэмэлт гарц.
+ * И-мэйлээр Customer холбоно (утасны OTP байхгүй).
  */
 const jwks = env.SUPABASE_JWKS_URL ? createRemoteJWKSet(new URL(env.SUPABASE_JWKS_URL)) : null;
 
@@ -16,7 +15,7 @@ interface SupabaseClaims {
   sub: string;
   phone?: string;
   email?: string;
-  user_metadata?: { phone?: string; name?: string };
+  user_metadata?: { phone?: string; name?: string; email?: string };
   app_metadata?: { role?: string };
 }
 
@@ -33,13 +32,6 @@ async function verify(token: string): Promise<SupabaseClaims | null> {
   }
 }
 
-/**
- * Supabase token → манай token payload.
- *
- * - Утасны дугаартай хэрэглэгч → CUSTOMER (Customer мөр байхгүй бол үүснэ).
- * - `app_metadata.role` нь admin/staff бөгөөд тухайн и-мэйлээр идэвхтэй
- *   AdminUser бүртгэлтэй үед → ADMIN/STAFF. Бүртгэлгүй бол эрх олгохгүй.
- */
 export async function resolveSupabaseToken(token: string): Promise<TokenPayload | null> {
   const claims = await verify(token);
   if (!claims) return null;
@@ -53,17 +45,23 @@ export async function resolveSupabaseToken(token: string): Promise<TokenPayload 
     return { sub: admin.id, email: admin.email, role: admin.role } satisfies AdminToken;
   }
 
-  const rawPhone = claims.phone ?? claims.user_metadata?.phone;
-  if (!rawPhone) return null;
-
-  const phone = normalizePhone(rawPhone);
-  if (!PHONE_RE.test(phone)) return null;
+  const email = (claims.email ?? claims.user_metadata?.email)?.toLowerCase();
+  if (!email) return null;
 
   const customer = await prisma.customer.upsert({
-    where: { phone },
-    create: { phone, name: claims.user_metadata?.name ?? null },
+    where: { email },
+    create: {
+      email,
+      name: claims.user_metadata?.name ?? null,
+      emailVerifiedAt: new Date(),
+    },
     update: {},
   });
 
-  return { sub: customer.id, phone: customer.phone, role: 'CUSTOMER' } satisfies CustomerToken;
+  return {
+    sub: customer.id,
+    email: customer.email,
+    phone: customer.phone,
+    role: 'CUSTOMER',
+  } satisfies CustomerToken;
 }

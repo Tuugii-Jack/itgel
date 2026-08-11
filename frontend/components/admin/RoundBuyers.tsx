@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Metric, OrderBadge, PageHead, Table, Td, Th } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { dayLabel, dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import type { RoundOrders } from "@/lib/types";
@@ -78,7 +78,7 @@ export function RoundBuyers({
       <PageHead
         title={round.name}
         hint={`#${round.roundNo} гаргалт · ${money(round.sellPrice)}${
-          round.closeAt ? ` · ${dayLabel(round.closeAt)}-нд хаагдана` : " · бэлэн бараа"
+          round.closeAt ? ` · ${dayTimeLabel(round.closeAt)}-нд хаагдана` : " · бэлэн бараа"
         }`}
         actions={
           <Button variant="ghost" onClick={onClose}>

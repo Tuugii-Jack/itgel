@@ -97,7 +97,7 @@ type ArchivedOrder = {
   createdAt: string;
   /** Захиалгыг устгасан бол архивт үлдэнэ, зөвхөн тэмдэглэгдэнэ. */
   deleted: boolean;
-  customer: { id: string; name: string | null; phone: string };
+  customer: { id: string; name: string | null; phone: string | null };
   subtotal: number;
   paidAmount: number;
   refundedAmount: number;
@@ -118,7 +118,7 @@ function archivedOrder(order: {
   paidAmount: number;
   refundedAmount: number;
   dueAmount: number;
-  customer: { id: string; name: string | null; phone: string };
+  customer: { id: string; name: string | null; phone: string | null };
   batch: { id: string; name: string } | null;
   items: Parameters<typeof itemRow>[0][];
 }): ArchivedOrder {

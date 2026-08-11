@@ -17,6 +17,13 @@ const schema = z.object({
   SMS_API_KEY: z.string().optional(),
   SMS_SENDER: z.string().default('itgel'),
 
+  /** Gmail SMTP — и-мэйл баталгаажуулалт / нууц үг сэргээх. */
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().int().positive().default(465),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+
   // --- Supabase ---
   SUPABASE_URL: z.string().url().optional(),
   SUPABASE_PUBLISHABLE_KEY: z.string().optional(),

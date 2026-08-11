@@ -54,6 +54,7 @@ export interface Payment {
 export interface OrderTotals {
   subtotal: number;
   deliveryFee: number;
+  storageFee: number;
   total: number;
   paidAmount: number;
   refundedAmount: number;
@@ -238,6 +239,10 @@ export interface OrderItem {
   /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
   arriveFrom: string | null;
   arriveTo: string | null;
+  arrivedAt: string | null;
+  handedOverAt: string | null;
+  /** waiting | arrived | handed_over | cancelled */
+  itemStatus: "waiting" | "arrived" | "handed_over" | "cancelled";
 }
 
 export interface TimelineStep {
@@ -278,12 +283,23 @@ export interface BatchSummary {
   etaTo: string | null;
 }
 
+export interface StorageInfo {
+  freeDays: number;
+  feePerDay: number;
+  /** Идэвхтэй ирсэн барааны үнэгүй үлдсэн хоног (хамгийн бага). */
+  freeDaysLeft: number | null;
+  billableItemDays: number;
+  fee: number;
+}
+
 export interface PublicOrder {
   code: string;
   status: OrderStatus;
   statusLabel: string;
   subtotal: number;
   deliveryFee: number;
+  storageFee: number;
+  storage?: StorageInfo;
   paidAmount: number;
   refundedAmount: number;
   dueAmount: number;
@@ -293,7 +309,7 @@ export interface PublicOrder {
   fulfilment: Fulfilment | null;
   canChooseFulfilment: boolean;
   createdAt: string;
-  customer: { name: string | null; phone: string };
+  customer: { name: string | null; phone: string | null; email?: string };
   items: OrderItem[];
   batch: BatchSummary | null;
   delivery: DeliveryInfo | null;
@@ -306,6 +322,7 @@ export interface MyOrder {
   statusLabel: string;
   subtotal: number;
   deliveryFee: number;
+  storageFee: number;
   paidAmount: number;
   refundedAmount: number;
   dueAmount: number;
@@ -322,8 +339,11 @@ export interface MyOrder {
 
 export interface Me {
   id: string;
-  phone: string;
+  email: string;
+  phone: string | null;
   name: string | null;
+  emailVerified: boolean;
+  hasPassword: boolean;
   address: {
     district: string | null;
     khoroo: string | null;
@@ -351,6 +371,10 @@ export interface Store {
   bank: BankAccount | null;
   /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
   unpaidCancelHours: number;
+  /** Агуулахад ирснээс хойш үнэгүй хадгалах хоног. */
+  storageFreeDays: number;
+  /** Үнэгүй хоногоос хойш хоног бүрийн хураамж ₮. 0 = унтраана. */
+  storageFeePerDay: number;
 }
 
 export interface Slot {
@@ -385,10 +409,11 @@ export interface AdminOrderRow {
   code: string;
   status: OrderStatus;
   statusLabel: string;
-  customer: { id: string; name: string | null; phone: string };
+  customer: { id: string; name: string | null; phone: string | null; email?: string };
   itemCount: number;
   subtotal: number;
   deliveryFee: number;
+  storageFee: number;
   paidAmount: number;
   refundedAmount: number;
   dueAmount: number;
@@ -398,6 +423,10 @@ export interface AdminOrderRow {
   fulfilment: Fulfilment | null;
   batch: BatchSummary | null;
   createdAt: string;
+  deletedAt?: string | null;
+  purgeAt?: string | null;
+  /** Soft-delete-ээс хойш бүрмөсөн устгах хүртэл үлдсэн хоног. */
+  daysLeft?: number | null;
 }
 
 export interface AdminOrderDetail extends Omit<AdminOrderRow, "itemCount"> {
@@ -414,6 +443,54 @@ export interface AdminOrderDetail extends Omit<AdminOrderRow, "itemCount"> {
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
   updatedAt: string;
+}
+
+/** Админ хүлээлгэн өгөх — хэрэглэгчийн бүх мөр. */
+export interface HandoverCustomerItem extends OrderItem {
+  costPriceSnapshot: number;
+  profit: number;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  orderId: string;
+  orderCode: string;
+  orderStatus: OrderStatus;
+  orderStatusLabel: string;
+  dueAmount: number;
+  storageFee: number;
+  deliveryFee: number;
+  paidAmount: number;
+  subtotal: number;
+  canPick: boolean;
+}
+
+export interface HandoverOrderDue {
+  orderId: string;
+  code: string;
+  status: OrderStatus;
+  statusLabel: string;
+  subtotal: number;
+  deliveryFee: number;
+  storageFee: number;
+  paidAmount: number;
+  dueAmount: number;
+}
+
+export interface HandoverCustomer {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  email: string;
+  totals: {
+    items: number;
+    waiting: number;
+    arrived: number;
+    handedOver: number;
+    /** Бүх захиалгын төлбөрийн үлдэгдлийн нийлбэр. */
+    dueAmount: number;
+  };
+  /** Захиалга бүрийн төлбөрийн задаргаа. */
+  orders: HandoverOrderDue[];
+  items: HandoverCustomerItem[];
 }
 
 export interface AdminBatch extends BatchSummary {
@@ -479,8 +556,21 @@ export interface AdminDelivery {
 
 export interface AdminCustomer {
   id: string;
-  phone: string;
+  email: string;
+  phone: string | null;
   name: string | null;
+  emailVerified: boolean;
+  hasPassword: boolean;
+  address?: {
+    district: string | null;
+    khoroo: string | null;
+    addressText: string | null;
+  };
+  notifications?: {
+    payment: boolean;
+    arrival: boolean;
+    promo: boolean;
+  };
   orderCount: number;
   totalSpent: number;
   lastOrderAt: string | null;
@@ -560,6 +650,8 @@ export interface Settings {
   paymentNote: string;
   /** Мөнгө ороогүй захиалгыг хэдэн цагийн дараа цуцлах. 0 = цуцлахгүй. */
   unpaidCancelHours: number;
+  storageFreeDays: number;
+  storageFeePerDay: number;
   updatedAt: string;
 }
 

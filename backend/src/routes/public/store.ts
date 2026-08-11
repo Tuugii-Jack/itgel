@@ -28,6 +28,10 @@ publicStoreRouter.get(
           : null,
         /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
         unpaidCancelHours: settings.unpaidCancelHours,
+        /** Агуулахад ирснээс хойш үнэгүй хадгалах хоног. */
+        storageFreeDays: settings.storageFreeDays,
+        /** Үнэгүй хоногоос хэтэрсэн хоног бүрийн хураамж ₮. 0 = унтраана. */
+        storageFeePerDay: settings.storageFeePerDay,
       },
     });
   }),

@@ -84,6 +84,8 @@ export default function SettingsPage() {
         bankAccountName: settings.bankAccountName,
         paymentNote: settings.paymentNote,
         unpaidCancelHours: settings.unpaidCancelHours,
+        storageFreeDays: settings.storageFreeDays,
+        storageFeePerDay: settings.storageFeePerDay,
       });
       setSettings(updated);
       setSaved(true);
@@ -194,12 +196,32 @@ export default function SettingsPage() {
           </Field>
           <Field
             label="Төлбөр хүлээх хугацаа (цаг)"
-            hint="Мөнгө ороогүй захиалгыг автоматаар цуцлана. 0 = цуцлахгүй. Шилжүүлсэн гэж мэдэгдсэн захиалгыг хөндөхгүй."
+            hint="Мөнгө ороогүй захиалгыг автоматаар устгана (цуцлаад «Устсан»-д 10 хоног хадгална). 0 = унтраана. Шилжүүлсэн гэж мэдэгдсэн захиалгыг хөндөхгүй."
           >
             <Input
               type="number"
               value={String(settings.unpaidCancelHours)}
               onChange={(v) => patch({ unpaidCancelHours: Number(v) || 0 })}
+            />
+          </Field>
+          <Field
+            label="Агуулах — үнэгүй хоног"
+            hint="Бараа агуулахад ирснээс хойш хэдэн хоног үнэгүй хадгалах. Дараа нь өдөр бүрийн хураамж нэмэгдэнэ."
+          >
+            <Input
+              type="number"
+              value={String(settings.storageFreeDays)}
+              onChange={(v) => patch({ storageFreeDays: Number(v) || 0 })}
+            />
+          </Field>
+          <Field
+            label="Агуулах — өдрийн хураамж (₮)"
+            hint="Үнэгүй хоногоос хэтэрсэн хоног бүрт (барааны тоогоор) нэмэгдэнэ. 0 = унтраана. Анхдагч 1,000₮."
+          >
+            <Input
+              type="number"
+              value={String(settings.storageFeePerDay)}
+              onChange={(v) => patch({ storageFeePerDay: Number(v) || 0 })}
             />
           </Field>
         </Card>
@@ -215,7 +237,7 @@ export default function SettingsPage() {
           <Divider />
           <Toggle
             label="Хугацаа дуусахад захиалга хаах"
-            hint="closeAt хүрсэн барааг өдөрт нэг удаа CLOSED болгоно"
+            hint="closeAt (огноо+цаг) хүрсэн барааг 10 минут тутам CLOSED болгоно"
             checked={settings.autoCloseOnDeadline}
             onChange={(v) => patch({ autoCloseOnDeadline: v })}
           />

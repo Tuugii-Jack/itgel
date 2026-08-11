@@ -61,6 +61,21 @@ export function dayKey(iso: string | Date): string {
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
 
+/** "2026-08-12T14:30" — input[type=datetime-local], UB цагаар. */
+export function datetimeLocalKey(iso: string | Date): string {
+  const p = parts(iso);
+  return `${dayKey(iso)}T${p.hour}:${p.minute}`;
+}
+
+/** datetime-local утгыг UB (+08:00) ISO болгоно. */
+export function fromDatetimeLocal(value: string): string {
+  const v = value.trim();
+  if (!v) return "";
+  // "2026-08-12T14:30" эсвэл "2026-08-12T14:30:00"
+  const withSec = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(v) ? `${v}:00` : v;
+  return new Date(`${withSec}+08:00`).toISOString();
+}
+
 const WEEKDAYS: Record<string, string> = {
   Sun: "Ня",
   Mon: "Да",
@@ -126,7 +141,8 @@ export function arrivalLabel(product: {
 }
 
 /** "99112233" → "9911-2233" */
-export function phoneLabel(phone: string): string {
+export function phoneLabel(phone: string | null | undefined): string {
+  if (!phone) return "—";
   const digits = phone.replace(/\D/g, "");
   return digits.length === 8 ? `${digits.slice(0, 4)}-${digits.slice(4)}` : phone;
 }

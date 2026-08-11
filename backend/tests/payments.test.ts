@@ -23,6 +23,13 @@ describe('Захиалгын дүн', () => {
     expect(t.total).toBe(205_000);
   });
 
+  it('нийт дүн = бараа + хүргэлт + агуулах', () => {
+    const t = totals({ subtotal: 100_000, deliveryFee: 5_000, storageFee: 3_000 });
+    expect(t.total).toBe(108_000);
+    expect(t.dueAmount).toBe(108_000);
+    expect(t.storageFee).toBe(3_000);
+  });
+
   it('цэвэр орлого = төлсөн − буцаасан', () => {
     const t = totals({ subtotal: 100_000, paidAmount: 100_000, refundedAmount: 30_000 });
     expect(t.netPaid).toBe(70_000);

@@ -5,6 +5,7 @@ import { sweepAll } from '../lib/rateLimit.js';
 import { addDays, startOfUbDay, ubDateString, UB_TZ } from '../lib/date.js';
 import { changeOrderStatus, notifyArrival } from '../services/orders.js';
 import { getSettings } from '../services/settings.js';
+import { syncAllStorageFees } from '../services/storageFee.js';
 
 const tasks: ScheduledTask[] = [];
 
@@ -64,11 +65,12 @@ export async function sendArrivalNotifications(): Promise<number> {
 }
 
 /**
- * 4. Мөнгө ороогүй захиалгыг цуцлах.
+ * 4. Мөнгө ороогүй захиалгыг цуцалж soft-delete хийнэ.
  *
- * `unpaidCancelHours` нь 0 бол огт ажиллахгүй (анхдагч). Хэрэглэгч
+ * `unpaidCancelHours` нь 0 бол огт ажиллахгүй. Хэрэглэгч
  * "шилжүүлсэн" гэж мэдэгдсэн захиалгыг хөндөхгүй — админ гараар шалгана.
  * Зөвхөн NEW төлөвтэй, огт мөнгө ороогүй захиалгад хамаарна.
+ * Устгасны дараа «Устсан захиалга»-д 10 хоног үлдэж, дараа нь бүрмөсөн устгана.
  */
 export async function cancelUnpaidOrders(now = new Date()): Promise<number> {
   const settings = await getSettings();
@@ -89,7 +91,6 @@ export async function cancelUnpaidOrders(now = new Date()): Promise<number> {
   });
   if (expired.length === 0) return 0;
 
-  // Захиалга бүрийг тусад нь — нэг нь уначихвал бусад нь үргэлжилнэ.
   let cancelled = 0;
   for (const order of expired) {
     try {
@@ -98,6 +99,17 @@ export async function cancelUnpaidOrders(now = new Date()): Promise<number> {
         reason: `Төлбөр ${settings.unpaidCancelHours} цагийн дотор ороогүй.`,
         now,
       });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { deletedAt: now },
+      });
+      await audit({
+        actor: 'system',
+        action: 'SOFT_DELETE',
+        entity: 'Order',
+        entityId: order.id,
+        after: { reason: 'unpaid_timeout', hours: settings.unpaidCancelHours },
+      });
       cancelled += 1;
     } catch (error) {
       console.error(`[cron] ${order.code} цуцлаж чадсангүй:`, error);
@@ -105,14 +117,53 @@ export async function cancelUnpaidOrders(now = new Date()): Promise<number> {
   }
 
   if (cancelled > 0) {
-    console.info(`[cron] ${cancelled} төлөгдөөгүй захиалга цуцлагдлаа.`);
+    console.info(`[cron] ${cancelled} төлөгдөөгүй захиалга устгагдлаа (10 хоног хадгална).`);
   }
   return cancelled;
 }
 
+const DELETED_RETENTION_DAYS = 10;
+
+/**
+ * Soft-deleted захиалгыг 10 хоногийн дараа бүрмөсөн устгана.
+ * Payment / OrderItem / Delivery cascade-аар дагалдана.
+ */
+export async function purgeDeletedOrders(now = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - DELETED_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+
+  const stale = await prisma.order.findMany({
+    where: { deletedAt: { not: null, lte: cutoff } },
+    select: { id: true, code: true },
+    take: 200,
+  });
+  if (stale.length === 0) return 0;
+
+  let purged = 0;
+  for (const order of stale) {
+    try {
+      await prisma.order.delete({ where: { id: order.id } });
+      await audit({
+        actor: 'system',
+        action: 'HARD_DELETE',
+        entity: 'Order',
+        entityId: order.id,
+        after: { code: order.code, reason: 'retention_expired' },
+      });
+      purged += 1;
+    } catch (error) {
+      console.error(`[cron] ${order.code} бүрмөсөн устгаж чадсангүй:`, error);
+    }
+  }
+
+  if (purged > 0) {
+    console.info(`[cron] ${purged} устсан захиалга бүрмөсөн устлаа.`);
+  }
+  return purged;
+}
+
 export interface StaleOrderReport {
   code: string;
-  customerPhone: string;
+  customerPhone: string | null;
   arrivedAt: string | null;
   daysWaiting: number;
   dueAmount: number;
@@ -154,13 +205,32 @@ export async function reportStaleOrders(now = new Date()): Promise<StaleOrderRep
   return report;
 }
 
+/**
+ * Агуулахын хадгалалтын хураамж — ирснээс хойш үнэгүй хоногоос хэтэрсэн бараанд.
+ * Цаг тутам ажиллана; захиалга нээхэд ч sync хийнэ.
+ */
+export async function accrueStorageFees(now = new Date()): Promise<number> {
+  const updated = await syncAllStorageFees(now);
+  if (updated > 0) {
+    await audit({
+      actor: 'system',
+      action: 'STORAGE_FEE_ACCRUED',
+      entity: 'Order',
+      entityId: ubDateString(now),
+      after: { updated },
+    });
+    console.info(`[cron] ${updated} захиалгын агуулахын хураамж шинэчлэгдлээ.`);
+  }
+  return updated;
+}
+
 /** Бүх cron ажлыг UB цагаар ажиллуулна. */
 export function startCron(): void {
   const options = { timezone: UB_TZ };
 
-  // Өдөрт нэг — 00:05
+  // 10 минут тутам — хаагдах цаг хүрсэн тойрог
   tasks.push(
-    cron.schedule('5 0 * * *', () => void closeExpiredProducts().catch(console.error), options),
+    cron.schedule('*/10 * * * *', () => void closeExpiredProducts().catch(console.error), options),
   );
 
   // 10 минут тутам
@@ -174,6 +244,16 @@ export function startCron(): void {
   // Цаг тутам — төлөгдөөгүй захиалгыг цуцлах (тохиргоо асаалттай үед л).
   tasks.push(
     cron.schedule('15 * * * *', () => void cancelUnpaidOrders().catch(console.error), options),
+  );
+
+  // Цаг тутам — агуулахын хадгалалтын хураамж
+  tasks.push(
+    cron.schedule('20 * * * *', () => void accrueStorageFees().catch(console.error), options),
+  );
+
+  // Өдөрт нэг — 03:00: 10 хоног өнгөрсөн soft-delete захиалгыг бүрмөсөн устгана.
+  tasks.push(
+    cron.schedule('0 3 * * *', () => void purgeDeletedOrders().catch(console.error), options),
   );
 
   // Rate limiter-ийн хугацаа дууссан бичлэгүүд — эс цэвэрлэвэл санах ой өснө.

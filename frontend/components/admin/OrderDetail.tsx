@@ -16,6 +16,7 @@ import {
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
+import { downloadOrdersExcel, printOrders } from "@/lib/orderExport";
 import { PAYMENT_TONE } from "@/lib/payment";
 import { useToast } from "@/lib/toast";
 import type {
@@ -186,9 +187,34 @@ export function OrderDetail({
           </span>
         }
         actions={
-          <Button variant="ghost" onClick={onClose}>
-            Буцах
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                try {
+                  printOrders([order]);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
+                }
+              }}
+            >
+              Хэвлэх
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                downloadOrdersExcel([order], `${order.code}.csv`);
+                toast.success("Excel татагдлаа.");
+              }}
+            >
+              Excel
+            </Button>
+            <Button variant="ghost" onClick={onClose}>
+              Буцах
+            </Button>
+          </div>
         }
       />
 
@@ -345,6 +371,9 @@ export function OrderDetail({
             <SumRow label="Барааны дүн" value={money(totals.subtotal)} />
             {totals.deliveryFee > 0 && (
               <SumRow label="Хүргэлт" value={money(totals.deliveryFee)} />
+            )}
+            {(totals.storageFee ?? 0) > 0 && (
+              <SumRow label="Агуулахын хураамж" value={money(totals.storageFee)} />
             )}
             <SumRow label="Нийт" value={money(totals.total)} />
             <Divider />

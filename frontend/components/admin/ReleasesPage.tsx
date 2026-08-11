@@ -16,7 +16,7 @@ import { RoundForm } from "@/components/admin/RoundForm";
 import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { countdown, dayLabel, money } from "@/lib/format";
+import { countdown, dayTimeLabel, money } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -319,7 +319,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                     <Td className="tnum min-w-[120px] text-[13px]">
                       {kind === "order" ? (
                         <>
-                          {round.closeAt ? dayLabel(round.closeAt) : "—"}
+                          {round.closeAt ? dayTimeLabel(round.closeAt) : "—"}
                           {round.closeAt && round.status === "ACTIVE" && (
                             <div className="text-warn">{countdown(round.closeAt)}</div>
                           )}
@@ -409,7 +409,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                     <div className="mt-1 tnum text-[13px] text-muted">
                       #{round.roundNo} · {money(round.sellPrice)}
                       {kind === "order" && round.closeAt
-                        ? ` · ${dayLabel(round.closeAt)}`
+                        ? ` · ${dayTimeLabel(round.closeAt)}`
                         : kind === "ready"
                           ? ` · ${round.stock} үлд`
                           : ""}

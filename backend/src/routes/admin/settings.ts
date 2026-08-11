@@ -34,6 +34,8 @@ const patchBody = z.object({
   bankAccountName: z.string().trim().max(80).optional(),
   paymentNote: z.string().trim().max(300).optional(),
   unpaidCancelHours: z.coerce.number().int().min(0).max(720).optional(),
+  storageFreeDays: z.coerce.number().int().min(0).max(365).optional(),
+  storageFeePerDay: z.coerce.number().int().min(0).max(1_000_000).optional(),
 });
 
 adminSettingsRouter.patch(

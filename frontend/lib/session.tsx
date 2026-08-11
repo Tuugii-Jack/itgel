@@ -12,7 +12,7 @@ import {
 import { api, isAuthError, readToken, writeToken } from "./api";
 import type { Me } from "./types";
 
-/** Хэрэглэгчийн нэвтрэлт — утас + SMS код. Бүртгэл, нууц үг байхгүй. */
+/** Хэрэглэгчийн нэвтрэлт — и-мэйл + нууц үг. */
 interface Session {
   me: Me | null;
   loading: boolean;

@@ -21,6 +21,7 @@ import type {
   BatchSummary,
   Category,
   CreatedOrder,
+  HandoverCustomer,
   Me,
   MyOrder,
   OrderTotals,
@@ -189,8 +190,74 @@ export const api = {
       { method: "POST", body: { phone, code, name } },
     ).then((r) => r.data),
 
+  register: (body: { email: string; password: string; name?: string; phone: string }) =>
+    request<{
+      email: string;
+      expiresInSec: number;
+      resendAfterSec: number;
+      message?: string;
+      devCode?: string;
+    }>("/auth/register", { method: "POST", body }).then((r) => r.data),
+
+  login: (login: string, password: string) =>
+    request<{
+      token: string;
+      customer: {
+        id: string;
+        email: string;
+        phone: string | null;
+        name: string | null;
+        emailVerified: boolean;
+        hasPassword: boolean;
+      };
+    }>("/auth/login", { method: "POST", body: { login, password } }).then((r) => r.data),
+
+  verifyEmail: (email: string, code: string) =>
+    request<{
+      token: string;
+      customer: {
+        id: string;
+        email: string;
+        phone: string | null;
+        name: string | null;
+        emailVerified: boolean;
+        hasPassword: boolean;
+      };
+    }>("/auth/email/verify", { method: "POST", body: { email, code } }).then((r) => r.data),
+
+  resendEmailCode: (email: string) =>
+    request<{
+      email: string;
+      expiresInSec: number;
+      resendAfterSec: number;
+      devCode?: string;
+    }>("/auth/email/resend", { method: "POST", body: { email } }).then((r) => r.data),
+
+  forgotPassword: (email: string) =>
+    request<{
+      email: string;
+      expiresInSec: number;
+      resendAfterSec: number;
+      message?: string;
+      devCode?: string;
+    }>("/auth/password/forgot", { method: "POST", body: { email } }).then((r) => r.data),
+
+  resetPassword: (email: string, code: string, password: string) =>
+    request<{
+      token: string;
+      customer: {
+        id: string;
+        email: string;
+        phone: string | null;
+        name: string | null;
+        emailVerified: boolean;
+        hasPassword: boolean;
+      };
+    }>("/auth/password/reset", { method: "POST", body: { email, code, password } }).then(
+      (r) => r.data,
+    ),
+
   createOrder: (body: {
-    phone: string;
     name?: string;
     note?: string;
     items: {
@@ -201,7 +268,9 @@ export const api = {
       color?: string;
     }[];
   }) =>
-    request<CreatedOrder>("/orders", { method: "POST", body }).then((r) => r.data),
+    request<CreatedOrder>("/orders", { method: "POST", body, auth: "customer" }).then(
+      (r) => r.data,
+    ),
 
   order: (code: string) =>
     request<PublicOrder>(`/orders/${code}`).then((r) => r.data),
@@ -238,6 +307,7 @@ export const api = {
 
   updateMe: (body: Partial<{
     name: string | null;
+    phone: string | null;
     district: string | null;
     khoroo: string | null;
     addressText: string | null;
@@ -248,6 +318,26 @@ export const api = {
     request<Me>("/me", { method: "PATCH", body, auth: "customer" }).then(
       (r) => r.data,
     ),
+
+  changePassword: (currentPassword: string, newPassword: string) =>
+    request<Me>("/me/password", {
+      method: "POST",
+      body: { currentPassword, newPassword },
+      auth: "customer",
+    }).then((r) => r.data),
+
+  changeEmail: (email: string, password: string) =>
+    request<{
+      email: string;
+      expiresInSec: number;
+      resendAfterSec: number;
+      message?: string;
+      devCode?: string;
+    }>("/me/email/change", {
+      method: "POST",
+      body: { email, password },
+      auth: "customer",
+    }).then((r) => r.data),
 
   myOrders: () =>
     request<MyOrder[]>("/me/orders", { auth: "customer" }) as unknown as Promise<{
@@ -465,8 +555,34 @@ export const adminApi = {
   orders: (query?: Query) =>
     request<AdminOrderRow[]>("/admin/orders", { ...adminAuth, query }),
 
+  /** Шүүлт/сонголтын дагуу дэлгэрэнгүй захиалга (Excel, хэвлэх). */
+  exportOrders: (query?: Query) =>
+    request<AdminOrderDetail[]>("/admin/orders/export", { ...adminAuth, query }),
+
   order: (id: string) =>
     request<AdminOrderDetail>(`/admin/orders/${id}`, adminAuth).then((r) => r.data),
+
+  createOrder: (body: {
+    customerId?: string;
+    email?: string;
+    phone?: string;
+    name?: string;
+    note?: string;
+    status?: "NEW" | "CONFIRMED";
+    markPaid?: boolean;
+    items: {
+      productId: string;
+      qty: number;
+      selections?: Record<string, string>;
+      size?: string;
+      color?: string;
+    }[];
+  }) =>
+    request<AdminOrderDetail>("/admin/orders", {
+      ...adminAuth,
+      method: "POST",
+      body,
+    }).then((r) => r.data),
 
   setOrderStatus: (id: string, status: string, reason?: string, force?: boolean) =>
     request<AdminOrderDetail>(`/admin/orders/${id}/status`, {
@@ -602,10 +718,34 @@ export const adminApi = {
     ).then((r) => r.data),
 
   handoverLookup: (code: string) =>
-    request<AdminOrderDetail & { canHandOver: boolean; blockReason: string | null }>(
-      "/admin/handover/lookup",
-      { ...adminAuth, query: { code } },
-    ).then((r) => r.data),
+    request<
+      AdminOrderDetail & {
+        canHandOver: boolean;
+        blockReason: string | null;
+        pickableItemIds?: string[];
+      }
+    >("/admin/handover/lookup", { ...adminAuth, query: { code } }).then((r) => r.data),
+
+  handoverCustomer: (q: string) =>
+    request<HandoverCustomer[]>("/admin/handover/customer", {
+      ...adminAuth,
+      query: { q },
+    }).then((r) => r.data),
+
+  handoverPartial: (body: {
+    itemIds: string[];
+    collectedAmount?: number;
+    note?: string;
+  }) =>
+    request<{
+      itemCount: number;
+      orderIds: string[];
+      completedOrderIds: string[];
+    }>("/admin/handover/partial", {
+      ...adminAuth,
+      method: "POST",
+      body,
+    }).then((r) => r.data),
 
   handoverComplete: (orderId: string, body?: { collectedAmount?: number; note?: string }) =>
     request<AdminOrderDetail>(`/admin/handover/${orderId}/complete`, {
@@ -642,6 +782,41 @@ export const adminApi = {
         orders: (AdminOrderRow & { items: unknown[] })[];
       }
     >(`/admin/customers/${id}`, adminAuth).then((r) => r.data),
+
+  createCustomer: (body: {
+    email: string;
+    name?: string | null;
+    phone?: string | null;
+    password?: string;
+    emailVerified?: boolean;
+  }) =>
+    request<AdminCustomer>("/admin/customers", {
+      ...adminAuth,
+      method: "POST",
+      body,
+    }).then((r) => r.data),
+
+  updateCustomer: (
+    id: string,
+    body: Partial<{
+      email: string;
+      name: string | null;
+      phone: string | null;
+      password: string;
+      emailVerified: boolean;
+      district: string | null;
+      khoroo: string | null;
+      addressText: string | null;
+      notifyPayment: boolean;
+      notifyArrival: boolean;
+      notifyPromo: boolean;
+    }>,
+  ) =>
+    request<AdminCustomer>(`/admin/customers/${id}`, {
+      ...adminAuth,
+      method: "PATCH",
+      body,
+    }).then((r) => r.data),
 
   revenue: (period: "3m" | "6m" | "1y") =>
     request<RevenueReport>("/admin/reports/revenue", {

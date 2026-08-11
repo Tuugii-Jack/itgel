@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
+import { EmailAuthForm } from "@/components/EmailAuthForm";
 import { Button, Empty, ErrorNote, Input, Spinner, Textarea } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart, type CartLine } from "@/lib/cart";
@@ -11,8 +12,6 @@ import { useSession } from "@/lib/session";
 import { money, rangeLabel, relativeDay } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useToast } from "@/lib/toast";
-
-type Step = "phone" | "code" | "verified";
 
 /**
  * 03 Сагс ба захиалга — дизайны хэмжээг яг барина.
@@ -27,33 +26,19 @@ export default function CartPage() {
   const toast = useToast();
 
   const [buyerName, setBuyerName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
   const [note, setNote] = useState("");
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [step, setStep] = useState<Step>("phone");
-  const [devCode, setDevCode] = useState<string | null>(null);
-  const [cooldown, setCooldown] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Аль хэдийн нэвтэрсэн бол утсыг нь ашиглана.
   useEffect(() => {
-    if (session.me) {
-      setPhone(session.me.phone);
-      if (session.me.name) setBuyerName(session.me.name);
-      setStep("verified");
-    }
+    if (session.me?.name) setBuyerName(session.me.name);
+    if (session.me?.phone) setContactPhone(session.me.phone);
   }, [session.me]);
-
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [cooldown]);
 
   const groups = useMemo(() => groupLines(cart.lines), [cart.lines]);
 
-  if (!cart.ready) {
+  if (!cart.ready || session.loading) {
     return (
       <div className="flex justify-center py-24">
         <Spinner className="text-muted" />
@@ -77,47 +62,23 @@ export default function CartPage() {
     );
   }
 
-  const sendCode = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const result = await api.sendOtp(phone);
-      setDevCode(result.devCode ?? null);
-      setCooldown(result.resendAfterSec);
-      setStep("code");
-      toast.success("Код илгээлээ.");
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Код илгээж чадсангүй.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verify = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const result = await api.verifyOtp(phone, code, buyerName.trim() || undefined);
-      await session.signIn(result.token);
-      setStep("verified");
-      toast.success("Утас баталгаажлаа.");
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Код шалгаж чадсангүй.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const placeOrder = async () => {
+    if (!session.me) {
+      toast.error("Эхлээд нэвтэрнэ үү.");
+      return;
+    }
     setError(null);
     setBusy(true);
     try {
+      const phone = contactPhone.trim() || null;
+      if (phone !== (session.me.phone ?? null) || buyerName.trim() !== (session.me.name ?? "")) {
+        await api.updateMe({
+          name: buyerName.trim() || null,
+          phone,
+        });
+        await session.refresh();
+      }
       const order = await api.createOrder({
-        phone,
         name: buyerName.trim() || undefined,
         note: note.trim() || undefined,
         items: cart.lines.map((line) => ({
@@ -182,101 +143,58 @@ export default function CartPage() {
         <Rule />
       </div>
 
-      {/* Захиалагчийн мэдээлэл — laptop дээр нэг картад, 2 баганаар */}
+      {/* Захиалагчийн мэдээлэл */}
       <div className="flex flex-col gap-4 px-4 pt-6 lg:gap-5 lg:rounded-[12px] lg:border lg:border-line lg:px-6 lg:py-6">
         <div className="text-[15px] font-medium lg:text-[17px]">Захиалагчийн мэдээлэл</div>
 
-        <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-4">
-
-        <div className="flex flex-col gap-2">
-          <span className="text-[13px] text-ink-2">Нэр</span>
-          <Input value={buyerName} onChange={setBuyerName} placeholder="Овог, нэр" />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <span className="text-[13px] text-ink-2">Утасны дугаар</span>
-          {step === "verified" ? (
-            <div className="flex h-11 items-center justify-between gap-3 rounded-[8px] border border-line px-3">
-              <span className="tnum text-[17px]">{phone}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  session.signOut();
-                  setStep("phone");
-                  setCode("");
-                }}
-                className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ink-2 underline"
-              >
-                Солих
-              </button>
-            </div>
-          ) : (
-            <Input
-              value={phone}
-              onChange={(v) => setPhone(v.replace(/\D/g, "").slice(0, 8))}
-              placeholder="8 оронтой дугаар"
-              inputMode="numeric"
-              maxLength={8}
-              className="tnum text-[17px]"
-            />
-          )}
-          <div className="text-[13px] text-ink-2">
-            Захиалгаа хянах, бараа ирэхэд мэдэгдэхэд ашиглана.
-          </div>
-        </div>
-        </div>
-
-        {step === "phone" && (
-          <Button
-            variant="outline"
-            onClick={sendCode}
-            disabled={phone.length !== 8}
-            loading={busy}
-            className="w-full lg:w-auto lg:self-start"
-          >
-            Дугаараа баталгаажуулах
-          </Button>
-        )}
-
-        {step === "code" && (
-          <div className="flex flex-col gap-2 rounded-[12px] border border-line bg-surface p-3.5">
-            <div className="text-[14px]">Илгээсэн 4 оронтой кодыг оруулна уу</div>
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
-              inputMode="numeric"
-              maxLength={4}
-              placeholder="0000"
-              autoFocus
-              className="tnum h-11 w-[120px] rounded-[8px] border border-line bg-bg px-3 text-[20px] tracking-[0.3em] placeholder:text-muted"
-            />
-            {devCode && (
-              <div className="text-[13px] text-muted">
-                Туршилтын код: <span className="tnum">{devCode}</span>
+        {!session.me ? (
+          <EmailAuthForm variant="checkout" initialMode="register" />
+        ) : (
+          <>
+            <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-4">
+              <div className="flex flex-col gap-2">
+                <span className="text-[13px] text-ink-2">Нэр</span>
+                <Input value={buyerName} onChange={setBuyerName} placeholder="Овог, нэр" />
               </div>
-            )}
-            <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
-              <span>
-                {cooldown > 0
-                  ? `Код ирээгүй бол ${cooldown} секундын дараа дахин илгээнэ.`
-                  : "Код ирээгүй бол дахин илгээж болно."}
-              </span>
+              <div className="flex flex-col gap-2">
+                <span className="text-[13px] text-ink-2">И-мэйл</span>
+                <div className="flex h-11 items-center justify-between gap-3 rounded-[8px] border border-line px-3">
+                  <span className="truncate text-[15px]">{session.me.email}</span>
+                  <button
+                    type="button"
+                    onClick={() => session.signOut()}
+                    className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ink-2 underline"
+                  >
+                    Гарах
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 lg:col-span-2">
+                <span className="text-[13px] text-ink-2">Утасны дугаар</span>
+                <Input
+                  value={contactPhone}
+                  onChange={(v) => setContactPhone(v.replace(/\D/g, "").slice(0, 8))}
+                  inputMode="numeric"
+                  placeholder="99112233"
+                  className="tnum"
+                />
+                <div className="text-[13px] text-ink-2">
+                  Хүргэлт, холбоо барихад ашиглана. Хоосон байж болно.
+                </div>
+              </div>
             </div>
-            <Button full onClick={verify} disabled={code.length !== 4} loading={busy}>
-              Баталгаажуулах
-            </Button>
-          </div>
-        )}
 
-        <div className="flex flex-col gap-2">
-          <span className="text-[13px] text-ink-2">Нэмэлт тэмдэглэл</span>
-          <Textarea
-            value={note}
-            onChange={setNote}
-            rows={2}
-            placeholder="Жишээ: 18:00 цагаас хойш залгана уу"
-          />
-        </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-[13px] text-ink-2">Нэмэлт тэмдэглэл</span>
+              <Textarea
+                value={note}
+                onChange={setNote}
+                rows={2}
+                placeholder="Жишээ: 18:00 цагаас хойш залгана уу"
+              />
+            </div>
+          </>
+        )}
       </div>
 
       {error && (
@@ -312,8 +230,8 @@ export default function CartPage() {
               full
               size="bar"
               onClick={placeOrder}
-              disabled={step !== "verified"}
-              loading={busy && step === "verified"}
+              disabled={!session.me}
+              loading={busy && Boolean(session.me)}
             >
               Дансны мэдээлэл авах
             </Button>
@@ -331,8 +249,8 @@ export default function CartPage() {
           full
           size="bar"
           onClick={placeOrder}
-          disabled={step !== "verified"}
-          loading={busy && step === "verified"}
+          disabled={!session.me}
+          loading={busy && Boolean(session.me)}
         >
           Дансны мэдээлэл авах
         </Button>

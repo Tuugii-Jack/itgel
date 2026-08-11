@@ -5,7 +5,7 @@ import { PageHead, Select } from "@/components/admin/shared";
 import { Badge, Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { money } from "@/lib/format";
+import { fromDatetimeLocal, money } from "@/lib/format";
 import type { AdminProduct, ProductStatus } from "@/lib/types";
 
 const STATUSES: { value: ProductStatus; label: string }[] = [
@@ -131,9 +131,7 @@ export function ReleaseForm({
         sellPrice: sell,
         stock: kind === "ready" ? Number(stock) || 0 : 0,
         closeAt:
-          kind === "preorder" && closeAt
-            ? new Date(`${closeAt}T00:00:00+08:00`).toISOString()
-            : null,
+          kind === "preorder" && closeAt ? fromDatetimeLocal(closeAt) : null,
         leadMinDays: Number(leadMin) || 0,
         leadMaxDays: Number(leadMax) || 0,
         status,
@@ -219,9 +217,12 @@ export function ReleaseForm({
         <Card className="flex flex-col gap-3 p-4">
           {kind === "preorder" ? (
             <>
-              <Field label="Захиалга хаагдах өдөр" hint="UB цагаар өдрийн эхэнд хаагдана">
+              <Field
+                label="Захиалга хаагдах огноо, цаг"
+                hint="UB цагаар. Жишээ: 8-р сарын 15, 18:00"
+              >
                 <input
-                  type="date"
+                  type="datetime-local"
                   value={closeAt}
                   onChange={(e) => setCloseAt(e.target.value)}
                   className="h-11 w-full rounded-[8px] border border-line bg-bg px-3 text-[15px]"

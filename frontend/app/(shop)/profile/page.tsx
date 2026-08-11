@@ -20,6 +20,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
+import { EmailAuthForm } from "@/components/EmailAuthForm";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { awaitingPayment, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
 import type { MyOrder, OrderStatus, Store } from "@/lib/types";
@@ -63,124 +64,18 @@ export default function ProfilePage() {
   );
 }
 
-/** Утас → код → нэвтрэлт. Бүртгэл үүсгэх шаардлагагүй. */
+/** И-мэйл + нууц үгээр нэвтрэх / бүртгүүлэх. */
 function SignIn() {
-  const session = useSession();
-  const toast = useToast();
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [sent, setSent] = useState(false);
-  const [devCode, setDevCode] = useState<string | null>(null);
-  const [cooldown, setCooldown] = useState(0);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [cooldown]);
-
-  const send = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const result = await api.sendOtp(phone);
-      setDevCode(result.devCode ?? null);
-      setCooldown(result.resendAfterSec);
-      setSent(true);
-      toast.success("Код илгээлээ.");
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Код илгээж чадсангүй.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verify = async () => {
-    setError(null);
-    setBusy(true);
-    try {
-      const result = await api.verifyOtp(phone, code);
-      await session.signIn(result.token);
-      toast.success("Амжилттай нэвтэрлээ.");
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Код шалгаж чадсангүй.";
-      setError(message);
-      toast.error(message);
-      setBusy(false);
-    }
-  };
-
   return (
-    <div className="px-4 pt-6">
-      <Card className="flex flex-col gap-3 p-4">
-        {!sent ? (
-          <>
-            <div>
-              <div className="text-[15px] font-medium">Утасны дугаараа оруулна уу</div>
-              <p className="mt-1 mb-0 text-[13px] text-ink-2">
-                Тухайн дугаараар өгсөн захиалга, төлбөрийн түүх харагдана. Бүртгэл үүсгэх
-                шаардлагагүй.
-              </p>
-            </div>
-            <Input
-              value={phone}
-              onChange={(v) => setPhone(v.replace(/\D/g, "").slice(0, 8))}
-              placeholder="8 оронтой дугаар"
-              inputMode="numeric"
-              maxLength={8}
-            />
-            {error && <ErrorNote>{error}</ErrorNote>}
-            <Button full onClick={send} disabled={phone.length !== 8} loading={busy}>
-              Код авах
-            </Button>
-          </>
-        ) : (
-          <>
-            <div>
-              <div className="text-[15px] font-medium">Кодоо оруулна уу</div>
-              <p className="mt-1 mb-0 text-[13px] text-ink-2">
-                <span className="tnum">{phoneLabel(phone)}</span> дугаар руу 4 оронтой код
-                илгээлээ.
-              </p>
-            </div>
-            <Input
-              value={code}
-              onChange={(v) => setCode(v.replace(/\D/g, "").slice(0, 4))}
-              placeholder="0000"
-              inputMode="numeric"
-              maxLength={4}
-              autoFocus
-            />
-            {devCode && (
-              <p className="m-0 text-[12px] text-muted">
-                Туршилтын код: <span className="tnum">{devCode}</span>
-              </p>
-            )}
-            {error && <ErrorNote>{error}</ErrorNote>}
-            <Button full onClick={verify} disabled={code.length !== 4} loading={busy}>
-              Нэвтрэх
-            </Button>
-            <div className="flex items-center justify-between text-[13px]">
-              <button
-                type="button"
-                onClick={() => {
-                  setSent(false);
-                  setCode("");
-                }}
-                className="cursor-pointer border-0 bg-transparent p-0 text-ink-2 underline"
-              >
-                Дугаар солих
-              </button>
-              <span className="tnum text-muted">
-                {cooldown > 0 ? `${cooldown} сек` : "Дахин илгээж болно"}
-              </span>
-            </div>
-          </>
-        )}
+    <div className="px-4 pt-6 lg:mx-auto lg:max-w-[420px] lg:px-0 lg:pt-10">
+      <Card className="flex flex-col gap-3 p-4 lg:p-6">
+        <div>
+          <div className="text-[15px] font-medium">Нэвтрэх</div>
+          <p className="mt-1 mb-0 text-[13px] text-ink-2">
+            И-мэйл, нууц үгээрээ нэвтэрнэ үү. Захиалга, төлбөрийн түүх энд харагдана.
+          </p>
+        </div>
+        <EmailAuthForm />
       </Card>
     </div>
   );
@@ -215,7 +110,7 @@ function Profile() {
     void load();
   }, [load]);
 
-  const initial = (me.name ?? me.phone).trim().charAt(0).toUpperCase();
+  const initial = (me.name ?? me.email).trim().charAt(0).toUpperCase();
 
   const tabs: [Tab, string][] = [
     ["orders", "Захиалга"],
@@ -510,14 +405,23 @@ function InfoTab() {
   const toast = useToast();
   const me = session.me!;
   const [name, setName] = useState(me.name ?? "");
+  const [phone, setPhone] = useState(me.phone ?? "");
   const [district, setDistrict] = useState(me.address.district ?? "");
   const [khoroo, setKhoroo] = useState(me.address.khoroo ?? "");
   const [addressText, setAddressText] = useState(me.address.addressText ?? "");
-  /* Шилжүүлэгчийг оптимист шинэчилнэ — дарахад шууд хөдөлж, алдаа гарвал буцна. */
   const [notif, setNotif] = useState(me.notifications);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
+  const [emailCode, setEmailCode] = useState("");
+  const [emailDevCode, setEmailDevCode] = useState<string | null>(null);
+  const [emailStep, setEmailStep] = useState<"form" | "code">("form");
+  const [credBusy, setCredBusy] = useState(false);
 
   const save = async () => {
     setSaving(true);
@@ -525,6 +429,7 @@ function InfoTab() {
     try {
       await api.updateMe({
         name: name.trim() || null,
+        phone: phone.trim() || null,
         district: district.trim() || null,
         khoroo: khoroo.trim() || null,
         addressText: addressText.trim() || null,
@@ -539,6 +444,51 @@ function InfoTab() {
       toast.error(message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const changePassword = async () => {
+    setCredBusy(true);
+    try {
+      await api.changePassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      toast.success("Нууц үг солигдлоо.");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Нууц үг солиж чадсангүй.");
+    } finally {
+      setCredBusy(false);
+    }
+  };
+
+  const requestEmailChange = async () => {
+    setCredBusy(true);
+    try {
+      const result = await api.changeEmail(newEmail.trim(), emailPassword);
+      setEmailDevCode(result.devCode ?? null);
+      setEmailStep("code");
+      toast.success("Баталгаажуулах код илгээлээ.");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "И-мэйл солиж чадсангүй.");
+    } finally {
+      setCredBusy(false);
+    }
+  };
+
+  const confirmEmailChange = async () => {
+    setCredBusy(true);
+    try {
+      const result = await api.verifyEmail(newEmail.trim(), emailCode);
+      await session.signIn(result.token);
+      setEmailStep("form");
+      setNewEmail("");
+      setEmailPassword("");
+      setEmailCode("");
+      toast.success("И-мэйл солигдлоо.");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Код буруу байна.");
+    } finally {
+      setCredBusy(false);
     }
   };
 
@@ -565,31 +515,100 @@ function InfoTab() {
 
       <Card className="flex flex-col gap-3 p-4 lg:gap-4 lg:p-6">
         <div className="text-[15px] font-medium">Хувийн мэдээлэл</div>
-        {/* Laptop дээр нэр, утас зэрэгцээ — дизайны 2 багана */}
         <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
           <Field label="Нэр">
             <Input value={name} onChange={setName} placeholder="Овог, нэр" />
           </Field>
-          <Field label="Утас">
+          <Field label="И-мэйл">
             <div className="flex h-11 items-center justify-between rounded-[8px] border border-line bg-surface px-3">
-              <span className="tnum text-[15px]">{phoneLabel(me.phone)}</span>
-              <span className="text-[13px] text-ok">Баталгаажсан</span>
+              <span className="truncate text-[15px]">{me.email}</span>
+              <span className={`shrink-0 text-[13px] ${me.emailVerified ? "text-ok" : "text-warn"}`}>
+                {me.emailVerified ? "Баталгаажсан" : "Хүлээгдэж буй"}
+              </span>
             </div>
+          </Field>
+          <Field label="Утас" hint="Холбоо барих — заавал биш">
+            <Input
+              value={phone}
+              onChange={(v) => setPhone(v.replace(/\D/g, "").slice(0, 8))}
+              inputMode="numeric"
+              placeholder="99112233"
+            />
           </Field>
         </div>
       </Card>
 
       <Card className="flex flex-col gap-3 p-4 lg:gap-4 lg:p-6">
+        <div className="text-[15px] font-medium">Нууц үг солих</div>
+        <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
+          <Field label="Одоогийн нууц үг">
+            <Input value={currentPassword} onChange={setCurrentPassword} type="password" />
+          </Field>
+          <Field label="Шинэ нууц үг">
+            <Input value={newPassword} onChange={setNewPassword} type="password" />
+          </Field>
+        </div>
+        <Button
+          onClick={changePassword}
+          loading={credBusy}
+          disabled={currentPassword.length < 1 || newPassword.length < 6}
+        >
+          Нууц үг хадгалах
+        </Button>
+      </Card>
+
+      <Card className="flex flex-col gap-3 p-4 lg:gap-4 lg:p-6">
+        <div className="text-[15px] font-medium">И-мэйл солих</div>
+        {emailStep === "form" ? (
+          <>
+            <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
+              <Field label="Шинэ и-мэйл">
+                <Input value={newEmail} onChange={setNewEmail} type="email" />
+              </Field>
+              <Field label="Одоогийн нууц үг">
+                <Input value={emailPassword} onChange={setEmailPassword} type="password" />
+              </Field>
+            </div>
+            <Button
+              onClick={requestEmailChange}
+              loading={credBusy}
+              disabled={!newEmail.trim() || emailPassword.length < 1}
+            >
+              Код илгээх
+            </Button>
+          </>
+        ) : (
+          <>
+            <Field label="Баталгаажуулах код">
+              <Input
+                value={emailCode}
+                onChange={(v) => setEmailCode(v.replace(/\D/g, "").slice(0, 6))}
+                inputMode="numeric"
+                maxLength={6}
+              />
+            </Field>
+            {emailDevCode && (
+              <p className="m-0 text-[12px] text-muted">
+                Туршилтын код: <span className="tnum">{emailDevCode}</span>
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Button onClick={confirmEmailChange} loading={credBusy} disabled={emailCode.length !== 6}>
+                Баталгаажуулах
+              </Button>
+              <Button variant="ghost" onClick={() => setEmailStep("form")} disabled={credBusy}>
+                Болих
+              </Button>
+            </div>
+          </>
+        )}
+      </Card>
+
+      <Card className="flex flex-col gap-3 p-4 lg:gap-4 lg:p-6">
         <div>
           <div className="text-[15px] font-medium">Хадгалсан хаяг</div>
-          <p className="mt-0.5 mb-0 text-[13px] text-muted">
-            Хүргэлт сонгоход автоматаар орно
-          </p>
+          <p className="mt-0.5 mb-0 text-[13px] text-muted">Хүргэлт сонгоход автоматаар орно</p>
         </div>
-        {/*
-          Дизайнд «Дүүрэг, хороо» нэг талбар боловч хүргэлтийн хураамж дүүргээр
-          бодогддог тул тусад нь үлдээж, зэрэгцүүлж байрлууллаа.
-        */}
         <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
           <Field label="Дүүрэг">
             <Input value={district} onChange={setDistrict} placeholder="Дүүрэг" />
@@ -616,17 +635,15 @@ function InfoTab() {
           checked={notif.payment}
           onChange={(v) => toggle("notifyPayment", "payment", v)}
         />
-        <Divider />
         <Toggle
           label="Бараа ирсэн"
           hint="SMS-ээр мэдэгдэнэ"
           checked={notif.arrival}
           onChange={(v) => toggle("notifyArrival", "arrival", v)}
         />
-        <Divider />
         <Toggle
-          label="Шинэ бараа, урамшуулал"
-          hint="Сард 1-2 удаа"
+          label="Урамшуулал"
+          hint="Шинэ бараа, хямдрал"
           checked={notif.promo}
           onChange={(v) => toggle("notifyPromo", "promo", v)}
         />
@@ -635,7 +652,7 @@ function InfoTab() {
       {error && <ErrorNote>{error}</ErrorNote>}
 
       <Button full onClick={save} loading={saving}>
-        {saved ? "Хадгалсан" : "Хадгалах"}
+        {saved ? "Хадгалсан ✓" : "Хадгалах"}
       </Button>
     </div>
   );

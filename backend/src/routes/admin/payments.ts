@@ -23,6 +23,9 @@ adminPaymentsRouter.get(
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
     const orderId = param(req, 'id');
+    const { syncOrderStorageFee } = await import('../../services/storageFee.js');
+    await syncOrderStorageFee(orderId);
+
     const order = await prisma.order.findFirst({
       where: { id: orderId, deletedAt: null },
       select: { id: true },
@@ -41,6 +44,7 @@ adminPaymentsRouter.get(
         totals: {
           subtotal: totals.subtotal,
           deliveryFee: totals.deliveryFee,
+          storageFee: totals.storageFee,
           total: totals.total,
           paidAmount: totals.paidAmount,
           refundedAmount: totals.refundedAmount,

@@ -17,6 +17,7 @@ type Tx = Prisma.TransactionClient;
 export interface OrderTotals {
   subtotal: number;
   deliveryFee: number;
+  storageFee: number;
   /** Нийт төлөх ёстой дүн. */
   total: number;
   paidAmount: number;
@@ -31,7 +32,7 @@ export interface OrderTotals {
 export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderTotals> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { id: true, deliveryFee: true },
+    select: { id: true, deliveryFee: true, storageFee: true },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
 
@@ -54,6 +55,7 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
   const totals = computeTotals({
     subtotal,
     deliveryFee: order.deliveryFee,
+    storageFee: order.storageFee,
     paidAmount,
     refundedAmount,
   });
@@ -75,14 +77,17 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
 export function computeTotals(input: {
   subtotal: number;
   deliveryFee: number;
+  storageFee?: number;
   paidAmount: number;
   refundedAmount: number;
 }): OrderTotals {
-  const total = input.subtotal + input.deliveryFee;
+  const storageFee = input.storageFee ?? 0;
+  const total = input.subtotal + input.deliveryFee + storageFee;
   const netPaid = input.paidAmount - input.refundedAmount;
   return {
     subtotal: input.subtotal,
     deliveryFee: input.deliveryFee,
+    storageFee,
     total,
     paidAmount: input.paidAmount,
     refundedAmount: input.refundedAmount,
@@ -135,6 +140,7 @@ export async function loadOrderTotals(orderId: string): Promise<OrderTotals> {
     select: {
       subtotal: true,
       deliveryFee: true,
+      storageFee: true,
       paidAmount: true,
       refundedAmount: true,
     },

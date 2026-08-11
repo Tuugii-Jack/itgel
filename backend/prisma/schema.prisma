@@ -184,7 +184,12 @@ model SizeChartRow {
 
 model Customer {
   id        String   @id @default(cuid())
-  phone     String   @unique
+  /// Нэвтрэх и-мэйл — баталгаажсаны дараа л нэвтэрнэ.
+  email     String   @unique
+  passwordHash String?
+  emailVerifiedAt DateTime?
+  /// Холбоо барих утас — нэвтрэлтэд ашиглахгүй.
+  phone     String?  @unique
   name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -202,16 +207,18 @@ model Customer {
   orders Order[]
 }
 
-model OtpCode {
+model EmailOtp {
   id        String    @id @default(cuid())
-  phone     String
-  code      String // 4 орон
+  email     String
+  code      String
+  /// VERIFY | RESET
+  purpose   String
   expiresAt DateTime
   usedAt    DateTime?
   attempts  Int       @default(0)
   createdAt DateTime  @default(now())
 
-  @@index([phone, createdAt])
+  @@index([email, purpose, createdAt])
 }
 
 model AdminUser {
@@ -236,11 +243,13 @@ model Order {
   /// зориулсан кэш бөгөөд recalcOrderTotals() -ээр л шинэчлэгдэнэ.
   subtotal    Int @default(0) // идэвхтэй мөрүүдийн нийлбэр
   deliveryFee Int @default(0)
+  /// Агуулахад үнэгүй хоногоос хэтэрсэн хадгалалтын хураамж (кэш — cron/sync-ээр шинэчлэгдэнэ).
+  storageFee  Int @default(0)
   /// Дэвтрийн PAYMENT мөрүүдийн нийлбэр.
   paidAmount     Int @default(0)
   /// Дэвтрийн REFUND мөрүүдийн нийлбэр.
   refundedAmount Int @default(0)
-  /// subtotal + deliveryFee − (paidAmount − refundedAmount). Сөрөг байвал илүү төлсөн.
+  /// subtotal + deliveryFee + storageFee − (paidAmount − refundedAmount). Сөрөг байвал илүү төлсөн.
   dueAmount      Int @default(0)
 
   batchId     String?
@@ -328,6 +337,11 @@ model OrderItem {
   cancelledAt  DateTime?
   cancelReason String?
 
+  /// Агуулахад ирсэн огноо — багц AT_WAREHOUSE эсвэл бэлэн бараа CONFIRMED.
+  arrivedAt DateTime?
+  /// Хэрэглэгчид хүлээлгэн өгсөн огноо (хэсэгчилсэн авах боломжтой).
+  handedOverAt DateTime?
+
   order   Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   round   ProductRound @relation(fields: [roundId], references: [id])
   product Product      @relation(fields: [productId], references: [id])
@@ -335,6 +349,8 @@ model OrderItem {
   @@index([orderId])
   @@index([productId])
   @@index([roundId])
+  @@index([arrivedAt])
+  @@index([handedOverAt])
 }
 
 model Batch {
@@ -414,7 +430,11 @@ model Setting {
   /// Дансны доор нэмж бичих чөлөөт заавар (сонголтоор).
   paymentNote       String @default("")
   /// Мөнгө ороогүй захиалгыг хэдэн цагийн дараа автоматаар цуцлах. 0 = цуцлахгүй.
-  unpaidCancelHours Int    @default(0)
+  unpaidCancelHours Int    @default(12)
+  /// Агуулахад ирснээс хойш үнэгүй хадгалах хоног. Дараа нь storageFeePerDay тооцогдоно.
+  storageFreeDays   Int    @default(7)
+  /// Үнэгүй хоногоос хэтэрсэн хоног бүрт (мөр × тоо) нэмэгдэх хураамж ₮. 0 = унтраана.
+  storageFeePerDay  Int    @default(1000)
 
   updatedAt DateTime @updatedAt
 }

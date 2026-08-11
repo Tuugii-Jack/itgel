@@ -10,7 +10,7 @@ import {
   orderStatusForBatchStage,
   stepsToStatus,
 } from '../lib/orderStatus.js';
-import { notifyArrival } from './orders.js';
+import { notifyArrival, markItemsArrivedForBatch, promoteOrdersToArrived } from './orders.js';
 
 /** Төлөв бүрийн огноог тэмдэглэх талбар. */
 const STATUS_TIMESTAMP: Partial<Record<OrderStatus, string>> = {
@@ -204,9 +204,9 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
     const target = orderStatusForBatchStage(next);
     let moved = 0;
     let skipped = 0;
+    const now = new Date();
 
     if (target) {
-      const now = new Date();
 
       // Ижил төлөвтэй захиалгуудыг бүлэглэж, бүлэг бүрд ганц updateMany +
       // createMany хийнэ. Захиалга бүрд тусдаа хоёр бичилт хийвэл том багц
@@ -267,6 +267,22 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
       }
     } else {
       skipped = batch.orders.length;
+    }
+
+    // Мөрөөр ирсэн тэмдэг — Order.batchId-аас гадуур тойрог холбогдсон захиалгад ч.
+    if (next === 'AT_WAREHOUSE') {
+      const itemOrderIds = await markItemsArrivedForBatch(tx, batch.id, now);
+      const promoted = await promoteOrdersToArrived(
+        tx,
+        itemOrderIds,
+        actor,
+        `Багц "${batch.name}" → ${BATCH_STAGE_LABEL[next]}`,
+        now,
+      );
+      for (const id of promoted) {
+        if (!arrivedOrderIds.includes(id)) arrivedOrderIds.push(id);
+      }
+      // Багцын захиалгад аль хэдийн ARRIVED болсон ч мөрөнд arrivedAt тавьсан.
     }
 
     await audit(

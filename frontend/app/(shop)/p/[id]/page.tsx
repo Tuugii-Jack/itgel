@@ -16,7 +16,7 @@ import {
 } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import { arrivalLabel, dayLabel, money, rangeLabel } from "@/lib/format";
+import { arrivalLabel, dayLabel, dayTimeLabel, money, rangeLabel } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -709,7 +709,7 @@ function flowSteps(
     {
       label: "Захиалга хаагдана",
       short: "Захиалга хаагдана",
-      value: dayLabel(product.closeAt),
+      value: dayTimeLabel(product.closeAt),
       at: new Date(product.closeAt).getTime(),
     },
     {

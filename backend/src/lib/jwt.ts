@@ -3,7 +3,8 @@ import { env } from '../env.js';
 
 export interface CustomerToken {
   sub: string;
-  phone: string;
+  email: string;
+  phone: string | null;
   role: 'CUSTOMER';
 }
 

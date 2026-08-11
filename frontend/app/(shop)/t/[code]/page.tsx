@@ -203,6 +203,61 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
         </div>
       </div>
 
+      {/* Агуулахын хадгалалт — ирсэн бараанд */}
+      {order.storage &&
+        order.storage.feePerDay > 0 &&
+        order.items.some((i) => i.itemStatus === "arrived") && (
+          <div className="px-4 pt-6 lg:px-0 lg:pt-0">
+            <div
+              className={`overflow-hidden rounded-[12px] border p-4 ${
+                order.storage.fee > 0
+                  ? "border-warn bg-warn-bg"
+                  : "border-line bg-surface"
+              }`}
+            >
+              <div
+                className={`text-[15px] font-medium ${
+                  order.storage.fee > 0 ? "text-warn" : ""
+                }`}
+              >
+                Агуулахын хадгалалт
+              </div>
+              {order.storage.fee > 0 ? (
+                <p className="mt-1 mb-0 text-[14px] leading-[1.5] text-warn">
+                  Үнэгүй{" "}
+                  <span className="tnum">{order.storage.freeDays}</span> хоног
+                  дууссан. Хураамж{" "}
+                  <span className="tnum font-medium">{money(order.storage.fee)}</span>
+                  {" "}(
+                  <span className="tnum">{order.storage.feePerDay.toLocaleString("en-US")}</span>
+                  ₮/хоног × бараа). Үлдэгдэлд орсон — авахаасаа өмнө төлнө үү.
+                </p>
+              ) : (
+                <p className="mt-1 mb-0 text-[14px] leading-[1.5] text-ink-2">
+                  Ирснээс хойш{" "}
+                  <span className="tnum">{order.storage.freeDays}</span> хоног
+                  үнэгүй хадгална
+                  {order.storage.freeDaysLeft != null ? (
+                    <>
+                      {" "}
+                      — үлдсэн{" "}
+                      <span className="tnum font-medium">
+                        {order.storage.freeDaysLeft}
+                      </span>{" "}
+                      хоног
+                    </>
+                  ) : null}
+                  . Дараа нь өдөр бүр{" "}
+                  <span className="tnum">
+                    {order.storage.feePerDay.toLocaleString("en-US")}
+                  </span>
+                  ₮ (барааны тоогоор) нэмэгдэнэ.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
       {/* Мөнгө хүлээж байгаа бол данс, гүйлгээний утга */}
       {unpaid && (
         <div className="px-4 pt-6 lg:px-0 lg:pt-0">
@@ -285,7 +340,13 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
             >
               <div className="flex items-start gap-3 lg:contents">
                 <div className="min-w-0 flex-1">
-                  <div className={`text-[14px] ${item.cancelled ? "text-muted line-through" : ""}`}>
+                  <div
+                    className={`text-[14px] ${
+                      item.cancelled || item.itemStatus === "handed_over"
+                        ? "text-muted line-through"
+                        : ""
+                    }`}
+                  >
                     {item.name}
                   </div>
                   <div className="text-[13px] text-muted">
@@ -295,29 +356,48 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                   </div>
                 </div>
                 <div className="lg:justify-self-start">
-                  {item.cancelled ? (
+                  {item.cancelled || item.itemStatus === "cancelled" ? (
                     <Badge tone="danger">Цуцлагдсан</Badge>
+                  ) : item.itemStatus === "handed_over" ? (
+                    <Badge tone="neutral">Авсан</Badge>
+                  ) : item.itemStatus === "arrived" ? (
+                    <Badge tone="ok">Ирсэн</Badge>
                   ) : (
-                    <span className="hidden lg:inline">
-                      <Badge tone={STATUS_TONE[order.status]}>{order.statusLabel}</Badge>
-                    </span>
+                    <Badge tone="warn">Хүлээж байна</Badge>
                   )}
                 </div>
                 <span className="tnum hidden text-[13px] text-ink-2 lg:inline">
-                  {!item.cancelled && item.arriveFrom && item.arriveTo
-                    ? `${rangeLabel(item.arriveFrom, item.arriveTo)}-нд ирнэ`
-                    : ""}
+                  {item.itemStatus === "handed_over"
+                    ? "Авсан"
+                    : item.itemStatus === "arrived"
+                      ? "Авах боломжтой"
+                      : !item.cancelled && item.arriveFrom && item.arriveTo
+                        ? `${rangeLabel(item.arriveFrom, item.arriveTo)}-нд ирнэ`
+                        : ""}
                 </span>
                 <div
-                  className={`tnum text-[14px] lg:text-right ${item.cancelled ? "text-muted line-through" : ""}`}
+                  className={`tnum text-[14px] lg:text-right ${
+                    item.cancelled || item.itemStatus === "handed_over"
+                      ? "text-muted line-through"
+                      : ""
+                  }`}
                 >
                   {money(item.total)}
                 </div>
               </div>
-              {!item.cancelled && item.arriveFrom && item.arriveTo && (
+              {!item.cancelled &&
+                item.itemStatus === "waiting" &&
+                item.arriveFrom &&
+                item.arriveTo && (
                 <div className="tnum text-[13px] text-ink-2 lg:hidden">
                   {rangeLabel(item.arriveFrom, item.arriveTo)}-нд ирнэ
                 </div>
+              )}
+              {item.itemStatus === "arrived" && (
+                <div className="text-[13px] text-ok lg:hidden">Авах боломжтой</div>
+              )}
+              {item.itemStatus === "handed_over" && (
+                <div className="text-[13px] text-muted lg:hidden">Авсан</div>
               )}
             </div>
           ))}
@@ -327,6 +407,18 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
       {/* Төлбөр — laptop дээр хүснэгтийн толгойд орсон тул зөвхөн мобайлд */}
       <div className="px-4 pt-6 lg:hidden">
         <div className="flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5">
+          {order.storageFee > 0 && (
+            <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
+              <span>Агуулахын хураамж</span>
+              <span className="tnum">{money(order.storageFee)}</span>
+            </div>
+          )}
+          {order.deliveryFee > 0 && (
+            <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
+              <span>Хүргэлт</span>
+              <span className="tnum">{money(order.deliveryFee)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between gap-3">
             <span className="text-[14px] text-ink-2">
               {order.dueAmount > 0 ? "Шилжүүлэх үлдэгдэл" : "Төлсөн, бүтнээр"}

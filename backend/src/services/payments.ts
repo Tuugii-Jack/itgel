@@ -35,6 +35,7 @@ export async function recordPayment(
         code: true,
         subtotal: true,
         deliveryFee: true,
+        storageFee: true,
         paidAmount: true,
         refundedAmount: true,
       },
@@ -132,7 +133,7 @@ export async function cancelOrderItem(input: {
     if (input.refund && lineTotal > 0) {
       const before = await tx.order.findUniqueOrThrow({
         where: { id: order.id },
-        select: { subtotal: true, deliveryFee: true, paidAmount: true, refundedAmount: true },
+        select: { subtotal: true, deliveryFee: true, storageFee: true, paidAmount: true, refundedAmount: true },
       });
       // Цэвэр орлогоос хэтрэхгүй хэмжээгээр л буцаана.
       const refundable = Math.min(lineTotal, computeTotals(before).netPaid);

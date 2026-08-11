@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   BATCH_STAGE_LABEL,
@@ -17,6 +18,7 @@ import { OrderDetail } from "@/components/admin/OrderDetail";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { downloadOrdersExcel, printOrders } from "@/lib/orderExport";
 import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import type { AdminBatch, AdminOrderRow, AdminSummary, OrderStatus } from "@/lib/types";
 
@@ -40,6 +42,7 @@ export default function AdminOrdersPage() {
   const [batches, setBatches] = useState<AdminBatch[]>([]);
   const [status, setStatus] = useState("");
   const [batch, setBatch] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -50,6 +53,7 @@ export default function AdminOrdersPage() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [exportBusy, setExportBusy] = useState<"print" | "excel" | null>(null);
   const busy = busyAction !== null;
 
   useEffect(() => {
@@ -63,10 +67,11 @@ export default function AdminOrdersPage() {
         status: status || undefined,
         batch: batch || undefined,
         q: query || undefined,
+        deleted: showDeleted ? true : undefined,
         page,
         pageSize: ORDERS_PAGE_SIZE,
       }),
-    [status, batch, query],
+    [status, batch, query, showDeleted],
   );
 
   const load = useCallback(async () => {
@@ -171,6 +176,47 @@ export default function AdminOrdersPage() {
     }
   };
 
+  /** Сонгосон эсвэл одоогийн шүүлтийн захиалгыг дэлгэрэнгүйгээр авч хэвлэх/Excel. */
+  const runExport = async (mode: "print" | "excel") => {
+    setExportBusy(mode);
+    setError(null);
+    try {
+      const res = await adminApi.exportOrders(
+        selected.size > 0
+          ? { ids: [...selected].join(",") }
+          : {
+              status: status || undefined,
+              batch: batch || undefined,
+              q: query || undefined,
+              deleted: showDeleted ? true : undefined,
+              limit: 500,
+            },
+      );
+      if (res.data.length === 0) {
+        toast.error("Хэвлэх/татахад захиалга олдсонгүй.");
+        return;
+      }
+      if (mode === "excel") {
+        downloadOrdersExcel(res.data);
+        toast.success(`${res.data.length} захиалга Excel-д татагдлаа.`);
+      } else {
+        printOrders(res.data);
+        toast.success(`${res.data.length} захиалга хэвлэхэд бэлэн.`);
+      }
+    } catch (e) {
+      const msg =
+        e instanceof ApiError
+          ? e.message
+          : e instanceof Error
+            ? e.message
+            : "Экспорт хийж чадсангүй.";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setExportBusy(null);
+    }
+  };
+
   if (openId) {
     return (
       <OrderDetail
@@ -187,8 +233,46 @@ export default function AdminOrdersPage() {
 
   return (
     <div>
-      <PageHead title="Захиалга" hint="Бүх захиалгын урсгал, төлөв" />
+      <PageHead
+        title={showDeleted ? "Устсан захиалга" : "Захиалга"}
+        hint={
+          showDeleted
+            ? "Төлбөргүй устгасан захиалга — 10 хоног хадгалаад бүрмөсөн устана."
+            : "Бүх захиалгын урсгал, төлөв"
+        }
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={exportBusy !== null}
+              loading={exportBusy === "print"}
+              onClick={() => void runExport("print")}
+            >
+              {selected.size > 0 ? `Хэвлэх (${selected.size})` : "Хэвлэх"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={exportBusy !== null}
+              loading={exportBusy === "excel"}
+              onClick={() => void runExport("excel")}
+            >
+              {selected.size > 0 ? `Excel (${selected.size})` : "Excel"}
+            </Button>
+            {!showDeleted && (
+              <Link
+                href="/admin/orders/new"
+                className="inline-flex h-9 items-center rounded-[8px] border border-primary bg-primary px-3 text-[13px] text-white"
+              >
+                Захиалга оруулах
+              </Link>
+            )}
+          </div>
+        }
+      />
 
+      {!showDeleted && (
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Шинэ захиалга" value={summary?.newOrders ?? "—"} />
         <Metric
@@ -204,25 +288,53 @@ export default function AdminOrdersPage() {
           sub="Авах аргаа сонгосон"
         />
       </div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Select
-          value={status}
-          onChange={setStatus}
-          placeholder="Бүх статус"
-          options={STATUSES.map((s) => ({ value: s, label: ORDER_STATUS_LABEL[s] }))}
-        />
-        <Select
-          value={batch}
-          onChange={setBatch}
-          placeholder="Бүх багц"
-          options={batches.map((b) => ({ value: b.id, label: b.name }))}
-        />
+        <button
+          type="button"
+          onClick={() => setShowDeleted(false)}
+          className={`h-10 cursor-pointer rounded-[8px] border px-3 text-[13px] ${
+            !showDeleted ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"
+          }`}
+        >
+          Идэвхтэй
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setShowDeleted(true);
+            setSelected(new Set());
+            setStatus("");
+            setBatch("");
+          }}
+          className={`h-10 cursor-pointer rounded-[8px] border px-3 text-[13px] ${
+            showDeleted ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"
+          }`}
+        >
+          Устсан
+        </button>
+        {!showDeleted && (
+          <>
+            <Select
+              value={status}
+              onChange={setStatus}
+              placeholder="Бүх статус"
+              options={STATUSES.map((s) => ({ value: s, label: ORDER_STATUS_LABEL[s] }))}
+            />
+            <Select
+              value={batch}
+              onChange={setBatch}
+              placeholder="Бүх багц"
+              options={batches.map((b) => ({ value: b.id, label: b.name }))}
+            />
+          </>
+        )}
         <div className="min-w-[200px] flex-1">
           <Input
             value={search}
             onChange={setSearch}
-            placeholder="Код, нэр, утасны сүүлийн 4 орон"
+            placeholder="Код, нэр, утас, и-мэйл"
           />
         </div>
         {refreshing && (
@@ -230,7 +342,7 @@ export default function AdminOrdersPage() {
         )}
       </div>
 
-      {selected.size > 0 && (
+      {selected.size > 0 && !showDeleted && (
         <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
           <span className="text-[14px]">{selected.size} захиалга сонгосон</span>
           <div className="ml-auto flex flex-wrap gap-2">
@@ -305,7 +417,7 @@ export default function AdminOrdersPage() {
                   <Th>Дүн</Th>
                   <Th>Төлбөр</Th>
                   <Th>Статус</Th>
-                  <Th>Багц</Th>
+                  {showDeleted ? <Th>Үлдсэн</Th> : <Th>Багц</Th>}
                   <Th>Огноо</Th>
                 </tr>
               </thead>
@@ -355,18 +467,24 @@ export default function AdminOrdersPage() {
                     <Td>
                       <OrderBadge status={order.status} />
                     </Td>
-                    <Td className="text-[13px] text-ink-2">
-                      {order.batch ? (
-                        <>
-                          <div>{order.batch.name}</div>
-                          <div className="text-muted">{BATCH_STAGE_LABEL[order.batch.stage]}</div>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </Td>
+                    {showDeleted ? (
+                      <Td className="tnum text-[13px] text-warn">
+                        {order.daysLeft != null ? `${order.daysLeft} хоног` : "—"}
+                      </Td>
+                    ) : (
+                      <Td className="text-[13px] text-ink-2">
+                        {order.batch ? (
+                          <>
+                            <div>{order.batch.name}</div>
+                            <div className="text-muted">{BATCH_STAGE_LABEL[order.batch.stage]}</div>
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </Td>
+                    )}
                     <Td className="tnum whitespace-nowrap text-[13px] text-ink-2">
-                      {dayLabel(order.createdAt)}
+                      {dayLabel(showDeleted && order.deletedAt ? order.deletedAt : order.createdAt)}
                     </Td>
                   </tr>
                 ))}
@@ -380,12 +498,14 @@ export default function AdminOrdersPage() {
               <Card key={order.id} className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      aria-label={`${order.code} сонгох`}
-                      checked={selected.has(order.id)}
-                      onChange={() => toggle(order.id)}
-                    />
+                    {!showDeleted && (
+                      <input
+                        type="checkbox"
+                        aria-label={`${order.code} сонгох`}
+                        checked={selected.has(order.id)}
+                        onChange={() => toggle(order.id)}
+                      />
+                    )}
                     <button
                       type="button"
                       onClick={() => setOpenId(order.id)}
@@ -402,16 +522,21 @@ export default function AdminOrdersPage() {
                 </div>
                 <div className="mt-2 flex items-baseline justify-between">
                   <span className="tnum text-[15px]">{money(order.subtotal)}</span>
-                  <span className="tnum text-[13px] text-muted">{dayLabel(order.createdAt)}</span>
+                  <span className="tnum text-[13px] text-muted">
+                    {dayLabel(showDeleted && order.deletedAt ? order.deletedAt : order.createdAt)}
+                  </span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <Badge tone={PAYMENT_TONE[order.paymentState]}>
                     {PAYMENT_LABEL_SHORT[order.paymentState]}
                   </Badge>
+                  {showDeleted && order.daysLeft != null && (
+                    <Badge tone="warn">Үлдсэн {order.daysLeft} хоног</Badge>
+                  )}
                   {order.paymentClaimedAt && order.dueAmount > 0 && (
                     <Badge tone="info">Шилжүүлсэн гэсэн</Badge>
                   )}
-                  {order.batch && <Badge tone="info">{order.batch.name}</Badge>}
+                  {!showDeleted && order.batch && <Badge tone="info">{order.batch.name}</Badge>}
                 </div>
                 </Card>
             ))}

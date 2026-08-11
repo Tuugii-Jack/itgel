@@ -47,7 +47,7 @@ async function reset() {
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();
   await prisma.ad.deleteMany();
-  await prisma.otpCode.deleteMany();
+  await prisma.emailOtp.deleteMany();
   await prisma.customer.deleteMany();
   await prisma.adminUser.deleteMany();
   await prisma.payment.deleteMany();
@@ -93,13 +93,13 @@ const PRODUCTS: ProductSeed[] = [
 ];
 
 const CUSTOMERS = [
-  { phone: '99112233', name: 'Б. Оюунчимэг' },
-  { phone: '88445566', name: 'Д. Ганбат' },
-  { phone: '95778899', name: 'С. Ариунаа' },
-  { phone: '91223344', name: 'Т. Мөнхбат' },
-  { phone: '80556677', name: 'Ц. Номин' },
-  { phone: '94667788', name: 'Э. Батжаргал' },
-  { phone: '85990011', name: 'Г. Сарантуяа' },
+  { phone: '99112233', name: 'Б. Оюунчимэг', email: 'oyunaa@example.com' },
+  { phone: '88445566', name: 'Д. Ганбат', email: 'ganbat@example.com' },
+  { phone: '95778899', name: 'С. Ариунаа', email: 'ariunaa@example.com' },
+  { phone: '91223344', name: 'Т. Мөнхбат', email: 'munkhbat@example.com' },
+  { phone: '80556677', name: 'Ц. Номин', email: 'nomin@example.com' },
+  { phone: '94667788', name: 'Э. Батжаргал', email: 'batjargal@example.com' },
+  { phone: '85990011', name: 'Г. Сарантуяа', email: 'sarantuya@example.com' },
 ];
 
 async function main() {
@@ -206,7 +206,15 @@ async function main() {
   }
 
   const customers = await Promise.all(
-    CUSTOMERS.map((c) => prisma.customer.create({ data: c })),
+    CUSTOMERS.map((c) =>
+      prisma.customer.create({
+        data: {
+          ...c,
+          emailVerifiedAt: new Date(),
+          passwordHash: null,
+        },
+      }),
+    ),
   );
 
   const batches = await Promise.all([

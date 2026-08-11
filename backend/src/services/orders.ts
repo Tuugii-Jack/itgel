@@ -10,7 +10,8 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { addDays, computeArrival, toIso } from '../lib/date.js';
 import { conflict } from '../lib/errors.js';
-import { canTransition, ORDER_STATUS_LABEL } from '../lib/orderStatus.js';
+import { canTransition, ORDER_STATUS_LABEL, stepsToStatus } from '../lib/orderStatus.js';
+import { mailTemplates, sendMail } from './mail.js';
 import { getSettings } from './settings.js';
 import { sms, smsTemplates } from './sms.js';
 
@@ -72,6 +73,66 @@ export async function changeOrderStatus(
 
     const next = await tx.order.update({ where: { id: orderId }, data });
 
+    // Бэлэн бараа — баталгаажмагц авах боломжтой; ядаж нэг ирсэн бол ARRIVED.
+    if (to === 'CONFIRMED') {
+      await audit(
+        {
+          actor: options.actor,
+          action: 'STATUS_CHANGE',
+          entity: 'Order',
+          entityId: orderId,
+          before: { status: order.status },
+          after: { status: 'CONFIRMED', reason: options.reason },
+        },
+        tx,
+      );
+      const readyCount = await markReadyItemsArrived(tx, orderId, now);
+      if (readyCount > 0) {
+        const steps = stepsToStatus('CONFIRMED', 'ARRIVED');
+        const timestamps: Record<string, Date> = {};
+        let current: OrderStatus = 'CONFIRMED';
+        for (const step of steps) {
+          if (!canTransition(current, step)) break;
+          const field = STATUS_TIMESTAMP[step];
+          if (field) (timestamps as Record<string, Date>)[field as string] = now;
+          current = step;
+        }
+        if (current === 'ARRIVED') {
+          const arrived = await tx.order.update({
+            where: { id: orderId },
+            data: { status: 'ARRIVED', ...timestamps },
+          });
+          await audit(
+            {
+              actor: options.actor,
+              action: 'STATUS_CHANGE',
+              entity: 'Order',
+              entityId: orderId,
+              before: { status: 'CONFIRMED' },
+              after: { status: 'ARRIVED', reason: 'Бэлэн бараа ирсэн' },
+            },
+            tx,
+          );
+          return arrived;
+        }
+      }
+      return next;
+    }
+
+    // Захиалга бүхэлдээ ирсэн/өгсөн гэж тэмдэглэхэд мөрүүдийг нийцүүлнэ.
+    if (to === 'ARRIVED') {
+      await tx.orderItem.updateMany({
+        where: { orderId, cancelledAt: null, arrivedAt: null },
+        data: { arrivedAt: now },
+      });
+    }
+    if (to === 'HANDED_OVER') {
+      await tx.orderItem.updateMany({
+        where: { orderId, cancelledAt: null, handedOverAt: null },
+        data: { arrivedAt: now, handedOverAt: now },
+      });
+    }
+
     // Захиалга бүтнээрээ цуцлагдвал бэлэн барааны үлдэгдлийг буцаана.
     // Эс бөгөөс цуцалсан бүрд агуулахын тоо худал багасаж үлдэнэ.
     if (to === 'CANCELLED') await restoreReadyStock(tx, orderId);
@@ -91,9 +152,13 @@ export async function changeOrderStatus(
     return next;
   });
 
-  // SMS-ийг хүлээхгүй — админы «Ирсэн болгох» товч провайдерээс хамаарч
-  // гацахгүй. Илгээгдээгүй нь `arrivalNotifiedAt`-аар тэмдэглэгдэж, cron барина.
-  if (to === 'ARRIVED') {
+  // И-мэйл/SMS-ийг хүлээхгүй — админы товч SMTP/SMS провайдерээс гацахгүй.
+  if (to === 'CONFIRMED') {
+    void notifyOrderConfirmed(updated).catch((e) =>
+      console.warn(`[mail] ${updated.code} баталгаажилтын мэдэгдэл алдаа:`, e),
+    );
+  }
+  if (to === 'ARRIVED' || (to === 'CONFIRMED' && updated.status === 'ARRIVED')) {
     void notifyArrival(updated).catch((e) =>
       console.warn(`[sms] ${updated.code} ирсэн мэдэгдэл алдаа:`, e),
     );
@@ -155,6 +220,277 @@ async function restoreReadyStock(tx: Prisma.TransactionClient, orderId: string):
   }
 }
 
+/** Бэлэн барааны мөрүүдийг ирсэн гэж тэмдэглэнэ (closeAt null). */
+export async function markReadyItemsArrived(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  now = new Date(),
+): Promise<number> {
+  const result = await tx.orderItem.updateMany({
+    where: {
+      orderId,
+      cancelledAt: null,
+      arrivedAt: null,
+      round: { closeAt: null },
+    },
+    data: { arrivedAt: now },
+  });
+  return result.count;
+}
+
+/**
+ * Багц агуулахад ирэхэд тухайн тойргийн бүх мөрд `arrivedAt` тавина.
+ * Нөлөөлсөн захиалгын id-уудыг буцаана.
+ */
+export async function markItemsArrivedForBatch(
+  tx: Prisma.TransactionClient,
+  batchId: string,
+  now = new Date(),
+): Promise<string[]> {
+  const items = await tx.orderItem.findMany({
+    where: {
+      cancelledAt: null,
+      arrivedAt: null,
+      round: { batchId },
+    },
+    select: { id: true, orderId: true },
+  });
+  if (items.length === 0) return [];
+
+  await tx.orderItem.updateMany({
+    where: { id: { in: items.map((i) => i.id) } },
+    data: { arrivedAt: now },
+  });
+
+  return [...new Set(items.map((i) => i.orderId))];
+}
+
+/**
+ * Ирсэн мөртэй захиалгуудыг `ARRIVED` хүртэл ахиулна (алхам алхмаар).
+ * Аль хэдийн ARRIVED/HANDED_OVER/CANCELLED бол алгасна.
+ */
+export async function promoteOrdersToArrived(
+  tx: Prisma.TransactionClient,
+  orderIds: string[],
+  actor: string,
+  reason: string,
+  now = new Date(),
+): Promise<string[]> {
+  if (orderIds.length === 0) return [];
+
+  const orders = await tx.order.findMany({
+    where: {
+      id: { in: orderIds },
+      deletedAt: null,
+      status: { notIn: ['ARRIVED', 'HANDED_OVER', 'CANCELLED'] },
+    },
+    select: { id: true, code: true, status: true },
+  });
+
+  const promoted: string[] = [];
+  for (const order of orders) {
+    const steps = stepsToStatus(order.status, 'ARRIVED');
+    if (steps.length === 0) continue;
+
+    let current = order.status;
+    const timestamps: Record<string, Date> = {};
+    for (const step of steps) {
+      if (!canTransition(current, step)) {
+        throw conflict(
+          `${order.code} захиалгыг "${step}" руу шилжүүлэх боломжгүй.`,
+          { orderCode: order.code, from: current, to: step },
+        );
+      }
+      const field = STATUS_TIMESTAMP[step];
+      if (field) timestamps[field as string] = now;
+      current = step;
+    }
+
+    await tx.order.update({
+      where: { id: order.id },
+      data: { status: 'ARRIVED', ...timestamps },
+    });
+    await audit(
+      {
+        actor,
+        action: 'STATUS_CHANGE',
+        entity: 'Order',
+        entityId: order.id,
+        before: { status: order.status },
+        after: { status: 'ARRIVED', reason },
+      },
+      tx,
+    );
+    promoted.push(order.id);
+  }
+  return promoted;
+}
+
+export interface HandOverItemsResult {
+  itemCount: number;
+  orderIds: string[];
+  completedOrderIds: string[];
+}
+
+/**
+ * Ирсэн мөрүүдийг хүлээлгэн өгнө. Бүх идэвхтэй мөр авсан захиалгыг HANDED_OVER болгоно.
+ */
+export async function handOverItems(opts: {
+  itemIds: string[];
+  actor: string;
+  note?: string;
+  now?: Date;
+}): Promise<HandOverItemsResult> {
+  const now = opts.now ?? new Date();
+  const itemIds = [...new Set(opts.itemIds)];
+  if (itemIds.length === 0) throw conflict('Бараа сонгоогүй байна.');
+
+  return prisma.$transaction(async (tx) => {
+    const items = await tx.orderItem.findMany({
+      where: { id: { in: itemIds } },
+      include: {
+        order: { include: { delivery: true } },
+      },
+    });
+    if (items.length !== itemIds.length) throw conflict('Зарим бараа олдсонгүй.');
+
+    for (const item of items) {
+      if (item.cancelledAt) {
+        throw conflict(`"${item.nameSnapshot}" цуцлагдсан тул өгөх боломжгүй.`);
+      }
+      if (!item.arrivedAt) {
+        throw conflict(`"${item.nameSnapshot}" агуулахад ирээгүй байна.`);
+      }
+      if (item.handedOverAt) {
+        throw conflict(`"${item.nameSnapshot}" аль хэдийн өгсөн байна.`);
+      }
+      if (item.order.deletedAt || item.order.status === 'CANCELLED') {
+        throw conflict(`${item.order.code} захиалга хүчингүй.`);
+      }
+      if (item.order.status === 'HANDED_OVER') {
+        throw conflict(`${item.order.code} аль хэдийн бүтнээр өгсөн.`);
+      }
+    }
+
+    await tx.orderItem.updateMany({
+      where: { id: { in: itemIds } },
+      data: { handedOverAt: now },
+    });
+
+    const orderIds = [...new Set(items.map((i) => i.orderId))];
+    const completedOrderIds: string[] = [];
+
+    for (const orderId of orderIds) {
+      const remaining = await tx.orderItem.count({
+        where: {
+          orderId,
+          cancelledAt: null,
+          handedOverAt: null,
+        },
+      });
+
+      if (remaining > 0) {
+        // Хэсэгчилсэн — захиалга ARRIVED хэвээр (эсвэл урагшлуулах).
+        const order = items.find((i) => i.orderId === orderId)!.order;
+        if (order.status !== 'ARRIVED' && order.status !== 'HANDED_OVER') {
+          await promoteOrdersToArrived(
+            tx,
+            [orderId],
+            opts.actor,
+            opts.note ?? 'Хэсэгчилсэн хүлээлгэн өгөх',
+            now,
+          );
+        }
+        await audit(
+          {
+            actor: opts.actor,
+            action: 'HANDOVER_PARTIAL',
+            entity: 'Order',
+            entityId: orderId,
+            after: {
+              itemIds: items.filter((i) => i.orderId === orderId).map((i) => i.id),
+              note: opts.note,
+            },
+          },
+          tx,
+        );
+        continue;
+      }
+
+      const order = items.find((i) => i.orderId === orderId)!.order;
+      // Бүх мөр авсан — HANDED_OVER хүртэл.
+      if (order.status !== 'HANDED_OVER') {
+        if (order.status !== 'ARRIVED') {
+          await promoteOrdersToArrived(
+            tx,
+            [orderId],
+            opts.actor,
+            opts.note ?? 'Хүлээлгэн өгөх',
+            now,
+          );
+        }
+        const fresh = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
+        if (fresh.status === 'ARRIVED') {
+          await tx.order.update({
+            where: { id: orderId },
+            data: { status: 'HANDED_OVER', handedOverAt: now },
+          });
+          await audit(
+            {
+              actor: opts.actor,
+              action: 'STATUS_CHANGE',
+              entity: 'Order',
+              entityId: orderId,
+              before: { status: 'ARRIVED' },
+              after: { status: 'HANDED_OVER', reason: opts.note },
+            },
+            tx,
+          );
+        }
+      }
+
+      if (order.delivery) {
+        await tx.delivery.update({
+          where: { id: order.delivery.id },
+          data: { status: 'DELIVERED' },
+        });
+      }
+
+      await audit(
+        {
+          actor: opts.actor,
+          action: 'HANDOVER',
+          entity: 'Order',
+          entityId: orderId,
+          after: { note: opts.note, complete: true },
+        },
+        tx,
+      );
+      completedOrderIds.push(orderId);
+    }
+
+    return { itemCount: itemIds.length, orderIds, completedOrderIds };
+  });
+}
+
+/** Захиалга баталгаажсан тухай и-мэйл. `notifyPayment` асаалттай үед. */
+export async function notifyOrderConfirmed(order: Order): Promise<boolean> {
+  const customer = await prisma.customer.findUnique({ where: { id: order.customerId } });
+  if (!customer?.email || !customer.notifyPayment) return false;
+
+  const template = mailTemplates.orderConfirmed(order.code, customer.name);
+  const sent = await sendMail({
+    to: customer.email,
+    subject: template.subject,
+    text: template.text,
+  });
+  if (!sent.ok) {
+    console.warn(`[mail] ${order.code} баталгаажилт илгээгдсэнгүй: ${sent.error}`);
+    return false;
+  }
+  return true;
+}
+
 /** Захиалга ирснийг мэдэгдэх SMS. Нэг захиалгад нэг л удаа. */
 export async function notifyArrival(order: Order): Promise<boolean> {
   const settings = await getSettings();
@@ -162,7 +498,7 @@ export async function notifyArrival(order: Order): Promise<boolean> {
   if (order.arrivalNotifiedAt) return false;
 
   const customer = await prisma.customer.findUnique({ where: { id: order.customerId } });
-  if (!customer) return false;
+  if (!customer?.phone) return false;
 
   const result = await sms.send({
     phone: customer.phone,
