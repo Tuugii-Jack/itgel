@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../middleware/validate.js';
-import { districtList, getSettings } from '../../services/settings.js';
+import { districtList, getSettingsCached } from '../../services/settings.js';
 
 export const publicStoreRouter = Router();
 
@@ -8,7 +8,8 @@ export const publicStoreRouter = Router();
 publicStoreRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
-    const settings = await getSettings();
+    const settings = await getSettingsCached();
+    res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
     res.json({
       data: {
         storeName: settings.storeName,

@@ -111,6 +111,7 @@ publicProductsRouter.get(
       }),
     ]);
 
+    res.setHeader('Cache-Control', 'public, s-maxage=15, stale-while-revalidate=60');
     res.json({
       data: rounds.map((r) => publicProduct(r)),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },

@@ -26,6 +26,7 @@ publicCategoriesRouter.get(
       },
     });
 
+    res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
     res.json({
       data: categories.map((c) => ({
         id: c.id,
