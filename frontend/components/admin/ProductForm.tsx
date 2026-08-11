@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import {
   Button,
@@ -9,9 +9,11 @@ import {
   Field,
   ImagePlaceholder,
   Input,
+  Spinner,
   Textarea,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { fileToWebp } from "@/lib/imageUpload";
 import { OPTION_PRESETS } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminCategory, AdminProduct, ProductOption, SizeChartRow } from "@/lib/types";
@@ -44,36 +46,64 @@ export function ProductForm({
   const [sizeChart, setSizeChart] = useState<SizeChartRow[]>(product?.sizeChart ?? []);
   const [images, setImages] = useState<string[]>(product?.images ?? []);
   const toast = useToast();
+  const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Шинэ бараа дээр зураг нэмэхэд эхлээд үүсгэсэн draft id. */
+  const [productId, setProductId] = useState<string | null>(product?.id ?? null);
+
+  const buildTemplate = (imageList: string[] = images) => ({
+    name: name.trim() || "Шинэ бараа",
+    description: description.trim() || undefined,
+    categoryId,
+    images: imageList,
+    options: options
+      .map((o) => ({
+        name: o.name.trim(),
+        values: o.values.map((v) => v.trim()).filter(Boolean),
+      }))
+      .filter((o) => o.name && o.values.length > 0),
+    sizeChart: sizeChart.map((row) => ({
+      size: row.size,
+      heightRange: row.heightRange,
+      chestCm: row.chestCm,
+    })),
+  });
+
+  /** Зураг upload-д id хэрэгтэй тул байхгүй бол draft үүсгэнэ. */
+  const ensureProductId = async (): Promise<string> => {
+    if (productId) return productId;
+    if (!categoryId) throw new Error("Эхлээд ангилал сонгоно уу.");
+    const created = await adminApi.createProduct(buildTemplate([]));
+    setProductId(created.id);
+    return created.id;
+  };
 
   const save = async () => {
+    if (!name.trim()) {
+      const message = "Барааны нэр оруулна уу.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    if (!categoryId) {
+      const message = "Ангилал сонгоно уу.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const template = {
-        name: name.trim(),
-        description: description.trim() || undefined,
-        categoryId,
-        images,
-        options: options
-          .map((o) => ({
-            name: o.name.trim(),
-            values: o.values.map((v) => v.trim()).filter(Boolean),
-          }))
-          .filter((o) => o.name && o.values.length > 0),
-        sizeChart: sizeChart.map((row) => ({
-          size: row.size,
-          heightRange: row.heightRange,
-          chestCm: row.chestCm,
-        })),
-      };
+      const template = buildTemplate(images);
+      // Хэрэглэгчийн нэрийг template-д баталгаажуулна (draft «Шинэ бараа» байж болно).
+      template.name = name.trim();
 
-      if (product) await adminApi.updateProduct(product.id, template);
+      if (productId) await adminApi.updateProduct(productId, template);
       else await adminApi.createProduct(template);
 
-      toast.success(product ? "Бараа хадгалагдлаа." : "Бараа үүслээ.");
+      toast.success(productId ? "Бараа хадгалагдлаа." : "Бараа үүслээ.");
       await onSaved();
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
@@ -83,27 +113,49 @@ export function ProductForm({
     }
   };
 
-  const upload = async (file: File) => {
-    if (!product) {
-      const message = "Зураг нэмэхийн тулд эхлээд барааг хадгална уу.";
+  const upload = async (files: FileList | File[]) => {
+    const list = Array.from(files).filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|webp|gif|avif|heic|bmp)$/i.test(f.name));
+    if (list.length === 0) {
+      const message = "Зөвхөн зураг файл сонгоно уу.";
       setError(message);
       toast.error(message);
       return;
     }
+
+    const room = 12 - images.length;
+    if (room <= 0) {
+      const message = "Нэг бараанд дээд тал нь 12 зураг.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+
+    const batch = list.slice(0, room);
+    if (list.length > room) {
+      toast.error(`Зөвхөн ${room} зураг нэмэгдлээ (дээд хязгаар 12).`);
+    }
+
     setUploading(true);
     setError(null);
     try {
-      const presigned = await adminApi.presignImage(product.id, file.type);
-      const res = await fetch(presigned.uploadUrl, {
-        method: "PUT",
-        headers: presigned.headers,
-        body: file,
-      });
-      if (!res.ok) throw new Error(`Байршуулалт амжилтгүй (${res.status})`);
-      const next = [...images, presigned.publicUrl];
-      await adminApi.saveImages(product.id, next);
-      setImages(next);
-      toast.success("Зураг нэмэгдлээ.");
+      const id = await ensureProductId();
+      let next = [...images];
+      let ok = 0;
+      for (const file of batch) {
+        const webp = await fileToWebp(file);
+        const presigned = await adminApi.presignImage(id, webp.type);
+        const res = await fetch(presigned.uploadUrl, {
+          method: "PUT",
+          headers: presigned.headers,
+          body: webp,
+        });
+        if (!res.ok) throw new Error(`Байршуулалт амжилтгүй (${res.status})`);
+        next = [...next, presigned.publicUrl];
+        setImages(next);
+        ok += 1;
+      }
+      await adminApi.saveImages(id, next);
+      toast.success(ok === 1 ? "Зураг нэмэгдлээ." : `${ok} зураг нэмэгдлээ.`);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Зураг байршуулж чадсангүй.";
       setError(message);
@@ -116,9 +168,9 @@ export function ProductForm({
   const removeImage = async (url: string) => {
     const next = images.filter((i) => i !== url);
     setImages(next);
-    if (product) {
+    if (productId) {
       try {
-        await adminApi.saveImages(product.id, next);
+        await adminApi.saveImages(productId, next);
         toast.success("Зураг хасагдлаа.");
       } catch (e) {
         toast.error(e instanceof ApiError ? e.message : "Зураг хасаж чадсангүй.");
@@ -280,12 +332,7 @@ export function ProductForm({
 
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Зураг</div>
-          {!product && (
-            <p className="m-0 text-[13px] text-muted">
-              Зураг нэмэхийн тулд эхлээд барааг хадгална уу.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-2">
+          <div className="relative flex flex-wrap gap-2">
             {images.map((url) => (
               <div key={url} className="relative h-24 w-24 overflow-hidden rounded-[8px] border border-line">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -294,33 +341,56 @@ export function ProductForm({
                   type="button"
                   onClick={() => removeImage(url)}
                   aria-label="Зураг устгах"
-                  className="absolute right-1 top-1 h-6 w-6 cursor-pointer rounded-full border border-line bg-bg text-[12px]"
+                  disabled={uploading}
+                  className="absolute right-1 top-1 h-6 w-6 cursor-pointer rounded-full border border-line bg-bg text-[12px] disabled:opacity-40"
                 >
                   ×
                 </button>
               </div>
             ))}
-            {images.length === 0 && <ImagePlaceholder className="h-24 w-24 rounded-[8px] border border-line" />}
+            {images.length === 0 && !uploading && (
+              <ImagePlaceholder className="h-24 w-24 rounded-[8px] border border-line" />
+            )}
+            {uploading && (
+              <div className="flex h-24 w-24 flex-col items-center justify-center gap-2 rounded-[8px] border border-line bg-surface">
+                <Spinner className="text-ink-2" />
+                <span className="text-[11px] text-muted">WebP…</span>
+              </div>
+            )}
           </div>
-          <label className="inline-flex">
+          <div className="flex flex-col gap-1.5">
             <input
+              ref={fileRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/avif"
+              accept="image/*"
+              multiple
               className="hidden"
-              disabled={!product || uploading}
+              disabled={uploading || !categoryId || images.length >= 12}
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void upload(file);
+                const files = e.target.files;
+                if (files?.length) void upload(files);
                 e.target.value = "";
               }}
             />
-            <span
-              className={`inline-flex h-11 items-center rounded-[8px] border border-line px-4 text-[14px]
-                ${!product || uploading ? "opacity-40" : "cursor-pointer"}`}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!categoryId || images.length >= 12}
+              loading={uploading}
+              onClick={() => fileRef.current?.click()}
+              className="self-start"
             >
               {uploading ? "Байршуулж байна…" : "Зураг нэмэх"}
-            </span>
-          </label>
+            </Button>
+            <p className="m-0 text-[12px] text-muted">
+              {!categoryId
+                ? "Зураг нэмэхийн тулд ангилал сонгоно уу."
+                : images.length >= 12
+                  ? "Дээд тал нь 12 зураг."
+                  : "Олон зураг сонгож болно → автоматаар WebP."}
+            </p>
+          </div>
         </Card>
 
         {error && <ErrorNote>{error}</ErrorNote>}

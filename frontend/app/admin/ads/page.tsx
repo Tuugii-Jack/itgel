@@ -14,6 +14,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { fileToWebp } from "@/lib/imageUpload";
 import { useToast } from "@/lib/toast";
 import type { AdminAd } from "@/lib/types";
 
@@ -202,11 +203,12 @@ function AdForm({
         setDraftId(adId);
       }
 
-      const presigned = await adminApi.presignAdImage(adId, file.type);
+      const webp = await fileToWebp(file, { maxEdge: 2400, quality: 0.85 });
+      const presigned = await adminApi.presignAdImage(adId, webp.type);
       const res = await fetch(presigned.uploadUrl, {
         method: "PUT",
         headers: presigned.headers,
-        body: file,
+        body: webp,
       });
       if (!res.ok) throw new Error("Зураг байршуулж чадсангүй.");
 
@@ -214,7 +216,7 @@ function AdForm({
       await adminApi.updateAd(adId, { imageUrl: presigned.publicUrl });
       onError(null);
     } catch (e) {
-      onError(e instanceof ApiError ? e.message : "Зураг байршуулж чадсангүй.");
+      onError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Зураг байршуулж чадсангүй.");
     } finally {
       setUploading(false);
     }
@@ -271,20 +273,34 @@ function AdForm({
       <Field label="Зураг">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
           {imageUrl ? (
-            <div className="aspect-[2/1] w-full overflow-hidden rounded-[8px] border border-line sm:max-w-[280px]">
+            <div className="relative aspect-[2/1] w-full overflow-hidden rounded-[8px] border border-line sm:max-w-[280px]">
               <ProductImage src={imageUrl} alt={title || "Баннер"} className="h-full w-full" />
+              {uploading && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-bg/70">
+                  <Spinner className="text-ink-2" />
+                  <span className="text-[12px] text-muted">Байршуулж байна…</span>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="flex aspect-[2/1] w-full items-center justify-center rounded-[8px] border border-dashed border-line bg-surface text-[13px] text-muted sm:max-w-[280px]">
-              Зураг сонгоно уу
+            <div className="relative flex aspect-[2/1] w-full items-center justify-center rounded-[8px] border border-dashed border-line bg-surface text-[13px] text-muted sm:max-w-[280px]">
+              {uploading ? (
+                <div className="flex flex-col items-center gap-2">
+                  <Spinner className="text-ink-2" />
+                  <span>Байршуулж байна…</span>
+                </div>
+              ) : (
+                "Зураг сонгоно уу"
+              )}
             </div>
           )}
           <div className="flex flex-col gap-2">
             <input
               ref={fileRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/avif"
+              accept="image/*"
               className="hidden"
+              disabled={uploading}
               onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) void upload(file);
@@ -296,11 +312,12 @@ function AdForm({
               variant="outline"
               onClick={() => fileRef.current?.click()}
               loading={uploading}
+              disabled={uploading}
             >
-              {imageUrl ? "Зураг солих" : "Зураг сонгох"}
+              {uploading ? "Байршуулж байна…" : imageUrl ? "Зураг солих" : "Зураг сонгох"}
             </Button>
             <p className="m-0 text-[12px] text-muted">
-              Зөвлөмж: 1200×400px (3:1), JPG/PNG/WebP
+              Дурын зураг → WebP. Зөвлөмж: 1200×400px (3:1)
             </p>
           </div>
         </div>

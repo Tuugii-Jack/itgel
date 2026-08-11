@@ -14,6 +14,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
     "seed": "tsx prisma/seed.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
     "r2:cors": "wrangler r2 bucket cors set itgel-test --file r2-cors.json",
     "r2:cors:list": "wrangler r2 bucket cors list itgel-test",
     "test:e2e": "bash tests/e2e/smoke.sh && bash tests/e2e/payments.sh",

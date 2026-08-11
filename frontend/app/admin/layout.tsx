@@ -127,6 +127,7 @@ function Shell({ children }: { children: ReactNode }) {
   const { user, loading, signOut } = useAdminSession();
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const onLoginPage = pathname === "/admin/login";
 
   if (loading) {
     return (
@@ -136,8 +137,26 @@ function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  // Нэвтрэх хуудас нь бүрхүүлгүй.
-  if (!user) return <div className="min-h-dvh bg-surface">{children}</div>;
+  // Нэвтрээгүй: зөвхөн нэвтрэх хуудсыг харуулна — бусад admin хуудас render хийхгүй.
+  if (!user) {
+    if (!onLoginPage) {
+      return (
+        <div className="flex min-h-dvh items-center justify-center">
+          <Spinner className="text-muted" />
+        </div>
+      );
+    }
+    return <div className="min-h-dvh bg-surface">{children}</div>;
+  }
+
+  // Нэвтэрсэн хүн login дээр бол redirect хүртэл хоосон.
+  if (onLoginPage) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <Spinner className="text-muted" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-dvh bg-surface">

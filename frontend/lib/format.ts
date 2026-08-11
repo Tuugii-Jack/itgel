@@ -114,20 +114,24 @@ export function relativeDay(iso: string): string {
   return dayLabel(iso);
 }
 
-/** Захиалга хаагдах хүртэл: "3 хоног 4 цаг", "4 цаг 12 мин", "Хаагдсан" */
+/** Захиалга хаагдах хүртэл: "1 хоног 3 цаг 12 мин 5 сек үлдсэн", "Хаагдсан" */
 export function countdown(iso: string | null, now: Date = new Date()): string {
   if (!iso) return "";
   const ms = new Date(iso).getTime() - now.getTime();
   if (ms <= 0) return "Хаагдсан";
 
-  const totalMinutes = Math.floor(ms / 60_000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
 
-  if (days > 0) return hours > 0 ? `${days} хоног ${hours} цаг` : `${days} хоног`;
-  if (hours > 0) return `${hours} цаг ${minutes} мин`;
-  return `${minutes} мин`;
+  if (days > 0) {
+    return `${days} хоног ${hours} цаг ${minutes} мин ${seconds} сек үлдсэн`;
+  }
+  if (hours > 0) return `${hours} цаг ${minutes} мин ${seconds} сек үлдсэн`;
+  if (minutes > 0) return `${minutes} мин ${seconds} сек үлдсэн`;
+  return `${seconds} сек үлдсэн`;
 }
 
 /** Гарт очих огноо — бэлэн бараанд "Маргааш". */

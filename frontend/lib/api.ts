@@ -76,9 +76,22 @@ export const TOKEN_KEYS = {
   admin: "itgel.admin.token",
 } as const;
 
+/** Middleware-д унших cookie — JWT биш, зөвхөн «нэвтэрсэн эсэх» тэмдэг. */
+export const ADMIN_SESSION_COOKIE = "itgel_admin_session";
+
 export function readToken(kind: keyof typeof TOKEN_KEYS): string | null {
   if (typeof window === "undefined") return null;
   return window.localStorage.getItem(TOKEN_KEYS[kind]);
+}
+
+function syncAdminSessionCookie(token: string | null): void {
+  if (typeof document === "undefined") return;
+  if (token) {
+    // 30 хоног — JWT-ийн хугацаатай ойролцоо; гарахад cookie арилна.
+    document.cookie = `${ADMIN_SESSION_COOKIE}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+  } else {
+    document.cookie = `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+  }
 }
 
 export function writeToken(
@@ -88,6 +101,7 @@ export function writeToken(
   if (typeof window === "undefined") return;
   if (token) window.localStorage.setItem(TOKEN_KEYS[kind], token);
   else window.localStorage.removeItem(TOKEN_KEYS[kind]);
+  if (kind === "admin") syncAdminSessionCookie(token);
 }
 
 interface RequestOptions {

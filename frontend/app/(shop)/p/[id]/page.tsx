@@ -69,11 +69,9 @@ export default function ProductPage({
   if (!product || !store) {
     return (
       <div className='page pb-28 lg:pb-12'>
-        <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10 lg:pt-6'>
-          <div className='p-3 sm:p-4 lg:p-0'>
-            <Skeleton className='aspect-square w-full rounded-[12px]' />
-          </div>
-          <div className='flex flex-col gap-3 px-4 pt-5 lg:px-0 lg:pt-0'>
+        <div className='mx-auto grid w-full max-w-[1100px] gap-8 px-4 pt-6 sm:px-6 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:items-start lg:gap-10 lg:px-10 lg:pt-8'>
+          <Skeleton className='aspect-square w-full max-w-[440px] rounded-[12px]' />
+          <div className='flex flex-col gap-3'>
             <Skeleton className='h-5 w-28' />
             <Skeleton className='h-7 w-3/4' />
             <Skeleton className='h-9 w-40' />
@@ -92,7 +90,6 @@ export default function ProductPage({
   const blocked = soldOut || closed;
   const options = product.options ?? [];
   const missingOpt = options.find((o) => !selections[o.name]);
-  const missing = Boolean(missingOpt);
   const total = product.price * qty;
 
   const addToCart = () => {
@@ -121,46 +118,40 @@ export default function ProductPage({
   };
 
   return (
-    <div className='page pb-28 lg:pb-12'>
-      {/* Laptop — дизайны замын мөр */}
-      <nav className='hidden items-center gap-2 px-10 pt-8 text-[13px] text-muted lg:flex'>
-        <Link href='/' className='text-muted no-underline hover:text-ink-2'>
-          Нүүр
-        </Link>
-        <span>/</span>
-        <span>
-          {product.category?.name ??
-            (isOrder ? "Захиалгын бараа" : "Бэлэн бараа")}
-        </span>
-        <span>/</span>
-        <span className='truncate text-ink-2'>{product.name}</span>
-      </nav>
+    <div className='page pb-28 lg:pb-16'>
+      <div className='mx-auto w-full max-w-[1100px] px-4 sm:px-6 lg:px-10'>
+        <nav className='hidden items-center gap-2 pt-6 text-[13px] text-muted lg:flex'>
+          <Link href='/' className='text-muted no-underline hover:text-ink-2'>
+            Нүүр
+          </Link>
+          <span>/</span>
+          <span>
+            {product.category?.name ??
+              (isOrder ? "Захиалгын бараа" : "Бэлэн бараа")}
+          </span>
+          <span>/</span>
+          <span className='truncate text-ink-2'>{product.name}</span>
+        </nav>
 
-      {/*
-        Laptop — дизайны хуваарь: зүүн талд зураг (уян), баруун талд мэдээлэл
-        440px тогтмол, хооронд 48px зай.
-      */}
-      <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10 lg:pt-6'>
-        {/* Зураг — хуудасны хамгийн чухал элемент тул тод, тусдаа орчинтой. */}
-        <div className='border-b border-line bg-surface p-3 sm:p-4 lg:border-0 lg:bg-transparent lg:p-0'>
-          <ProductGallery
-            images={product.images}
-            alt={product.name}
-            overlay={
-              blocked ? null : (
-                <GalleryChip
-                  product={product}
-                  closeLabel={closeLabel}
-                  soldOut={soldOut}
-                />
-              )
-            }
-          />
-        </div>
+        <div className='grid gap-6 pt-4 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:items-start lg:gap-10 lg:pt-6'>
+          <div>
+            <ProductGallery
+              images={product.images}
+              alt={product.name}
+              overlay={
+                blocked ? null : (
+                  <GalleryChip
+                    product={product}
+                    closeLabel={closeLabel}
+                    soldOut={soldOut}
+                  />
+                )
+              }
+            />
+          </div>
 
-        <div className='lg:flex lg:min-w-0 lg:flex-col lg:gap-6'>
-          {blocked && (
-            <div className='px-4 pt-4 lg:px-0 lg:pt-0'>
+          <div className='flex min-w-0 flex-col gap-5 lg:gap-6'>
+            {blocked && (
               <div
                 className={`rounded-[12px] border px-4 py-3 ${closed ? "border-warn bg-warn-bg" : "border-danger bg-danger-bg"}`}
               >
@@ -177,122 +168,114 @@ export default function ProductPage({
                     : "Дахин нөхөгдөх үед сайт дээр дахин гарна."}
                 </p>
               </div>
-            </div>
-          )}
+            )}
 
-          <div className='flex flex-col gap-2.5 px-4 pt-5 lg:px-0 lg:pt-0'>
-            <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
-              {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
-            </Badge>
-            <h1 className='m-0 text-[21px] font-medium leading-[1.35] lg:text-[28px] lg:leading-[1.3] lg:tracking-[-0.01em]'>
-              {product.name}
-            </h1>
-            <div className='tnum text-[30px] font-semibold leading-none tracking-tight lg:text-[32px] lg:font-medium'>
-              {money(product.price)}
-            </div>
-          </div>
-
-          {/* Laptop — дизайны 4 алхамын карт, нээлттэй байдлаар */}
-          <FlowCard product={product} />
-
-          {/* Худалдан авах шийдвэрт нөлөөлөх гурван зүйл — эхэнд, том. */}
-          <KeyFacts
-            product={product}
-            closeLabel={closeLabel}
-            soldOut={soldOut}
-            closed={closed}
-          />
-
-          {!blocked &&
-            options.map((opt) => {
-              const selected = selections[opt.name] ?? null;
-              return (
-                <div key={opt.name} className='px-4 pt-7 lg:px-0 lg:pt-0'>
-                  <div className='mb-2 text-[14px] text-ink-2 lg:text-[13px]'>
-                    {opt.name}
-                    {selected && <span className='tnum'> · {selected}</span>}
-                  </div>
-                  <ChoiceGroup
-                    columns={opt.values.length > 4 ? 4 : Math.max(2, opt.values.length)}
-                    options={opt.values.map((v) => ({ value: v, label: v }))}
-                    value={selected}
-                    onChange={(v) => {
-                      setSelections((prev) => ({ ...prev, [opt.name]: v }));
-                      setNotice(null);
-                    }}
-                  />
-                </div>
-              );
-            })}
-
-          {/* Мобайл дээр тоо ширхэг тусдаа мөр, laptop дээр доод үйлдлийн мөрөнд */}
-          {!blocked && (
-            <div className='px-4 pt-6 lg:hidden'>
-              <div className='mb-2.5 text-[15px] font-medium'>Тоо ширхэг</div>
-              <div className='flex items-center gap-3'>
-                <Stepper
-                  qty={qty}
-                  max={isOrder ? 50 : Math.max(1, product.stock)}
-                  onChange={setQty}
-                />
-                <span className='tnum text-[15px] text-ink-2'>
-                  = {money(total)}
-                </span>
+            <div className='flex flex-col gap-2'>
+              <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
+                {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
+              </Badge>
+              <h1 className='m-0 text-[22px] font-medium leading-[1.3] tracking-[-0.01em] lg:text-[26px]'>
+                {product.name}
+              </h1>
+              <div className='tnum text-[26px] font-medium leading-none lg:text-[28px]'>
+                {money(product.price)}
               </div>
             </div>
-          )}
 
-          {notice && (
-            <div className='px-4 pt-4 lg:px-0 lg:pt-0'>
-              <ErrorNote>{notice}</ErrorNote>
-            </div>
-          )}
+            <FlowCard product={product} />
 
-          <HowItArrives product={product} />
+            <KeyFacts
+              product={product}
+              closeLabel={closeLabel}
+              soldOut={soldOut}
+              closed={closed}
+            />
 
-          {/* Laptop — дизайны үйлдлийн мөр: тоо, нийт дүн, товч */}
-          <div className='hidden lg:flex lg:flex-col lg:gap-2'>
-            {blocked ? (
-              <Link href='/' className='no-underline'>
-                <Button full size='bar' variant='outline'>
-                  Бусад бараа үзэх
-                </Button>
-              </Link>
-            ) : (
-              <>
-                <div className='flex items-center gap-4'>
+            {!blocked &&
+              options.map((opt) => {
+                const selected = selections[opt.name] ?? null;
+                return (
+                  <div key={opt.name}>
+                    <div className='mb-2 text-[14px] text-ink-2'>
+                      {opt.name}
+                      {selected && <span className='tnum'> · {selected}</span>}
+                    </div>
+                    <ChoiceGroup
+                      columns={
+                        opt.values.length > 4
+                          ? 4
+                          : Math.max(2, opt.values.length)
+                      }
+                      options={opt.values.map((v) => ({ value: v, label: v }))}
+                      value={selected}
+                      onChange={(v) => {
+                        setSelections((prev) => ({ ...prev, [opt.name]: v }));
+                        setNotice(null);
+                      }}
+                    />
+                  </div>
+                );
+              })}
+
+            {!blocked && (
+              <div className='lg:hidden'>
+                <div className='mb-2.5 text-[15px] font-medium'>Тоо ширхэг</div>
+                <div className='flex items-center gap-3'>
                   <Stepper
                     qty={qty}
                     max={isOrder ? 50 : Math.max(1, product.stock)}
                     onChange={setQty}
-                    size='lg'
                   />
-                  <div className='min-w-0 flex-1'>
-                    <div className='text-[13px] text-muted'>Нийт</div>
-                    <div className='tnum text-[18px] font-medium'>
-                      {money(total)}
-                    </div>
-                  </div>
-                  <Button size='bar' onClick={addToCart} className='px-8'>
-                    {isOrder ? "Захиалах" : "Сагсанд хийх"}
-                  </Button>
+                  <span className='tnum text-[15px] text-ink-2'>
+                    = {money(total)}
+                  </span>
                 </div>
-                <div className='text-[13px] text-muted'>
-                  Захиалахад дүнг бүтнээр төлнө.
-                </div>
-              </>
+              </div>
             )}
+
+            {notice && <ErrorNote>{notice}</ErrorNote>}
+
+            <HowItArrives product={product} />
+
+            <div className='hidden lg:flex lg:flex-col lg:gap-2'>
+              {blocked ? (
+                <Link href='/' className='no-underline'>
+                  <Button full size='bar' variant='outline'>
+                    Бусад бараа үзэх
+                  </Button>
+                </Link>
+              ) : (
+                <>
+                  <div className='flex items-center gap-4'>
+                    <Stepper
+                      qty={qty}
+                      max={isOrder ? 50 : Math.max(1, product.stock)}
+                      onChange={setQty}
+                      size='lg'
+                    />
+                    <div className='min-w-0 flex-1'>
+                      <div className='text-[13px] text-muted'>Нийт</div>
+                      <div className='tnum text-[18px] font-medium'>
+                        {money(total)}
+                      </div>
+                    </div>
+                    <Button size='bar' onClick={addToCart} className='px-8'>
+                      {isOrder ? "Захиалах" : "Сагсанд хийх"}
+                    </Button>
+                  </div>
+                  <div className='text-[13px] text-muted'>
+                    Захиалахад дүнг бүтнээр төлнө.
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Тайлбар ба хэмжээсийн хүснэгт — laptop дээр зураг, мэдээллийн доор */}
-      {(product.description || product.sizeChart.length > 0) && (
-        <>
-          <div className='hidden lg:mx-10 lg:my-12 lg:block lg:h-px lg:bg-line' />
-          <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10'>
+        {(product.description || product.sizeChart.length > 0) && (
+          <div className='mt-10 grid gap-8 border-t border-line pt-8 lg:mt-12 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:gap-10 lg:pt-10'>
             {product.description && (
-              <div className='px-4 pt-7 lg:px-0 lg:pt-0'>
+              <div className={product.sizeChart.length > 0 ? "" : "lg:col-span-2"}>
                 <div className='mb-2 text-[15px] font-medium lg:mb-3 lg:text-[17px]'>
                   Тайлбар
                 </div>
@@ -303,7 +286,7 @@ export default function ProductPage({
             )}
 
             {product.sizeChart.length > 0 && (
-              <div className='px-4 pt-7 lg:col-start-2 lg:px-0 lg:pt-0'>
+              <div>
                 <div className='mb-2 text-[15px] font-medium lg:mb-3 lg:text-[17px]'>
                   Хэмжээсийн хүснэгт
                 </div>
@@ -311,13 +294,13 @@ export default function ProductPage({
                   <table className='w-full border-collapse text-[13px]'>
                     <thead>
                       <tr className='bg-surface text-ink-2'>
-                        <th className='px-3 py-2.5 text-left font-normal lg:px-3.5'>
+                        <th className='px-3 py-2.5 text-left font-normal'>
                           Хэмжээ
                         </th>
-                        <th className='px-3 py-2.5 text-left font-normal lg:px-3.5'>
+                        <th className='px-3 py-2.5 text-left font-normal'>
                           Өндөр, см
                         </th>
-                        <th className='px-3 py-2.5 text-left font-normal lg:px-3.5'>
+                        <th className='px-3 py-2.5 text-left font-normal'>
                           Цээж, см
                         </th>
                       </tr>
@@ -328,11 +311,11 @@ export default function ProductPage({
                           key={`${row.size}-${i}`}
                           className='border-t border-line'
                         >
-                          <td className='px-3 py-2.5 lg:px-3.5'>{row.size}</td>
-                          <td className='tnum px-3 py-2.5 text-ink-2 lg:px-3.5'>
+                          <td className='px-3 py-2.5'>{row.size}</td>
+                          <td className='tnum px-3 py-2.5 text-ink-2'>
                             {row.heightRange}
                           </td>
-                          <td className='tnum px-3 py-2.5 text-ink-2 lg:px-3.5'>
+                          <td className='tnum px-3 py-2.5 text-ink-2'>
                             {row.chestCm}
                           </td>
                         </tr>
@@ -343,10 +326,9 @@ export default function ProductPage({
               </div>
             )}
           </div>
-        </>
-      )}
+        )}
+      </div>
 
-      {/* Утсан дээр наалдсан үйлдлийн мөр — laptop дээр баруун баганад байдаг */}
       <div
         className='fixed inset-x-0 bottom-0 z-20 mx-auto flex max-w-[560px] items-center gap-3 border-t border-line bg-bg p-4
         shadow-[0_-8px_24px_rgba(20,20,25,0.06)]
@@ -395,7 +377,7 @@ function GalleryChip({
 
   return (
     <span
-      className={`absolute bottom-5 left-5 hidden h-8 items-center gap-1.5 rounded-[8px] border border-line bg-bg px-3 lg:inline-flex
+      className={`absolute bottom-3 left-3 inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-line bg-bg/95 px-2.5 backdrop-blur-sm lg:bottom-4 lg:left-4 lg:px-3
         ${isOrder ? "text-warn" : "text-ok"}`}
     >
       <svg
@@ -469,7 +451,7 @@ function KeyFacts({
 
   // Laptop дээр эдгээр нь зурган дээрх шошго ба алхмын карт болж хуваагдана.
   return (
-    <div className='px-4 pt-6 lg:hidden'>
+    <div className='lg:hidden'>
       <div className='divide-y divide-line rounded-[12px] border border-line'>
         <Fact
           icon='truck'
@@ -714,7 +696,7 @@ function HowItArrives({ product }: { product: Product }) {
   const steps = flowSteps(product);
 
   return (
-    <div className='px-4 pt-7 lg:hidden'>
+    <div className='lg:hidden'>
       {/* Дэлгэрэнгүй явц — сонирхсон хүн нээж үзнэ, эхний харцыг бөглөрүүлэхгүй. */}
       <details className='group rounded-[12px] border border-line bg-surface'>
         <summary className='flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-[15px] font-medium'>

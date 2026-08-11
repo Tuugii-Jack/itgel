@@ -128,27 +128,30 @@ function CardFact({
 /** Зураг дээрх хугацааны тэмдэглэгээ. */
 function CloseCountdown({ closeAt }: { closeAt: string }) {
   const label = useCountdown(closeAt);
-  if (label === "Хаагдсан") return null;
+  if (!label || label === "Хаагдсан") return null;
   return (
-    <div className='absolute inset-x-2 bottom-2 flex h-[26px] items-center justify-center gap-1.5 rounded-[6px] border border-line bg-bg'>
+    <div className='absolute inset-x-1.5 bottom-2 flex min-h-[28px] items-center justify-center gap-1 rounded-[6px] border border-line bg-bg/95 px-1.5 py-1 backdrop-blur-sm'>
       <svg
-        width='12'
-        height='12'
+        width='11'
+        height='11'
         viewBox='0 0 12 12'
         fill='none'
         stroke='#B45309'
         strokeWidth='1.2'
         strokeLinecap='round'
+        className='shrink-0'
       >
         <circle cx='6' cy='6' r='4.6' />
         <path d='M6 3.4 V6 L7.9 7.2' />
       </svg>
-      <span className='tnum text-[12px] text-warn'>{label}</span>
+      <span className='tnum text-center text-[10px] leading-tight text-warn sm:text-[11px]'>
+        {label}
+      </span>
     </div>
   );
 }
 
-/** Минут тутам шинэчилнэ — «3 хоног 4 цаг». */
+/** Секунд тутам шинэчилнэ — «1 хоног 3 цаг 12 мин 5 сек үлдсэн». */
 export function useCountdown(iso: string | null): string {
   // Эхлэхдээ хоосон — сервер ба браузерын цаг зөрж hydration алдаа гаргахгүй.
   const [label, setLabel] = useState("");
@@ -156,7 +159,7 @@ export function useCountdown(iso: string | null): string {
   useEffect(() => {
     setLabel(countdown(iso));
     if (!iso) return;
-    const timer = setInterval(() => setLabel(countdown(iso)), 60_000);
+    const timer = setInterval(() => setLabel(countdown(iso)), 1000);
     return () => clearInterval(timer);
   }, [iso]);
 

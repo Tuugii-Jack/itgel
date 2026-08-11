@@ -28,21 +28,29 @@ interface AdminSession {
 
 const Ctx = createContext<AdminSession | null>(null);
 
+const LOGIN_PATH = "/admin/login";
+
 export function AdminSessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+  const onLoginPage = pathname === LOGIN_PATH;
 
   useEffect(() => {
     if (!readToken("admin")) {
+      writeToken("admin", null); // cookie-г цэвэрлэнэ
       setUser(null);
       setLoading(false);
       return;
     }
     adminApi
       .me()
-      .then(setUser)
+      .then((me) => {
+        setUser(me);
+        // Хуучин session-д cookie байхгүй байж болно — нөхнө.
+        writeToken("admin", readToken("admin"));
+      })
       .catch(() => {
         writeToken("admin", null);
         setUser(null);
@@ -50,12 +58,12 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Нэвтрээгүй бол нэвтрэх хуудас руу.
+  // Нэвтрээгүй → зөвхөн login; нэвтэрсэн → login-ээс гар.
   useEffect(() => {
     if (loading) return;
-    if (!user && pathname !== "/admin/login") router.replace("/admin/login");
-    if (user && pathname === "/admin/login") router.replace("/admin");
-  }, [user, loading, pathname, router]);
+    if (!user && !onLoginPage) router.replace(LOGIN_PATH);
+    if (user && onLoginPage) router.replace("/admin");
+  }, [user, loading, onLoginPage, router]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {
@@ -70,7 +78,7 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     writeToken("admin", null);
     setUser(null);
-    router.replace("/admin/login");
+    router.replace(LOGIN_PATH);
   }, [router]);
 
   const value = useMemo<AdminSession>(
