@@ -168,6 +168,18 @@ export function Th({
   );
 }
 
-export function Td({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <td className={`border-b border-line p-3 align-top ${className}`}>{children}</td>;
+export function Td({
+  children,
+  className = "",
+  onClick,
+}: {
+  children: ReactNode;
+  className?: string;
+  onClick?: (e: React.MouseEvent<HTMLTableCellElement>) => void;
+}) {
+  return (
+    <td className={`border-b border-line p-3 align-top ${className}`} onClick={onClick}>
+      {children}
+    </td>
+  );
 }

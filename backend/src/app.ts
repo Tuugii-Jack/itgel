@@ -32,3 +32,7 @@ export function createApp() {
 
   return app;
 }
+
+/** Vercel Express preset `src/app` дээр default export шаарддаг. */
+const app = createApp();
+export default app;

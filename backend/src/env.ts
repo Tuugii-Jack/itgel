@@ -1,6 +1,9 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
+/** Хоосон string → undefined (Vercel дээр optional env хоосон байж болно). */
+const emptyToUndef = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
+
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -13,33 +16,33 @@ const schema = z.object({
   JWT_ADMIN_TTL: z.string().default('12h'),
 
   SMS_PROVIDER: z.enum(['console', 'http']).default('console'),
-  SMS_API_URL: z.string().optional(),
-  SMS_API_KEY: z.string().optional(),
+  SMS_API_URL: z.preprocess(emptyToUndef, z.string().optional()),
+  SMS_API_KEY: z.preprocess(emptyToUndef, z.string().optional()),
   SMS_SENDER: z.string().default('itgel'),
 
   /** Gmail SMTP — и-мэйл баталгаажуулалт / нууц үг сэргээх. */
-  SMTP_HOST: z.string().optional(),
+  SMTP_HOST: z.preprocess(emptyToUndef, z.string().optional()),
   SMTP_PORT: z.coerce.number().int().positive().default(465),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  SMTP_FROM: z.string().optional(),
+  SMTP_USER: z.preprocess(emptyToUndef, z.string().optional()),
+  SMTP_PASS: z.preprocess(emptyToUndef, z.string().optional()),
+  SMTP_FROM: z.preprocess(emptyToUndef, z.string().optional()),
 
   // --- Supabase ---
-  SUPABASE_URL: z.string().url().optional(),
-  SUPABASE_PUBLISHABLE_KEY: z.string().optional(),
-  SUPABASE_SECRET_KEY: z.string().optional(),
-  SUPABASE_JWKS_URL: z.string().url().optional(),
+  SUPABASE_URL: z.preprocess(emptyToUndef, z.string().url().optional()),
+  SUPABASE_PUBLISHABLE_KEY: z.preprocess(emptyToUndef, z.string().optional()),
+  SUPABASE_SECRET_KEY: z.preprocess(emptyToUndef, z.string().optional()),
+  SUPABASE_JWKS_URL: z.preprocess(emptyToUndef, z.string().url().optional()),
   SUPABASE_STORAGE_BUCKET: z.string().default('product-images'),
 
   /** auto — тохируулсан нь ажиллана (R2 → supabase → mock). Тодорхой заавал болно. */
   STORAGE_PROVIDER: z.enum(['auto', 'r2', 'supabase', 'mock']).default('auto'),
 
-  R2_ENDPOINT: z.string().optional(),
+  R2_ENDPOINT: z.preprocess(emptyToUndef, z.string().optional()),
   R2_REGION: z.string().default('us-east-1'),
-  R2_BUCKET: z.string().optional(),
-  R2_ACCESS_KEY_ID: z.string().optional(),
-  R2_SECRET_ACCESS_KEY: z.string().optional(),
-  R2_PUBLIC_BASE_URL: z.string().optional(),
+  R2_BUCKET: z.preprocess(emptyToUndef, z.string().optional()),
+  R2_ACCESS_KEY_ID: z.preprocess(emptyToUndef, z.string().optional()),
+  R2_SECRET_ACCESS_KEY: z.preprocess(emptyToUndef, z.string().optional()),
+  R2_PUBLIC_BASE_URL: z.preprocess(emptyToUndef, z.string().optional()),
   R2_FORCE_PATH_STYLE: z
     .string()
     .default('true')
