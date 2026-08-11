@@ -7,7 +7,6 @@ export default function ShopLayout({ children }: { children: ReactNode }) {
   return (
     <SessionProvider>
       <CartProvider>
-        {/* Laptop-ийн нийтлэг толгой — нүүрээс бусад дэлгэцэд, lg-ээс дээш. */}
         <ShopHeader />
         {children}
       </CartProvider>

@@ -21,16 +21,8 @@ export default function LookupPage() {
 
   return (
     <div className="screen">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-3 py-3">
-        <Link href="/" aria-label="Буцах" className="no-underline">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#1C1917" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 4 L6 10 L12 16" />
-          </svg>
-        </Link>
-        <span className="text-[15px]">Захиалга хянах</span>
-      </div>
-
-      <div className="px-4 pt-6">
+      <div className="px-4 pt-6 lg:mx-auto lg:max-w-[480px] lg:px-0 lg:pt-10">
+        <div className="mb-4 text-[20px] font-medium lg:text-[24px]">Захиалга хянах</div>
         <Card className="flex flex-col gap-3 p-4">
           <div>
             <div className="text-[15px] font-medium">Захиалгын кодоо оруулна уу</div>

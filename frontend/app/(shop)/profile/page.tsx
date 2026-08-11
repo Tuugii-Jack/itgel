@@ -50,15 +50,9 @@ export default function ProfilePage() {
 
   return (
     <div className="screen pb-12">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-3 py-3 lg:hidden">
-        <Link href="/" aria-label="Нүүр" className="no-underline">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#1C1917" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 4 L6 10 L12 16" />
-          </svg>
-        </Link>
-        <span className="text-[15px]">Миний профайл</span>
+      <div className="px-4 pt-6 lg:hidden">
+        <div className="text-[20px] font-medium">Миний профайл</div>
       </div>
-
       {session.me ? <Profile /> : <SignIn />}
     </div>
   );

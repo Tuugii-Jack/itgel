@@ -2,8 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
 import { ProductCard } from "@/components/ProductCard";
 import { Button, Divider, Empty, ErrorNote, Skeleton } from "@/components/ui";
@@ -13,6 +12,8 @@ import type { Ad, Category, Product, Store } from "@/lib/types";
 
 const GUTTER = "mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8 xl:px-10";
 
+/** Нүүр дээр захиалгын барааны эхний хязгаар — илүү бол «Бүгдийг үзэх». */
+const ORDER_PREVIEW = 8;
 const PAGE_SIZE = 20;
 
 /** Нэг төрлийн барааны жагсаалт + хуудаслалт. */
@@ -26,25 +27,13 @@ interface SectionData {
 const EMPTY_SECTION: SectionData = { items: [], total: 0, page: 1, pages: 1 };
 
 export default function HomePage() {
-  // useSearchParams нь Suspense хүрээ шаарддаг.
-  return (
-    <Suspense fallback={null}>
-      <HomeContent />
-    </Suspense>
-  );
-}
-
-function HomeContent() {
   const cart = useCart();
-  const searchParams = useSearchParams();
   const [store, setStore] = useState<Store | null>(null);
   const [ads, setAds] = useState<Ad[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [orderData, setOrderData] = useState<SectionData>(EMPTY_SECTION);
   const [readyData, setReadyData] = useState<SectionData>(EMPTY_SECTION);
   const [category, setCategory] = useState<string | null>(null);
-  const [search, setSearch] = useState(searchParams.get("q") ?? "");
-  const [query, setQuery] = useState(searchParams.get("q")?.trim() ?? "");
   const [loading, setLoading] = useState(true);
   const [moreLoading, setMoreLoading] = useState<"order" | "ready" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,29 +48,13 @@ function HomeContent() {
       .catch((e: ApiError) => setError(e.message));
   }, []);
 
-  // Толгойн хайлтаас /?q=... гэж ирэхэд утгыг нь авна.
-  // Render дундаа тохируулна — эффект хэрэглэвэл нэг илүү render үүсдэг.
-  const urlQ = searchParams.get("q") ?? "";
-  const [lastUrlQ, setLastUrlQ] = useState(urlQ);
-  if (urlQ !== lastUrlQ) {
-    setLastUrlQ(urlQ);
-    setSearch(urlQ);
-    setQuery(urlQ.trim());
-  }
-
-  useEffect(() => {
-    const timer = setTimeout(() => setQuery(search.trim()), 350);
-    return () => clearTimeout(timer);
-  }, [search]);
-
   const fetchSection = useCallback(
-    async (type: "order" | "ready", page: number) => {
+    async (type: "order" | "ready", page: number, pageSize = PAGE_SIZE) => {
       const result = await api.products({
         type,
         category: category ?? undefined,
-        q: query || undefined,
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         sort: type === "order" ? "closing" : undefined,
       });
       return {
@@ -91,7 +64,7 @@ function HomeContent() {
         pages: result.meta?.pages ?? 1,
       };
     },
-    [category, query],
+    [category],
   );
 
   const load = useCallback(async () => {
@@ -99,7 +72,7 @@ function HomeContent() {
     setError(null);
     try {
       const [order, ready] = await Promise.all([
-        fetchSection("order", 1),
+        fetchSection("order", 1, ORDER_PREVIEW),
         fetchSection("ready", 1),
       ]);
       setOrderData(order);
@@ -134,26 +107,19 @@ function HomeContent() {
 
   const nothing =
     !loading && orderData.items.length === 0 && readyData.items.length === 0;
-  const filtering = category !== null || query !== "";
+  const filtering = category !== null;
 
   return (
     <div className='page'>
-      <TopNav store={store} />
-
       {ads.length > 0 && !filtering && (
         <div className={`${GUTTER} pt-4 lg:pt-6`}>
           <AdBanner ads={ads} />
         </div>
       )}
 
-      {/* Хайлт — нүүр дээрээс шууд бараа хайна. */}
-      <div className={`${GUTTER} pt-4 lg:pt-6`}>
-        <SearchBox value={search} onChange={setSearch} />
-      </div>
-
       {/* Category chips — soft blue active state */}
       <div
-        className={`no-scrollbar flex gap-2 overflow-x-auto ${GUTTER} pt-3 lg:pt-4`}
+        className={`no-scrollbar flex gap-2 overflow-x-auto ${GUTTER} pt-4 lg:pt-6`}
       >
         <Chip active={category === null} onClick={() => setCategory(null)}>
           Бүгд
@@ -178,11 +144,7 @@ function HomeContent() {
       {loading && <SectionSkeleton />}
 
       {nothing && (
-        <Empty>
-          {query
-            ? `«${query}» гэсэн хайлтад тохирох бараа олдсонгүй.`
-            : "Энэ ангилалд одоогоор бараа алга."}
-        </Empty>
+        <Empty>Энэ ангилалд одоогоор бараа алга.</Empty>
       )}
 
       {!loading && orderData.items.length > 0 && (
@@ -191,8 +153,14 @@ function HomeContent() {
           title='Захиалгын бараа'
           hint='Одоо захиалж, 2-3 долоо хоногийн дараа авна'
           data={orderData}
-          moreLoading={moreLoading === "order"}
-          onMore={() => loadMore("order")}
+          moreHref={
+            orderData.total > ORDER_PREVIEW
+              ? category
+                ? `/order?category=${encodeURIComponent(category)}`
+                : "/order"
+              : undefined
+          }
+          moreLabel='Бүгдийг үзэх'
         />
       )}
 
@@ -232,117 +200,6 @@ function HomeContent() {
   );
 }
 
-/**
- * Доош scroll хийхэд header-г нуух, дээш scroll хийхэд буцааж харуулах hook.
- * threshold хүртэлх бага зэргийн scroll-д header нуугдахгүй.
- */
-function useHideOnScroll(threshold = 500) {
-  const [hidden, setHidden] = useState(false);
-  const lastY = useRef(0);
-  const accum = useRef(0);
-
-  useEffect(() => {
-    lastY.current = window.scrollY;
-
-    const onScroll = () => {
-      const y = window.scrollY;
-      const diff = y - lastY.current;
-
-      if (diff < 0) {
-        accum.current = 0;
-        setHidden(false);
-      } else if (diff > 0) {
-        accum.current += diff;
-        if (y > threshold && accum.current > threshold) {
-          setHidden(true);
-        }
-      }
-
-      lastY.current = y;
-    };
-
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [threshold]);
-
-  return hidden;
-}
-
-function TopNav({ store }: { store: Store | null }) {
-  const hidden = useHideOnScroll(500);
-
-  return (
-    <header
-      className={`sticky top-0 z-30 flex h-16 lg:h-20 items-center gap-6 lg:gap-8 bg-bg/80 backdrop-blur-md mx-auto w-full px-4 sm:px-6 lg:px-10 xl:px-14 transition-transform duration-300 ease-out ${
-        hidden ? "-translate-y-full" : "translate-y-0"
-      }`}
-    >
-      <Link href='/' className='no-underline shrink-0'>
-        <Image
-          src='/logo.png'
-          alt={store?.storeName ?? "itgel"}
-          width={40}
-          height={40}
-          priority
-          className='h-10 lg:h-11 w-auto'
-        />
-      </Link>
-
-      <nav className='hidden items-center gap-1 lg:flex'>
-        <NavLink href='#order'>Захиалгын бараа</NavLink>
-        <NavLink href='#ready'>Бэлэн бараа</NavLink>
-      </nav>
-
-      <div className='ml-auto flex items-center gap-2 lg:gap-3'>
-        {store?.phone && (
-          <a
-            href={`tel:${store.phone.replace(/\D/g, "")}`}
-            className='tnum hidden h-10 items-center rounded-[8px] px-3 text-[14px] text-ink-2 no-underline transition-colors hover:text-primary xl:inline-flex'
-          >
-            {store.phone}
-          </a>
-        )}
-        <Link href='/profile' className='no-underline'>
-          <Button variant='outline' size='sm' className='h-10 lg:h-11'>
-            Профайл
-          </Button>
-        </Link>
-        <Link href='/t' className='no-underline'>
-          <Button variant='outline' size='sm' className='h-10 lg:h-11'>
-            <svg
-              width='16'
-              height='16'
-              viewBox='0 0 16 16'
-              fill='none'
-              stroke='currentColor'
-              strokeWidth='1.3'
-              strokeLinecap='round'
-              strokeLinejoin='round'
-              className='text-ink-2'
-            >
-              <path d='M1.8 5.2 8 2.2l6.2 3v5.6L8 13.8l-6.2-3z' />
-              <path d='M1.8 5.2 8 8.2l6.2-3 M8 8.2v5.6' />
-            </svg>
-            <span className='hidden sm:inline'>Захиалгаа хянах</span>
-            <span className='sm:hidden'>Хянах</span>
-          </Button>
-        </Link>
-      </div>
-    </header>
-  );
-}
-
-function NavLink({ href, children }: { href: string; children: string }) {
-  return (
-    <a
-      href={href}
-      className='rounded-[8px] px-3 py-2 text-[14px] text-ink-2 no-underline transition-colors hover:bg-primary-soft hover:text-primary'
-    >
-      {children}
-    </a>
-  );
-}
-
 function Chip({
   children,
   active,
@@ -365,61 +222,6 @@ function Chip({
     >
       {children}
     </button>
-  );
-}
-
-function SearchBox({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className='flex h-11 max-w-[480px] items-center gap-2 rounded-[8px] border border-line bg-surface px-3 transition-colors focus-within:border-primary-muted'>
-      <svg
-        width='16'
-        height='16'
-        viewBox='0 0 18 18'
-        fill='none'
-        stroke='#A8A29E'
-        strokeWidth='1.3'
-        strokeLinecap='round'
-        className='shrink-0'
-        aria-hidden
-      >
-        <circle cx='8' cy='8' r='5.5' />
-        <path d='M12.2 12.2 16 16' />
-      </svg>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder='Бараа хайх'
-        aria-label='Бараа хайх'
-        className='h-full w-full bg-transparent text-[14px] outline-none placeholder:text-muted'
-      />
-      {value && (
-        <button
-          type='button'
-          onClick={() => onChange("")}
-          aria-label='Хайлт цэвэрлэх'
-          className='flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-muted hover:text-ink'
-        >
-          <svg
-            width='12'
-            height='12'
-            viewBox='0 0 12 12'
-            fill='none'
-            stroke='currentColor'
-            strokeWidth='1.4'
-            strokeLinecap='round'
-            aria-hidden
-          >
-            <path d='M2 2 L10 10 M10 2 L2 10' />
-          </svg>
-        </button>
-      )}
-    </div>
   );
 }
 
@@ -453,15 +255,20 @@ function Section({
   data,
   moreLoading,
   onMore,
+  moreLabel,
+  moreHref,
 }: {
   id: string;
   title: string;
   hint: string;
   data: SectionData;
-  moreLoading: boolean;
-  onMore: () => void;
+  moreLoading?: boolean;
+  onMore?: () => void;
+  moreLabel?: string;
+  /** Өгвөл товч энэ хуудас руу шилжинэ (нүүрээс «Бүгдийг үзэх»). */
+  moreHref?: string;
 }) {
-  const hasMore = data.page < data.pages;
+  const hasMore = Boolean(moreHref) || data.items.length < data.total;
 
   return (
     <section id={id} className='scroll-mt-20 pt-8 lg:pt-12'>
@@ -488,10 +295,19 @@ function Section({
         ))}
       </div>
 
-      {hasMore && (
+      {hasMore && moreHref && (
+        <div className={`flex justify-center pt-6 ${GUTTER}`}>
+          <Link href={moreHref} className='no-underline'>
+            <Button variant='outline'>{moreLabel ?? "Бүгдийг үзэх"}</Button>
+          </Link>
+        </div>
+      )}
+
+      {hasMore && !moreHref && onMore && (
         <div className={`flex justify-center pt-6 ${GUTTER}`}>
           <Button variant='outline' onClick={onMore} loading={moreLoading}>
-            Цааш үзэх · {data.total - data.items.length} бараа
+            {moreLabel ??
+              `Цааш үзэх · ${data.total - data.items.length} бараа`}
           </Button>
         </div>
       )}

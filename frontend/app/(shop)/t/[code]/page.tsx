@@ -93,9 +93,6 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
   if (!order || !store) {
     return (
       <div className="screen pb-8">
-        <div className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
-          <span className="text-[15px] font-medium">Захиалга хянах</span>
-        </div>
         <div className="px-4 pt-5 lg:px-10 lg:pt-8">
           <Skeleton className="h-8 w-40" />
           <Skeleton className="mt-2 h-4 w-28" />
@@ -116,19 +113,6 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
 
   return (
     <div className="screen pb-8">
-      <div className="sticky top-0 z-10 flex h-12 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
-        <Link
-          href="/"
-          aria-label="Нүүр"
-          className="-ml-3 flex h-11 w-11 items-center justify-center no-underline"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#1C1917" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 4 L6 10 L12 16" />
-          </svg>
-        </Link>
-        <span className="text-[15px] font-medium">Захиалга хянах</span>
-      </div>
-
       {/*
         Дизайнд «Бараа ирсэн» нь тусдаа дэлгэц (06). Хянах дэлгэцийн дотор
         оруулбал доод талын тогтмол товчны зай нь хуудсыг тасалдуулна.

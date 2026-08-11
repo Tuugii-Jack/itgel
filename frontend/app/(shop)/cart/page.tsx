@@ -49,7 +49,6 @@ export default function CartPage() {
   if (cart.lines.length === 0) {
     return (
       <div className="screen">
-        <Header />
         <Empty>Сагс хоосон байна.</Empty>
         <div className="px-4">
           <Link href="/" className="no-underline">
@@ -107,11 +106,9 @@ export default function CartPage() {
 
   return (
     <div className="screen flex flex-col pb-28 lg:pb-12">
-      <Header />
-
-      {/* Laptop-ийн хуудасны гарчиг — мобайл дээр толгой нь энэ үүргийг гүйцэтгэнэ. */}
-      <div className="hidden px-10 pt-8 lg:block">
-        <div className="text-[24px] font-medium">Сагс</div>
+      {/* Laptop-ийн хуудасны гарчиг */}
+      <div className="px-4 pt-6 lg:px-10 lg:pt-8">
+        <div className="text-[20px] font-medium lg:text-[24px]">Сагс</div>
       </div>
 
       <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8 lg:px-10 lg:pt-6">
@@ -255,24 +252,6 @@ export default function CartPage() {
           Дансны мэдээлэл авах
         </Button>
       </div>
-    </div>
-  );
-}
-
-/** Дизайны толгой — 48px өндөр, 16px хажуугийн зай. */
-function Header() {
-  return (
-    <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
-      <Link
-        href="/"
-        aria-label="Буцах"
-        className="-ml-3 flex h-11 w-11 items-center justify-center no-underline"
-      >
-        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#1C1917" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 4 L6 10 L12 16" />
-        </svg>
-      </Link>
-      <span className="text-[15px] font-medium">Сагс</span>
     </div>
   );
 }

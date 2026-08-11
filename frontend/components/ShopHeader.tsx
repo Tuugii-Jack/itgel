@@ -1,72 +1,105 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
-import { useCart } from "@/lib/cart";
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui";
+import { api } from "@/lib/api";
+import type { Store } from "@/lib/types";
 
 /**
- * Laptop дизайны нийтлэг толгой — 68px, 40px хажуугийн зай.
- *
- * Зөвхөн `lg`-ээс дээш харагдана: мобайл дээр дэлгэц бүр өөрийн 48px
- * буцах толгойтой. Нүүр хуудас өөрийн толгойтой тул түүнийг алгасна.
+ * Дэлгүүрийн нийтлэг толгой — нүүр, сагс, профайл гэх мэт бүх хуудсанд ижил.
+ * Доош scroll хийхэд нуугдана, дээш гүйлгэхэд буцаж гарна.
  */
 export function ShopHeader() {
-  const pathname = usePathname();
-  const router = useRouter();
-  const cart = useCart();
-  const [query, setQuery] = useState("");
+  const [store, setStore] = useState<Store | null>(null);
+  const hidden = useHideOnScroll(500);
 
-  if (pathname === "/") return null;
-
-  const search = (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = query.trim();
-    router.push(q ? `/?q=${encodeURIComponent(q)}` : "/");
-  };
+  useEffect(() => {
+    api.store().then(setStore).catch(() => {});
+  }, []);
 
   return (
-    <header className="hidden h-[68px] shrink-0 items-center gap-8 border-b border-line bg-bg px-10 lg:flex">
-      <Link href="/" className="shrink-0 text-[20px] font-medium tracking-[-0.01em] no-underline">
-        itgel
+    <header
+      className={`sticky top-0 z-30 flex h-16 lg:h-20 items-center gap-6 lg:gap-8 bg-bg/80 backdrop-blur-md mx-auto w-full px-4 sm:px-6 lg:px-10 xl:px-14 transition-transform duration-300 ease-out ${
+        hidden ? "-translate-y-full" : "translate-y-0"
+      }`}
+    >
+      <Link href="/" className="no-underline shrink-0">
+        <Image
+          src="/logo.png"
+          alt={store?.storeName ?? "itgel"}
+          width={40}
+          height={40}
+          priority
+          className="h-10 lg:h-11 w-auto"
+        />
       </Link>
 
-      <form onSubmit={search} className="flex h-10 max-w-[420px] flex-1 items-center gap-2 rounded-[8px] border border-line bg-surface px-3">
-        <svg width="16" height="16" viewBox="0 0 18 18" fill="none" stroke="#A8A29E" strokeWidth="1.3" strokeLinecap="round" className="shrink-0">
-          <circle cx="8" cy="8" r="5.5" />
-          <path d="M12.2 12.2 16 16" />
-        </svg>
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Бараа хайх"
-          className="h-full w-full bg-transparent text-[14px] outline-none placeholder:text-muted"
-        />
-      </form>
+      <nav className="hidden items-center gap-1 lg:flex">
+        <NavLink href="/order">Захиалгын бараа</NavLink>
+        <NavLink href="/#ready">Бэлэн бараа</NavLink>
+      </nav>
 
-      <div className="ml-auto flex items-center gap-2">
-        <Link
-          href="/profile"
-          className="flex h-10 items-center gap-2 rounded-[8px] border border-line bg-bg px-3 text-[14px] no-underline"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#57534E" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="8" cy="5.6" r="2.8" />
-            <path d="M2.8 13.6c0-2.6 2.3-4.2 5.2-4.2s5.2 1.6 5.2 4.2" />
-          </svg>
-          Профайл
-        </Link>
-        <Link
-          href="/cart"
-          className="flex h-10 items-center gap-2 rounded-[8px] bg-ink px-3.5 text-[14px] text-white no-underline"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#FFFFFF" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 2.6h1.9l1.7 8h6.8l1.6-6H4.4" />
-            <circle cx="6.4" cy="13.2" r="1.1" />
-            <circle cx="11.8" cy="13.2" r="1.1" />
-          </svg>
-          Сагс{cart.lines.length > 0 && ` ${cart.lines.length}`}
+      <div className="ml-auto flex items-center gap-2 lg:gap-3">
+        {store?.phone && (
+          <a
+            href={`tel:${store.phone.replace(/\D/g, "")}`}
+            className="tnum hidden h-10 items-center rounded-[8px] px-3 text-[14px] text-ink-2 no-underline transition-colors hover:text-primary xl:inline-flex"
+          >
+            {store.phone}
+          </a>
+        )}
+        <Link href="/profile" className="no-underline">
+          <Button variant="outline" size="sm" className="h-10 lg:h-11">
+            Профайл
+          </Button>
         </Link>
       </div>
     </header>
   );
+}
+
+function NavLink({ href, children }: { href: string; children: string }) {
+  return (
+    <a
+      href={href}
+      className="rounded-[8px] px-3 py-2 text-[14px] text-ink-2 no-underline transition-colors hover:bg-primary-soft hover:text-primary"
+    >
+      {children}
+    </a>
+  );
+}
+
+/** Доош scroll → нуух, дээш → харуулах. threshold хүртэл бага гүйлгэлтэд нуугдахгүй. */
+function useHideOnScroll(threshold = 500) {
+  const [hidden, setHidden] = useState(false);
+  const lastY = useRef(0);
+  const accum = useRef(0);
+
+  useEffect(() => {
+    lastY.current = window.scrollY;
+
+    const onScroll = () => {
+      const y = window.scrollY;
+      const diff = y - lastY.current;
+
+      if (diff < 0) {
+        accum.current = 0;
+        setHidden(false);
+      } else if (diff > 0) {
+        accum.current += diff;
+        if (y > threshold && accum.current > threshold) {
+          setHidden(true);
+        }
+      }
+
+      lastY.current = y;
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [threshold]);
+
+  return hidden;
 }

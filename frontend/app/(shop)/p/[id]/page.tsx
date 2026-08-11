@@ -69,10 +69,6 @@ export default function ProductPage({
   if (!product || !store) {
     return (
       <div className='page pb-28 lg:pb-12'>
-        <div className='sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-2 py-2 lg:hidden'>
-          <BackButton />
-          <Skeleton className='h-4 w-40' />
-        </div>
         <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10 lg:pt-6'>
           <div className='p-3 sm:p-4 lg:p-0'>
             <Skeleton className='aspect-square w-full rounded-[12px]' />
@@ -126,11 +122,6 @@ export default function ProductPage({
 
   return (
     <div className='page pb-28 lg:pb-12'>
-      <div className='sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-2 py-2 lg:hidden'>
-        <BackButton />
-        <span className='truncate text-[15px]'>{product.name}</span>
-      </div>
-
       {/* Laptop — дизайны замын мөр */}
       <nav className='hidden items-center gap-2 px-10 pt-8 text-[13px] text-muted lg:flex'>
         <Link href='/' className='text-muted no-underline hover:text-ink-2'>
@@ -606,31 +597,6 @@ function Fact({
         {value}
       </span>
     </div>
-  );
-}
-
-function BackButton() {
-  const router = useRouter();
-  return (
-    <button
-      type='button'
-      onClick={() => router.back()}
-      aria-label='Буцах'
-      className='flex h-10 w-10 cursor-pointer items-center justify-center rounded-[8px] border-0 bg-transparent'
-    >
-      <svg
-        width='20'
-        height='20'
-        viewBox='0 0 20 20'
-        fill='none'
-        stroke='#1C1917'
-        strokeWidth='1.4'
-        strokeLinecap='round'
-        strokeLinejoin='round'
-      >
-        <path d='M12 4 L6 10 L12 16' />
-      </svg>
-    </button>
   );
 }
 
