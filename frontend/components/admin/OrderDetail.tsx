@@ -45,6 +45,13 @@ function nextStatus(from: OrderStatus): OrderStatus | null {
   return ORDER_FLOW[i + 1];
 }
 
+function previousStatus(from: OrderStatus): OrderStatus | null {
+  if (from === "CANCELLED") return null; // audit-аас тодорхойлогдоно
+  const i = ORDER_FLOW.indexOf(from);
+  if (i <= 0) return null;
+  return ORDER_FLOW[i - 1];
+}
+
 const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "BANK_TRANSFER", label: "Шилжүүлэг" },
   { value: "CASH", label: "Бэлэн" },
@@ -143,6 +150,24 @@ export function OrderDetail({
         setError(message);
         toast.error(message);
       }
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const revertStatus = async () => {
+    setBusyKey("status:revert");
+    setError(null);
+    setShortfall(null);
+    try {
+      await adminApi.revertOrderStatus(orderId);
+      toast.success("Төлөв нэг алхам буцаагдлаа.");
+      await load();
+      onChanged();
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : "Гүйцэтгэж чадсангүй.";
+      setError(message);
+      toast.error(message);
     } finally {
       setBusyKey(null);
     }
@@ -365,6 +390,7 @@ export function OrderDetail({
             disabled={busy}
             busyKey={busyKey}
             onChange={changeStatus}
+            onRevert={revertStatus}
           />
 
           <Card className="flex flex-col gap-2 p-4">
@@ -421,21 +447,32 @@ export function OrderDetail({
   );
 }
 
-/** Дараагийн алхам ба цуцлах — backend-ийн зөвшөөрсөн шилжилтүүд л харагдана. */
+/** Дараагийн алхам, буцаах, цуцлах — backend-ийн зөвшөөрсөн шилжилтүүд л харагдана. */
 function StatusActions({
   status,
   disabled,
   busyKey,
   onChange,
+  onRevert,
 }: {
   status: OrderStatus;
   disabled: boolean;
   busyKey: string | null;
   onChange: (status: OrderStatus) => void;
+  onRevert: () => void;
 }) {
   const next = nextStatus(status);
+  const prev = previousStatus(status);
+  const canRevert = status !== "NEW";
   const canCancel = status !== "CANCELLED" && status !== "HANDED_OVER";
-  if (!next && !canCancel) return null;
+  if (!next && !canCancel && !canRevert) return null;
+
+  const revertLabel =
+    status === "CANCELLED"
+      ? "Цуцлалтыг буцаах"
+      : prev
+        ? `«${ORDER_STATUS_LABEL[prev]}» руу буцаах`
+        : "Буцаах";
 
   return (
     <Card className="flex flex-col gap-3 p-4">
@@ -452,6 +489,17 @@ function StatusActions({
             onClick={() => onChange(next)}
           >
             {ORDER_STATUS_LABEL[next]} болгох
+          </Button>
+        )}
+        {canRevert && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={disabled}
+            loading={busyKey === "status:revert"}
+            onClick={onRevert}
+          >
+            {revertLabel}
           </Button>
         )}
         {canCancel && (

@@ -9,7 +9,7 @@ import { asyncHandler, param, query, validate } from '../../middleware/validate.
 import { handOverItems } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
 import { adminOrderItem, publicOrderItem } from '../../services/serialize.js';
-import { syncOrderStorageFee } from '../../services/storageFee.js';
+import { syncOrderStorageFee, syncOrdersStorageFees } from '../../services/storageFee.js';
 import { adminOrderDetail } from './orders.js';
 
 export const adminHandoverRouter = Router();
@@ -39,15 +39,18 @@ adminHandoverRouter.get(
     if (!order) throw notFound('Ийм кодтой захиалга олдсонгүй.');
 
     await syncOrderStorageFee(order.id);
-    const fresh = await prisma.order.findUniqueOrThrow({
+    // Зөвхөн мөнгөний багана шинэчлэгдсэн байж болно — бүтэн include дахин татахгүй.
+    const money = await prisma.order.findUniqueOrThrow({
       where: { id: order.id },
-      include: {
-        customer: true,
-        items: { include: { product: true } },
-        batch: true,
-        delivery: true,
+      select: {
+        storageFee: true,
+        dueAmount: true,
+        paidAmount: true,
+        refundedAmount: true,
+        subtotal: true,
       },
     });
+    const fresh = { ...order, ...money };
 
     const pickable = fresh.items.filter(
       (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt,
@@ -108,7 +111,7 @@ adminHandoverRouter.get(
     const orderIds = [
       ...new Set(customers.flatMap((c) => c.orders.map((o) => o.id))),
     ];
-    await Promise.all(orderIds.map((id) => syncOrderStorageFee(id)));
+    await syncOrdersStorageFees(orderIds);
 
     const refreshed = await prisma.customer.findMany({
       where: { id: { in: customers.map((c) => c.id) } },
@@ -213,7 +216,7 @@ adminHandoverRouter.post(
     if (items.length !== body.itemIds.length) throw conflict('Зарим бараа олдсонгүй.');
 
     const uniqueOrderIds = [...new Set(items.map((i) => i.orderId))];
-    await Promise.all(uniqueOrderIds.map((id) => syncOrderStorageFee(id)));
+    await syncOrdersStorageFees(uniqueOrderIds);
 
     const dueByOrder = new Map<string, number>();
     for (const orderId of uniqueOrderIds) {

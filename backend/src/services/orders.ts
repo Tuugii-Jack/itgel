@@ -10,7 +10,7 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { addDays, computeArrival, toIso } from '../lib/date.js';
 import { conflict } from '../lib/errors.js';
-import { canTransition, ORDER_STATUS_LABEL, stepsToStatus } from '../lib/orderStatus.js';
+import { canTransition, ORDER_STATUS_LABEL, previousInFlow, stepsToStatus } from '../lib/orderStatus.js';
 import { mailTemplates, sendMail } from './mail.js';
 import { getSettings } from './settings.js';
 import { sms, smsTemplates } from './sms.js';
@@ -164,6 +164,139 @@ export async function changeOrderStatus(
     );
   }
   return updated;
+}
+
+/**
+ * Төлвийг нэг алхам буцаана (админ санамсаргүй урагшлуулсан үед).
+ * CANCELLED бол audit-аас цуцлахаас өмнөх төлөв рүү.
+ */
+export async function revertOrderStatus(
+  orderId: string,
+  options: StatusChangeOptions,
+): Promise<Order> {
+  const updated = await prisma.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({ where: { id: orderId } });
+    if (!order) throw conflict('Захиалга олдсонгүй.');
+    if (order.deletedAt) throw conflict('Устгасан захиалгын төлөв буцаах боломжгүй.');
+
+    let to: OrderStatus | null = null;
+    if (order.status === 'CANCELLED') {
+      to = await previousStatusFromAudit(tx, orderId);
+      if (!to || to === 'CANCELLED') {
+        throw conflict('Цуцлахаас өмнөх төлөвийг олсонгүй. Гараар засаарай.');
+      }
+    } else {
+      to = previousInFlow(order.status);
+      if (!to) {
+        throw conflict(`"${ORDER_STATUS_LABEL[order.status]}" төлвөөс буцаах боломжгүй.`);
+      }
+    }
+
+    const from = order.status;
+    const data: Prisma.OrderUpdateInput = { status: to };
+
+    // Одоогийн төлвийн огноог цэвэрлэнэ.
+    const clearField = STATUS_TIMESTAMP[from];
+    if (clearField) (data as Record<string, unknown>)[clearField] = null;
+
+    // Мөрийн нийцүүлэлт
+    if (from === 'HANDED_OVER') {
+      await tx.orderItem.updateMany({
+        where: { orderId, cancelledAt: null },
+        data: { handedOverAt: null },
+      });
+    }
+    if (from === 'ARRIVED') {
+      // Аваагүй мөрүүдийн arrivedAt-ийг арилгана (буцааж «хүлээж» болгоно).
+      await tx.orderItem.updateMany({
+        where: { orderId, cancelledAt: null, handedOverAt: null },
+        data: { arrivedAt: null },
+      });
+      data.arrivalNotifiedAt = null;
+    }
+    if (from === 'CONFIRMED' && to === 'NEW') {
+      // Бэлэн барааны arrivedAt-ийг баталгаажуулахад тавьсан тул буцаана.
+      await tx.orderItem.updateMany({
+        where: {
+          orderId,
+          cancelledAt: null,
+          handedOverAt: null,
+          round: { closeAt: null },
+        },
+        data: { arrivedAt: null },
+      });
+      data.arrivalNotifiedAt = null;
+      if (order.batchId) data.batch = { disconnect: true };
+    }
+    if (from === 'CANCELLED') {
+      data.cancelledAt = null;
+      // Цуцлах үед үлдэгдэл нэмэгдсэн тул дахин хасна.
+      await consumeReadyStock(tx, orderId);
+    }
+
+    const next = await tx.order.update({ where: { id: orderId }, data });
+
+    await audit(
+      {
+        actor: options.actor,
+        action: 'STATUS_REVERT',
+        entity: 'Order',
+        entityId: orderId,
+        before: { status: from },
+        after: { status: to, reason: options.reason ?? 'Админ буцаасан' },
+      },
+      tx,
+    );
+
+    return next;
+  });
+
+  return updated;
+}
+
+async function previousStatusFromAudit(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<OrderStatus | null> {
+  const logs = await tx.auditLog.findMany({
+    where: { entity: 'Order', entityId: orderId, action: { in: ['STATUS_CHANGE', 'STATUS_REVERT'] } },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+  });
+  for (const log of logs) {
+    const after = log.after as { status?: string } | null;
+    if (after?.status === 'CANCELLED') {
+      const before = log.before as { status?: OrderStatus } | null;
+      if (before?.status && before.status !== 'CANCELLED') return before.status;
+    }
+  }
+  return null;
+}
+
+/** Цуцлалтыг буцаах үед бэлэн барааны үлдэгдлийг дахин хасна. */
+async function consumeReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
+  const items = await tx.orderItem.findMany({
+    where: { orderId, cancelledAt: null },
+    include: { round: true },
+  });
+
+  for (const item of items) {
+    if (!item.round || item.round.closeAt !== null) continue;
+    const round = await tx.productRound.findUniqueOrThrow({ where: { id: item.roundId } });
+    if (round.stock < item.qty) {
+      throw conflict(
+        `"${item.nameSnapshot}" үлдэгдэл хүрэлцэхгүй (${round.stock}/${item.qty}). Цуцлалтыг буцаах боломжгүй.`,
+      );
+    }
+    const nextStock = round.stock - item.qty;
+    await tx.productRound.update({
+      where: { id: item.roundId },
+      data: {
+        stock: nextStock,
+        ...(nextStock <= 0 && round.status === 'ACTIVE' ? { status: 'SOLD_OUT' as const } : {}),
+      },
+    });
+  }
 }
 
 /**
@@ -378,6 +511,14 @@ export async function handOverItems(opts: {
     });
 
     const orderIds = [...new Set(items.map((i) => i.orderId))];
+
+    // Утсаар/админ захиалга — хэрэглэгч сайт дээр авах арга сонгоогүй байсан ч
+    // биеэр ирж авсан бол PICKUP гэж тэмдэглэнэ.
+    await tx.order.updateMany({
+      where: { id: { in: orderIds }, fulfilment: null },
+      data: { fulfilment: 'PICKUP' },
+    });
+
     const completedOrderIds: string[] = [];
 
     for (const orderId of orderIds) {

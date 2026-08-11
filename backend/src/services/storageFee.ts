@@ -1,7 +1,7 @@
-import type { Prisma } from '@prisma/client';
+import type { Prisma, Setting } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { diffUbDays } from '../lib/date.js';
-import { getSettings } from './settings.js';
+import { getSettingsCached } from './settings.js';
 import { recalcOrderTotals } from './money.js';
 
 type Tx = Prisma.TransactionClient;
@@ -27,6 +27,13 @@ export type StorageFeeBreakdown = {
   freeDays: number;
   /** Хоног бүрийн хураамж ₮. */
   feePerDay: number;
+};
+
+type OrderForStorage = {
+  id: string;
+  storageFee: number;
+  status: string;
+  items: StorageItemInput[];
 };
 
 /**
@@ -60,13 +67,86 @@ export function computeStorageFee(
   return { fee, billableItemDays, freeDaysLeft, freeDays, feePerDay };
 }
 
-/** Захиалгын `storageFee`-г дахин бодож, өөрчлөгдсөн бол dueAmount шинэчилнэ. */
+function targetStorageFee(
+  order: Pick<OrderForStorage, 'storageFee' | 'status'>,
+  breakdown: StorageFeeBreakdown,
+): number {
+  if (order.status === 'HANDED_OVER' || order.status === 'CANCELLED') {
+    return order.storageFee;
+  }
+  return Math.max(order.storageFee, breakdown.fee);
+}
+
+/** Аль хэдийн ачаалсан захиалгаас задаргаа — нэмэлт DB query байхгүй. */
+export function peekStorageFee(
+  order: OrderForStorage,
+  settings: Pick<Setting, 'storageFeePerDay' | 'storageFreeDays'>,
+  now = new Date(),
+): StorageFeeBreakdown {
+  const breakdown = computeStorageFee(
+    order.items,
+    settings.storageFeePerDay,
+    settings.storageFreeDays,
+    now,
+  );
+  return { ...breakdown, fee: targetStorageFee(order, breakdown) };
+}
+
+/**
+ * Олон захиалгыг нэг Setting + нэг findMany-аар sync.
+ * Жагсаалт дээр N×sync хийхгүй — зөвхөн handover/cron/нэг захиалга.
+ */
+export async function syncOrdersStorageFees(
+  orderIds: string[],
+  now = new Date(),
+  client: Tx | typeof prisma = prisma,
+): Promise<number> {
+  const ids = [...new Set(orderIds.filter(Boolean))];
+  if (ids.length === 0) return 0;
+
+  const settings = await getSettingsCached();
+  if (settings.storageFeePerDay <= 0) return 0;
+
+  const orders = await client.order.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      storageFee: true,
+      status: true,
+      items: {
+        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true },
+      },
+    },
+  });
+
+  let updated = 0;
+  for (const order of orders) {
+    const breakdown = computeStorageFee(
+      order.items,
+      settings.storageFeePerDay,
+      settings.storageFreeDays,
+      now,
+    );
+    const targetFee = targetStorageFee(order, breakdown);
+    if (targetFee === order.storageFee) continue;
+
+    await client.order.update({
+      where: { id: order.id },
+      data: { storageFee: targetFee },
+    });
+    await recalcOrderTotals(client, order.id);
+    updated += 1;
+  }
+  return updated;
+}
+
+/** Нэг захиалга — batch-ийн нимгэн wrapper. */
 export async function syncOrderStorageFee(
   orderId: string,
   now = new Date(),
   client: Tx | typeof prisma = prisma,
 ): Promise<StorageFeeBreakdown> {
-  const settings = await getSettings();
+  const settings = await getSettingsCached();
   const order = await client.order.findUnique({
     where: { id: orderId },
     select: {
@@ -88,34 +168,20 @@ export async function syncOrderStorageFee(
     };
   }
 
-  // Бүрэн авсан/цуцлагдсан захиалга дээр шинэ хураамж нэмэхгүй.
-  // Хэсэгчилэн авсан ч өмнө бодогдсон хураамжийг бууруулахгүй (max).
-  const breakdown = computeStorageFee(
-    order.items,
-    settings.storageFeePerDay,
-    settings.storageFreeDays,
-    now,
-  );
-
-  const targetFee =
-    order.status === 'HANDED_OVER' || order.status === 'CANCELLED'
-      ? order.storageFee
-      : Math.max(order.storageFee, breakdown.fee);
-
-  if (targetFee !== order.storageFee) {
+  const breakdown = peekStorageFee(order, settings, now);
+  if (breakdown.fee !== order.storageFee) {
     await client.order.update({
       where: { id: orderId },
-      data: { storageFee: targetFee },
+      data: { storageFee: breakdown.fee },
     });
     await recalcOrderTotals(client, orderId);
   }
-
-  return { ...breakdown, fee: targetFee };
+  return breakdown;
 }
 
-/** Идэвхтэй ARRIVED захиалгуудын хадгалалтын хураамжийг масс-шинэчилнэ. */
+/** Cron — нэг query-ээр авч, өөрчлөгдсөнүүдийг л шинэчилнэ. */
 export async function syncAllStorageFees(now = new Date()): Promise<number> {
-  const settings = await getSettings();
+  const settings = await getSettingsCached();
   if (settings.storageFeePerDay <= 0) return 0;
 
   const orders = await prisma.order.findMany({
@@ -124,18 +190,33 @@ export async function syncAllStorageFees(now = new Date()): Promise<number> {
       status: { in: ['ARRIVED', 'IN_TRANSIT', 'IN_BATCH', 'CONFIRMED'] },
       items: { some: { arrivedAt: { not: null }, handedOverAt: null, cancelledAt: null } },
     },
-    select: { id: true },
+    select: {
+      id: true,
+      storageFee: true,
+      status: true,
+      items: {
+        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true },
+      },
+    },
     take: 500,
   });
 
   let updated = 0;
   for (const order of orders) {
-    const before = await prisma.order.findUnique({
+    const breakdown = computeStorageFee(
+      order.items,
+      settings.storageFeePerDay,
+      settings.storageFreeDays,
+      now,
+    );
+    const targetFee = targetStorageFee(order, breakdown);
+    if (targetFee === order.storageFee) continue;
+    await prisma.order.update({
       where: { id: order.id },
-      select: { storageFee: true },
+      data: { storageFee: targetFee },
     });
-    const after = await syncOrderStorageFee(order.id, now);
-    if (before && before.storageFee !== after.fee) updated += 1;
+    await recalcOrderTotals(prisma, order.id);
+    updated += 1;
   }
   return updated;
 }

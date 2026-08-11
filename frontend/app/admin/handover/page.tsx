@@ -754,6 +754,9 @@ export default function HandoverPage() {
 
       <Card className="mb-4 flex flex-col gap-3 p-4">
         <div className="text-[14px] font-medium">Утас, нэр эсвэл и-мэйл</div>
+        <p className="m-0 text-[13px] leading-[1.4] text-muted">
+          Утсаар захиалсан / сайт дээр «өөрөө авна» дараагүй байсан ч утасны дугаараар олж өгнө.
+        </p>
         <Input
           value={customerQ}
           onChange={setCustomerQ}

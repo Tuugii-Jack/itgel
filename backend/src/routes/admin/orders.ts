@@ -16,7 +16,7 @@ import {
   PAYMENT_STATE_LABEL,
   paymentState,
 } from '../../services/money.js';
-import { buildTimeline, changeOrderStatus } from '../../services/orders.js';
+import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
 import {
   adminOrderItem,
   batchSummary,
@@ -77,7 +77,7 @@ adminOrdersRouter.get(
         : {}),
     };
 
-    const [total, foundOrders] = await Promise.all([
+    const [total, orders] = await Promise.all([
       prisma.order.count({ where }),
       prisma.order.findMany({
         where,
@@ -94,25 +94,8 @@ adminOrdersRouter.get(
       }),
     ]);
 
-    // Хүлээлгэн өгөх жагсаалтад агуулахын хураамж шинэчлэгдсэн due харагдана.
-    if (q.status === 'ARRIVED') {
-      await Promise.all(foundOrders.map((o) => syncOrderStorageFee(o.id)));
-    }
-
-    const orders =
-      q.status === 'ARRIVED'
-        ? await prisma.order.findMany({
-            where: { id: { in: foundOrders.map((o) => o.id) } },
-            orderBy: { createdAt: 'desc' },
-            include: {
-              customer: { select: { id: true, name: true, phone: true, email: true } },
-              items: {
-                select: { qty: true, unitPrice: true, costPriceSnapshot: true, cancelledAt: true },
-              },
-              batch: true,
-            },
-          })
-        : foundOrders;
+    // Агуулахын хураамж — жагсаалт дээр sync хийхгүй (N+1 удаашрал).
+    // Cron + захиалга/хүлээлгэн өгөх нээхэд шинэчлэгдэнэ.
 
     const RETENTION_MS = 10 * 24 * 60 * 60 * 1000;
     const now = Date.now();
@@ -408,6 +391,43 @@ adminOrdersRouter.patch(
     }
 
     await changeOrderStatus(orderId, status, { actor: actorOf(req), reason });
+
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: {
+        customer: true,
+        items: { include: { product: true } },
+        batch: true,
+        delivery: true,
+      },
+    });
+
+    res.json({ data: adminOrderDetail(order) });
+  }),
+);
+
+/**
+ * POST /orders/:id/status/revert — төлвийг нэг алхам буцаана
+ * (санамсаргүй урагшлуулсан эсвэл цуцалсныг сэргээх).
+ */
+adminOrdersRouter.post(
+  '/:id/status/revert',
+  validate({
+    params: z.object({ id: z.string().min(1) }),
+    body: z
+      .object({
+        reason: z.string().trim().max(300).optional(),
+      })
+      .optional(),
+  }),
+  asyncHandler(async (req, res) => {
+    const orderId = param(req, 'id');
+    const reason =
+      req.body && typeof req.body === 'object' && 'reason' in req.body
+        ? (req.body as { reason?: string }).reason
+        : undefined;
+
+    await revertOrderStatus(orderId, { actor: actorOf(req), reason });
 
     const order = await prisma.order.findUniqueOrThrow({
       where: { id: orderId },

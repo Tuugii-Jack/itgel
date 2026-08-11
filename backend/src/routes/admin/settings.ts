@@ -5,7 +5,7 @@ import { audit } from '../../lib/audit.js';
 import { badRequest } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
-import { getSettings } from '../../services/settings.js';
+import { getSettings, invalidateSettingsCache } from '../../services/settings.js';
 
 export const adminSettingsRouter = Router();
 
@@ -50,6 +50,7 @@ adminSettingsRouter.patch(
     if (min > max) throw badRequest('defaultLeadMinDays нь defaultLeadMaxDays-с их байж болохгүй.');
 
     const after = await prisma.setting.update({ where: { id: 1 }, data: body });
+    invalidateSettingsCache();
 
     await audit({
       actor: actorOf(req),

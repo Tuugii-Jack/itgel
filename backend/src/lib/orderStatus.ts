@@ -24,7 +24,7 @@ export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
  * Шилжилт зөвшөөрөгдөх эсэх.
  * — Гинжин дагуу зөвхөн нэг алхам урагш.
  * — CANCELLED руу HANDED_OVER-с бусад бүх төлвөөс.
- * — CANCELLED-с хаашаа ч шилжихгүй.
+ * — CANCELLED-с хаашаа ч шилжихгүй (буцаах нь тусдаа `canRevert`).
  */
 export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
   if (from === to) return false;
@@ -36,6 +36,23 @@ export function canTransition(from: OrderStatus, to: OrderStatus): boolean {
   const toIndex = ORDER_FLOW.indexOf(to);
   if (fromIndex === -1 || toIndex === -1) return false;
   return toIndex === fromIndex + 1;
+}
+
+/** Гинжин дээрх өмнөх алхам — NEW/CANCELLED дээр null. */
+export function previousInFlow(status: OrderStatus): OrderStatus | null {
+  const i = ORDER_FLOW.indexOf(status);
+  if (i <= 0) return null;
+  return ORDER_FLOW[i - 1] ?? null;
+}
+
+/**
+ * Админ санамсаргүй урагшлуулсныг нэг алхам буцаах.
+ * CANCELLED-с буцаахыг audit-аас өмнөх төлөвтэй нь зөвшөөрнө (энд зөвхөн flow).
+ */
+export function canRevert(from: OrderStatus): boolean {
+  if (from === 'NEW') return false;
+  if (from === 'CANCELLED') return true;
+  return previousInFlow(from) !== null;
 }
 
 /** Багцын шат ахихад дотор байгаа захиалга шилжих төлөв (шаардлагагүй бол null). */

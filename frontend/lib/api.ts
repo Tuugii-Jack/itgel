@@ -591,6 +591,14 @@ export const adminApi = {
       body: { status, reason, force },
     }).then((r) => r.data),
 
+  /** Төлвийг нэг алхам буцаана (санамсаргүй урагшлуулсан үед). */
+  revertOrderStatus: (id: string, reason?: string) =>
+    request<AdminOrderDetail>(`/admin/orders/${id}/status/revert`, {
+      ...adminAuth,
+      method: "POST",
+      body: reason ? { reason } : {},
+    }).then((r) => r.data),
+
   /** Олон захиалгын төлөв нэг хүсэлтээр. Алдаатайг тусад нь буцаана. */
   bulkOrderStatus: (ids: string[], status: string, force?: boolean) =>
     request<{

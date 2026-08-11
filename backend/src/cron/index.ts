@@ -246,9 +246,9 @@ export function startCron(): void {
     cron.schedule('15 * * * *', () => void cancelUnpaidOrders().catch(console.error), options),
   );
 
-  // Цаг тутам — агуулахын хадгалалтын хураамж
+  // 15 минут тутам — агуулахын хадгалалтын хураамж (request path дээр sync хийхгүй)
   tasks.push(
-    cron.schedule('20 * * * *', () => void accrueStorageFees().catch(console.error), options),
+    cron.schedule('*/15 * * * *', () => void accrueStorageFees().catch(console.error), options),
   );
 
   // Өдөрт нэг — 03:00: 10 хоног өнгөрсөн soft-delete захиалгыг бүрмөсөн устгана.

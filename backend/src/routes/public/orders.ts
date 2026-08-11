@@ -13,8 +13,8 @@ import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, recalcOrderTotals } from '../../services/money.js';
-import { deliveryFeeFor, getSettings } from '../../services/settings.js';
-import { syncOrderStorageFee } from '../../services/storageFee.js';
+import { deliveryFeeFor, getSettings, getSettingsCached } from '../../services/settings.js';
+import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { claimDeliverySlot } from '../../services/delivery.js';
 import {
@@ -258,25 +258,43 @@ publicOrdersRouter.get(
 
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
-    const storage = await syncOrderStorageFee(order.id);
-    const fresh = await prisma.order.findUniqueOrThrow({
-      where: { id: order.id },
-      include: {
-        items: { include: { product: true } },
-        batch: true,
-        delivery: true,
-        customer: true,
-      },
-    });
+    // Унших үед DB-д бичихгүй — задаргааг одоогийн мөрөөс бодно.
+    // Хураамж өөрчлөгдсөн бол нэг удаа sync (давхар full include fetch хийхгүй).
+    const settings = await getSettingsCached();
+    let storage = peekStorageFee(order, settings);
+    let storageFee = order.storageFee;
+    let dueAmount = order.dueAmount;
+    let paidAmount = order.paidAmount;
+    let refundedAmount = order.refundedAmount;
+    let subtotal = order.subtotal;
+
+    if (storage.fee !== order.storageFee) {
+      storage = await syncOrderStorageFee(order.id);
+      const moneyRow = await prisma.order.findUniqueOrThrow({
+        where: { id: order.id },
+        select: {
+          storageFee: true,
+          dueAmount: true,
+          paidAmount: true,
+          refundedAmount: true,
+          subtotal: true,
+        },
+      });
+      storageFee = moneyRow.storageFee;
+      dueAmount = moneyRow.dueAmount;
+      paidAmount = moneyRow.paidAmount;
+      refundedAmount = moneyRow.refundedAmount;
+      subtotal = moneyRow.subtotal;
+    }
 
     res.json({
       data: {
-        code: fresh.code,
-        status: fresh.status,
-        statusLabel: orderStatusLabel(fresh.status),
-        subtotal: fresh.subtotal,
-        deliveryFee: fresh.deliveryFee,
-        storageFee: fresh.storageFee,
+        code: order.code,
+        status: order.status,
+        statusLabel: orderStatusLabel(order.status),
+        subtotal,
+        deliveryFee: order.deliveryFee,
+        storageFee,
         storage: {
           freeDays: storage.freeDays,
           feePerDay: storage.feePerDay,
@@ -284,23 +302,31 @@ publicOrdersRouter.get(
           billableItemDays: storage.billableItemDays,
           fee: storage.fee,
         },
-        paidAmount: fresh.paidAmount,
-        refundedAmount: fresh.refundedAmount,
-        dueAmount: fresh.dueAmount,
-        paymentState: paymentState(computeTotals(fresh)),
-        paymentClaimedAt: fresh.paymentClaimedAt?.toISOString() ?? null,
-        fulfilment: fresh.fulfilment,
-        createdAt: fresh.createdAt.toISOString(),
+        paidAmount,
+        refundedAmount,
+        dueAmount,
+        paymentState: paymentState(
+          computeTotals({
+            subtotal,
+            deliveryFee: order.deliveryFee,
+            storageFee,
+            paidAmount,
+            refundedAmount,
+          }),
+        ),
+        paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
+        fulfilment: order.fulfilment,
+        createdAt: order.createdAt.toISOString(),
         customer: {
-          name: fresh.customer.name,
-          phone: maskPhone(fresh.customer.phone),
-          email: fresh.customer.email,
+          name: order.customer.name,
+          phone: maskPhone(order.customer.phone),
+          email: order.customer.email,
         },
-        items: fresh.items.map(publicOrderItem),
-        batch: batchSummary(fresh.batch),
-        delivery: publicDelivery(fresh.delivery),
-        timeline: buildTimeline(fresh),
-        canChooseFulfilment: fresh.status === 'ARRIVED' && fresh.fulfilment === null,
+        items: order.items.map(publicOrderItem),
+        batch: batchSummary(order.batch),
+        delivery: publicDelivery(order.delivery),
+        timeline: buildTimeline(order),
+        canChooseFulfilment: order.status === 'ARRIVED' && order.fulfilment === null,
       },
     });
   }),
