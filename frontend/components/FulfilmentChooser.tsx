@@ -91,19 +91,22 @@ export function FulfilmentChooser({
   };
 
   return (
-    <div className="pb-24">
-      <div className="px-4 pt-6">
+    <div className="pb-24 lg:px-10 lg:pb-12 lg:pt-8">
+      <div className="px-4 pt-6 lg:max-w-[1120px] lg:px-0 lg:pt-0">
         <div className="tnum text-[13px] text-muted">{order.code}</div>
-        <div className="mt-1 text-[24px] font-medium">
+        <div className="mt-1 text-[24px] font-medium lg:text-[28px]">
           {liveItems.length} бараа ирлээ
         </div>
-        <div className="mt-1 text-[14px] leading-[1.5] text-ink-2">
+        <div className="mt-1 text-[14px] leading-[1.5] text-ink-2 lg:text-[15px]">
           Хэрхэн авахаа сонгоно уу.
         </div>
       </div>
 
+      <div className="lg:mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8">
+        <div className="lg:flex lg:flex-col lg:gap-6">
+
       {/* Ирсэн бараанууд */}
-      <div className="flex flex-col gap-2 px-4 pt-5">
+      <div className="flex flex-col gap-2 px-4 pt-5 lg:px-0 lg:pt-0">
         <div className="text-[13px] text-ink-2">Ирсэн бараа</div>
         <div className="overflow-hidden rounded-[12px] border border-line">
           {liveItems.map((item) => (
@@ -130,11 +133,11 @@ export function FulfilmentChooser({
         </div>
       </div>
 
-      <div className="px-4 pt-6">
-        <div className="text-[15px] font-medium">Авах аргаа сонгоно уу</div>
+      <div className="px-4 pt-6 lg:px-0 lg:pt-0">
+        <div className="text-[15px] font-medium lg:text-[17px]">Авах аргаа сонгоно уу</div>
       </div>
 
-      <div className="flex flex-col gap-3 px-4 pt-6">
+      <div className="flex flex-col gap-3 px-4 pt-6 lg:grid lg:grid-cols-2 lg:px-0 lg:pt-3">
         <OptionCard
           selected={type === "PICKUP"}
           onSelect={() => setType("PICKUP")}
@@ -160,7 +163,8 @@ export function FulfilmentChooser({
       </div>
 
       {type === "DELIVERY" && (
-        <div className="flex flex-col gap-6 px-4 pt-6">
+        <div className="flex flex-col gap-6 px-4 pt-6 lg:rounded-[12px] lg:border lg:border-line lg:px-6 lg:py-6 lg:pt-6">
+          <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:gap-6">
           <Field label="Дүүрэг">
             <div className="grid grid-cols-2 gap-2">
               {store.deliveryFees.map((d) => (
@@ -178,6 +182,7 @@ export function FulfilmentChooser({
           <Field label="Хороо">
             <Input value={khoroo} onChange={setKhoroo} placeholder="Жишээ: 15-р хороо" />
           </Field>
+          </div>
 
           <Field label="Дэлгэрэнгүй хаяг">
             <Textarea
@@ -189,7 +194,7 @@ export function FulfilmentChooser({
           </Field>
 
           <Field label="Хүргэлтийн өдөр">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 lg:max-w-[520px]">
               {slots.map((slot) => {
                 const active = day === slot.day;
                 return (
@@ -221,31 +226,41 @@ export function FulfilmentChooser({
         </div>
       )}
 
-      {/* Хураангуй */}
-      <div className="px-4 pb-6 pt-6">
-        <div className="tnum flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5 text-[14px]">
-          <Row label="Одоо авах" value={`${liveItems.length} бараа`} />
-          <Row
-            label="Барааны төлбөр"
-            value={order.dueAmount > 0 ? money(order.dueAmount) : "Төлөгдсөн"}
-            ok={order.dueAmount === 0}
-          />
-          <Row label="Хүргэлтийн хураамж" value={fee === 0 ? "Үнэгүй" : money(fee)} />
-          <div className="h-px bg-line" />
-          <div className="flex justify-between gap-3 text-[17px] font-medium">
-            <span>Одоо төлөх</span>
-            <span>{money(total)}</span>
+      {error && (
+        <div className="px-4 pb-3 lg:px-0 lg:pb-0">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+        </div>
+
+        {/* Хураангуй — laptop дээр баруун талд наалдана */}
+        <div className="px-4 pb-6 pt-6 lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-4 lg:rounded-[12px] lg:border lg:border-line lg:p-6">
+          <div className="hidden text-[17px] font-medium lg:block">Хураангуй</div>
+          <div className="tnum flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5 text-[14px] lg:rounded-none lg:border-0 lg:p-0">
+            <Row label="Одоо авах" value={`${liveItems.length} бараа`} />
+            <Row
+              label="Барааны төлбөр"
+              value={order.dueAmount > 0 ? money(order.dueAmount) : "Төлөгдсөн"}
+              ok={order.dueAmount === 0}
+            />
+            <Row label="Хүргэлтийн хураамж" value={fee === 0 ? "Үнэгүй" : money(fee)} />
+            <div className="h-px bg-line" />
+            <div className="flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]">
+              <span>Одоо төлөх</span>
+              <span>{money(total)}</span>
+            </div>
+          </div>
+
+          {/* Laptop дээр товч хураангуйн дотор */}
+          <div className="hidden lg:block">
+            <Button full size="bar" onClick={submit} loading={busy}>
+              Баталгаажуулах
+            </Button>
           </div>
         </div>
       </div>
 
-      {error && (
-        <div className="px-4 pb-3">
-          <ErrorNote>{error}</ErrorNote>
-        </div>
-      )}
-
-      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3">
+      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3 lg:hidden">
         <Button full size="bar" onClick={submit} loading={busy}>
           Баталгаажуулах
         </Button>

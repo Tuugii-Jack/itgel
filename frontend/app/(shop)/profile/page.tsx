@@ -47,7 +47,7 @@ export default function ProfilePage() {
 
   return (
     <div className="screen pb-12">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-3 py-3">
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-3 py-3 lg:hidden">
         <Link href="/" aria-label="Нүүр" className="no-underline">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#1C1917" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
             <path d="M12 4 L6 10 L12 16" />
@@ -204,52 +204,81 @@ function Profile() {
 
   const initial = (me.name ?? me.phone).trim().charAt(0).toUpperCase();
 
+  const tabs: [Tab, string][] = [
+    ["orders", "Захиалга"],
+    ["payments", "Төлбөр"],
+    ["info", "Мэдээлэл"],
+  ];
+
   return (
-    <div>
-      <div className="flex items-center gap-3 px-4 pt-5">
-        <span className="flex h-11 w-11 items-center justify-center rounded-full border border-line bg-surface text-[17px]">
-          {initial}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[15px]">{me.name ?? "Нэр оруулаагүй"}</div>
-          <div className="tnum text-[13px] text-ink-2">{phoneLabel(me.phone)}</div>
+    /* Laptop — дизайны 280px хажуугийн цэс, баруун талд агуулга */
+    <div className="lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start lg:gap-8 lg:px-10 lg:pt-8">
+      <div className="lg:sticky lg:top-8 lg:flex lg:flex-col lg:gap-4">
+        <div className="flex items-center gap-3 px-4 pt-5 lg:flex-col lg:items-stretch lg:gap-3 lg:rounded-[12px] lg:border lg:border-line lg:p-5 lg:pt-5">
+          <div className="flex min-w-0 flex-1 items-center gap-3 lg:flex-none lg:gap-3.5">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-line bg-surface text-[17px] lg:h-[52px] lg:w-[52px] lg:text-[20px]">
+              {initial}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[15px] lg:text-[16px]">
+                {me.name ?? "Нэр оруулаагүй"}
+              </div>
+              <div className="tnum text-[13px] text-ink-2 lg:text-muted">
+                {phoneLabel(me.phone)}
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden lg:block lg:h-px lg:bg-line" />
+          <div className="hidden lg:flex lg:items-baseline lg:justify-between lg:gap-3">
+            <span className="text-[13px] text-muted">Нийт төлсөн</span>
+            <span className="tnum text-[17px] font-medium">{money(totals.totalSpent)}</span>
+          </div>
+
+          <div className="lg:hidden">
+            <Button variant="ghost" size="sm" onClick={session.signOut}>
+              Гарах
+            </Button>
+          </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={session.signOut}>
+
+        {/* Мобайл — хэвтээ таб; laptop — босоо цэс */}
+        <div className="flex gap-2 px-4 pt-4 lg:flex-col lg:gap-1.5 lg:px-0 lg:pt-0">
+          {tabs.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`h-9 flex-1 cursor-pointer rounded-[8px] border text-[14px] lg:h-11 lg:flex-none lg:px-3.5 lg:text-left lg:text-[15px]
+                ${tab === key ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={session.signOut}
+          className="hidden h-11 cursor-pointer rounded-[8px] border border-line bg-bg text-[14px] text-ink-2 lg:block"
+        >
           Гарах
-        </Button>
+        </button>
       </div>
 
-      <div className="flex gap-2 px-4 pt-4">
-        {(
-          [
-            ["orders", "Захиалга"],
-            ["payments", "Төлбөр"],
-            ["info", "Мэдээлэл"],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={`h-9 flex-1 cursor-pointer rounded-[8px] border text-[14px]
-              ${tab === key ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"}`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="lg:min-w-0">
+        {loading ? (
+          <div className="flex justify-center py-16">
+            <Spinner className="text-muted" />
+          </div>
+        ) : tab === "orders" ? (
+          <OrdersTab orders={orders} activeCount={totals.activeCount} />
+        ) : tab === "payments" ? (
+          <PaymentsTab orders={orders} totalSpent={totals.totalSpent} store={store} />
+        ) : (
+          <InfoTab />
+        )}
       </div>
-
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <Spinner className="text-muted" />
-        </div>
-      ) : tab === "orders" ? (
-        <OrdersTab orders={orders} activeCount={totals.activeCount} />
-      ) : tab === "payments" ? (
-        <PaymentsTab orders={orders} totalSpent={totals.totalSpent} store={store} />
-      ) : (
-        <InfoTab />
-      )}
     </div>
   );
 }
@@ -260,21 +289,26 @@ function OrdersTab({ orders, activeCount }: { orders: MyOrder[]; activeCount: nu
   }
 
   return (
-    <div className="px-4 pt-4">
-      <div className="mb-3 text-[13px] text-ink-2">
-        {activeCount > 0 ? `${activeCount} захиалга явагдаж байна` : "Идэвхтэй захиалга алга"}
+    <div className="px-4 pt-4 lg:px-0 lg:pt-0">
+      <div className="mb-3 flex items-baseline justify-between gap-4 text-[13px] text-ink-2">
+        <span className="hidden text-[20px] font-medium text-ink lg:block">Захиалга</span>
+        <span>
+          {activeCount > 0 ? `${activeCount} захиалга явагдаж байна` : "Идэвхтэй захиалга алга"}
+        </span>
       </div>
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
         {orders.map((order) => {
           const eta = order.timeline.find((s) => s.key === "arrived");
           const etaValue = eta?.at ?? eta?.estimatedAt;
           return (
             <Link key={order.code} href={`/t/${order.code}`} className="no-underline">
-              <Card className="p-4">
+              <Card className="h-full p-4 lg:p-5">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <div className="tnum text-[15px] font-medium">{order.code}</div>
+                    <div className="tnum text-[15px] font-medium lg:text-[18px] lg:font-normal">
+                      {order.code}
+                    </div>
                     <div className="text-[13px] text-muted">
                       {dayLabel(order.createdAt)} · {order.itemCount} бараа
                     </div>
@@ -355,16 +389,52 @@ function PaymentsTab({
   );
 
   return (
-    <div className="px-4 pt-4">
-      <Card surface className="mb-3 flex items-baseline justify-between gap-2 p-4">
+    <div className="px-4 pt-4 lg:px-0 lg:pt-0">
+      <div className="mb-3 hidden text-[20px] font-medium lg:block">Төлбөр</div>
+
+      <Card surface className="mb-3 flex items-baseline justify-between gap-2 p-4 lg:hidden">
         <span className="text-[14px] text-ink-2">Нийт төлсөн</span>
         <span className="tnum text-[20px] font-medium">{money(totalSpent)}</span>
       </Card>
 
+      {/* Laptop — дизайны хүснэгт: захиалга / огноо / дүн / төлөв */}
+      {paid.length > 0 && (
+        <div className="hidden overflow-hidden rounded-[12px] border border-line lg:block">
+          <div className="grid grid-cols-[140px_minmax(0,1fr)_150px_150px] gap-x-4 border-b border-line bg-surface px-5 py-3 text-[13px] text-ink-2">
+            <span>Захиалга</span>
+            <span>Огноо</span>
+            <span>Дүн</span>
+            <span>Төлөв</span>
+          </div>
+          {paid.map((order) => (
+            <div
+              key={order.code}
+              className="grid grid-cols-[140px_minmax(0,1fr)_150px_150px] items-center gap-x-4 border-b border-line px-5 py-3.5 last:border-b-0"
+            >
+              <span className="tnum text-[14px]">{order.code}</span>
+              <span className="tnum text-[14px] text-ink-2">{dayLabel(order.createdAt)}</span>
+              <span className="tnum text-[15px]">
+                {money(order.paidAmount)}
+                {order.refundedAmount > 0 && (
+                  <span className="block text-[13px] text-muted">
+                    − {money(order.refundedAmount)}
+                  </span>
+                )}
+              </span>
+              <span>
+                <Badge tone={PAYMENT_TONE[order.paymentState]}>
+                  {PAYMENT_LABEL[order.paymentState]}
+                </Badge>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {paid.length === 0 ? (
         <Empty>Төлбөрийн бичилт алга.</Empty>
       ) : (
-        <Card className="divide-y divide-line">
+        <Card className="divide-y divide-line lg:hidden">
           {paid.map((order) => (
             <div key={order.code} className="flex flex-col gap-1.5 p-3.5">
               <div className="flex items-start justify-between gap-2">
@@ -447,33 +517,44 @@ function InfoTab() {
   };
 
   return (
-    <div className="flex flex-col gap-4 px-4 pt-4">
-      <Card className="flex flex-col gap-3 p-4">
+    <div className="flex flex-col gap-4 px-4 pt-4 lg:max-w-[720px] lg:gap-5 lg:px-0 lg:pt-0">
+      <div className="hidden text-[20px] font-medium lg:block">Мэдээлэл</div>
+
+      <Card className="flex flex-col gap-3 p-4 lg:gap-4 lg:p-6">
         <div className="text-[15px] font-medium">Хувийн мэдээлэл</div>
-        <Field label="Нэр">
-          <Input value={name} onChange={setName} placeholder="Овог, нэр" />
-        </Field>
-        <Field label="Утас">
-          <div className="flex h-11 items-center justify-between rounded-[8px] border border-line bg-surface px-3">
-            <span className="tnum text-[15px]">{phoneLabel(me.phone)}</span>
-            <span className="text-[13px] text-ok">Баталгаажсан</span>
-          </div>
-        </Field>
+        {/* Laptop дээр нэр, утас зэрэгцээ — дизайны 2 багана */}
+        <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
+          <Field label="Нэр">
+            <Input value={name} onChange={setName} placeholder="Овог, нэр" />
+          </Field>
+          <Field label="Утас">
+            <div className="flex h-11 items-center justify-between rounded-[8px] border border-line bg-surface px-3">
+              <span className="tnum text-[15px]">{phoneLabel(me.phone)}</span>
+              <span className="text-[13px] text-ok">Баталгаажсан</span>
+            </div>
+          </Field>
+        </div>
       </Card>
 
-      <Card className="flex flex-col gap-3 p-4">
+      <Card className="flex flex-col gap-3 p-4 lg:gap-4 lg:p-6">
         <div>
           <div className="text-[15px] font-medium">Хадгалсан хаяг</div>
           <p className="mt-0.5 mb-0 text-[13px] text-muted">
             Хүргэлт сонгоход автоматаар орно
           </p>
         </div>
-        <Field label="Дүүрэг">
-          <Input value={district} onChange={setDistrict} placeholder="Дүүрэг" />
-        </Field>
-        <Field label="Хороо">
-          <Input value={khoroo} onChange={setKhoroo} placeholder="Хороо" />
-        </Field>
+        {/*
+          Дизайнд «Дүүрэг, хороо» нэг талбар боловч хүргэлтийн хураамж дүүргээр
+          бодогддог тул тусад нь үлдээж, зэрэгцүүлж байрлууллаа.
+        */}
+        <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
+          <Field label="Дүүрэг">
+            <Input value={district} onChange={setDistrict} placeholder="Дүүрэг" />
+          </Field>
+          <Field label="Хороо">
+            <Input value={khoroo} onChange={setKhoroo} placeholder="Хороо" />
+          </Field>
+        </div>
         <Field label="Дэлгэрэнгүй">
           <Textarea
             value={addressText}
@@ -484,7 +565,7 @@ function InfoTab() {
         </Field>
       </Card>
 
-      <Card className="flex flex-col gap-1 p-4">
+      <Card className="flex flex-col gap-1 p-4 lg:gap-2 lg:p-6">
         <div className="mb-1 text-[15px] font-medium">Мэдэгдэл</div>
         <Toggle
           label="Төлбөр баталгаажсан"

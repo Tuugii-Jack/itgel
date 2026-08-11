@@ -107,16 +107,19 @@ export default function ProductPage({
 
   return (
     <div className='page pb-28 lg:pb-12'>
-      <div className='sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-2 py-2 lg:px-4'>
+      <div className='sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-bg px-2 py-2 lg:hidden'>
         <BackButton />
         <span className='truncate text-[15px]'>{product.name}</span>
       </div>
 
-      {/* Desktop дээр зүүн талд зураг, баруун талд мэдээлэл */}
-      <div className='lg:grid lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:items-start lg:gap-12 lg:px-8 lg:pt-8'>
+      {/*
+        Laptop — дизайны хуваарь: зүүн талд зураг (уян), баруун талд мэдээлэл
+        440px тогтмол, хооронд 48px зай.
+      */}
+      <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_440px] lg:items-start lg:gap-12 lg:px-10 lg:pt-8'>
         {/* Зураг — хуудасны хамгийн чухал элемент тул тод, тусдаа орчинтой. */}
-        <div className='lg:sticky lg:top-20'>
-          <div className='border-b border-line bg-surface p-3 sm:p-4 lg:rounded-[16px] lg:border'>
+        <div className='lg:sticky lg:top-8'>
+          <div className='border-b border-line bg-surface p-3 sm:p-4 lg:rounded-[12px] lg:border lg:p-0'>
             <ProductGallery images={product.images} alt={product.name} />
           </div>
         </div>
@@ -147,10 +150,10 @@ export default function ProductPage({
             <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
               {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
             </Badge>
-            <h1 className='m-0 text-[21px] font-medium leading-[1.35] lg:text-[26px]'>
+            <h1 className='m-0 text-[21px] font-medium leading-[1.35] lg:text-[28px] lg:leading-[1.3] lg:tracking-[-0.01em]'>
               {product.name}
             </h1>
-            <div className='tnum text-[30px] font-semibold leading-none tracking-tight lg:text-[34px]'>
+            <div className='tnum text-[30px] font-semibold leading-none tracking-tight lg:text-[32px] lg:font-medium'>
               {money(product.price)}
             </div>
           </div>

@@ -132,33 +132,48 @@ export default function CartPage() {
   const readyTotal = cart.subtotal - orderTotal;
 
   return (
-    <div className="screen flex flex-col pb-28">
+    <div className="screen flex flex-col pb-28 lg:pb-12">
       <Header />
 
+      {/* Laptop-ийн хуудасны гарчиг — мобайл дээр толгой нь энэ үүргийг гүйцэтгэнэ. */}
+      <div className="hidden px-10 pt-8 lg:block">
+        <div className="text-[24px] font-medium">Сагс</div>
+      </div>
+
+      <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8 lg:px-10 lg:pt-6">
+        <div className="lg:flex lg:flex-col lg:gap-6">
       {/* Бараанууд — төрлөөр бүлэглэж, ирэх огноог картын хөлд */}
-      {groups.map((group) => (
-        <section key={group.key} className="px-4 pt-4">
-          <div className="mb-2 text-[13px] text-ink-2">{group.label}</div>
+      {groups.map((group, i) => (
+        <section key={group.key} className="px-4 pt-4 lg:px-0 lg:pt-0">
+          {/* Ижил төрлийн бүлэг дараалбал шошгыг давтахгүй. */}
+          {group.label !== groups[i - 1]?.label && (
+            <div className="mb-2 text-[13px] text-ink-2">{group.label}</div>
+          )}
           <div className="overflow-hidden rounded-[12px] border border-line">
             {group.lines.map(({ line, index }) => (
               <CartRow
                 key={`${line.productId}-${line.size}-${line.color}`}
                 line={line}
-                showEta={group.mixedEta}
                 onQty={(qty) => cart.setQty(index, qty)}
                 onRemove={() => cart.remove(index)}
               />
             ))}
-            <div className="bg-surface px-3.5 py-2.5 text-[13px] text-ink-2">{group.note}</div>
+            <div className="bg-surface px-3.5 py-2.5 text-[13px] text-ink-2 lg:px-4 lg:py-3">
+              {group.note}
+            </div>
           </div>
         </section>
       ))}
 
-      <Rule />
+      <div className="lg:hidden">
+        <Rule />
+      </div>
 
-      {/* Захиалагчийн мэдээлэл */}
-      <div className="flex flex-col gap-4 px-4 pt-6">
-        <div className="text-[15px] font-medium">Захиалагчийн мэдээлэл</div>
+      {/* Захиалагчийн мэдээлэл — laptop дээр нэг картад, 2 баганаар */}
+      <div className="flex flex-col gap-4 px-4 pt-6 lg:gap-5 lg:rounded-[12px] lg:border lg:border-line lg:px-6 lg:py-6">
+        <div className="text-[15px] font-medium lg:text-[17px]">Захиалагчийн мэдээлэл</div>
+
+        <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-4">
 
         <div className="flex flex-col gap-2">
           <span className="text-[13px] text-ink-2">Нэр</span>
@@ -196,9 +211,16 @@ export default function CartPage() {
             Захиалгаа хянах, бараа ирэхэд мэдэгдэхэд ашиглана.
           </div>
         </div>
+        </div>
 
         {step === "phone" && (
-          <Button full variant="outline" onClick={sendCode} disabled={phone.length !== 8} loading={busy}>
+          <Button
+            variant="outline"
+            onClick={sendCode}
+            disabled={phone.length !== 8}
+            loading={busy}
+            className="w-full lg:w-auto lg:self-start"
+          >
             Дугаараа баталгаажуулах
           </Button>
         )}
@@ -244,39 +266,60 @@ export default function CartPage() {
         </div>
       </div>
 
-      <Rule />
-
-      {/* Төлбөрийн хураангуй */}
-      <div className="px-4 pb-6 pt-6">
-        <div className="mb-3 text-[15px] font-medium">Төлбөрийн хураангуй</div>
-        <div className="tnum flex flex-col gap-2.5 text-[14px]">
-          {orderTotal > 0 && <SumRow label="Захиалгын бараа" value={money(orderTotal)} />}
-          {readyTotal > 0 && <SumRow label="Бэлэн бараа" value={money(readyTotal)} />}
-          <div className="h-px bg-line" />
-          <div className="flex justify-between gap-3 text-[17px] font-medium">
-            <span>Одоо төлөх</span>
-            <span>{money(cart.subtotal)}</span>
-          </div>
-        </div>
-        <p className="mt-4 mb-0 text-[13px] leading-[1.6] text-ink-2">
-          Төлбөрөө дансаар бүтнээр шилжүүлнэ. Админ шалгаж баталгаажуулсны дараа захиалга
-          баталгаажна.
-        </p>
-      </div>
-
       {error && (
-        <div className="px-4 pb-2">
+        <div className="px-4 pt-4 lg:px-0">
           <ErrorNote>{error}</ErrorNote>
         </div>
       )}
 
-      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3">
+          {/* Мобайл дээр блок хоорондын зураас — дизайны 24px/16px */}
+          <div className="lg:hidden">
+            <Rule />
+          </div>
+        </div>
+
+        {/* Төлбөрийн хураангуй — laptop дээр баруун талд наалдана */}
+        <div className="px-4 pb-6 pt-6 lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-4 lg:rounded-[12px] lg:border lg:border-line lg:p-6">
+          <div className="mb-3 text-[15px] font-medium lg:mb-0 lg:text-[17px]">
+            Төлбөрийн хураангуй
+          </div>
+          <div className="tnum flex flex-col gap-2.5 text-[14px]">
+            {orderTotal > 0 && <SumRow label="Захиалгын бараа" value={money(orderTotal)} />}
+            {readyTotal > 0 && <SumRow label="Бэлэн бараа" value={money(readyTotal)} />}
+            <div className="h-px bg-line" />
+            <div className="flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]">
+              <span>Одоо төлөх</span>
+              <span>{money(cart.subtotal)}</span>
+            </div>
+          </div>
+
+          {/* Laptop дээр товч хураангуйн дотор — тогтмол доод мөр хэрэггүй. */}
+          <div className="hidden lg:block">
+            <Button
+              full
+              size="bar"
+              onClick={placeOrder}
+              disabled={step !== "verified"}
+              loading={busy && step === "verified"}
+            >
+              Дансны мэдээлэл авах
+            </Button>
+          </div>
+
+          <p className="mt-4 mb-0 text-[13px] leading-[1.6] text-ink-2 lg:mt-0">
+            Төлбөрөө дансаар бүтнээр шилжүүлнэ. Админ шалгаж баталгаажуулсны дараа захиалга
+            баталгаажна.
+          </p>
+        </div>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3 lg:hidden">
         <Button
           full
+          size="bar"
           onClick={placeOrder}
           disabled={step !== "verified"}
           loading={busy && step === "verified"}
-          size="bar"
         >
           Дансны мэдээлэл авах
         </Button>
@@ -288,7 +331,7 @@ export default function CartPage() {
 /** Дизайны толгой — 48px өндөр, 16px хажуугийн зай. */
 function Header() {
   return (
-    <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-3 border-b border-line bg-bg px-4">
+    <div className="sticky top-0 z-10 flex h-12 shrink-0 items-center gap-3 border-b border-line bg-bg px-4 lg:hidden">
       <Link
         href="/"
         aria-label="Буцах"
@@ -310,69 +353,107 @@ function Rule() {
 
 function CartRow({
   line,
-  showEta,
   onQty,
   onRemove,
 }: {
   line: CartLine;
-  /** Бүлэгт өөр өөр огноо байвал мөр бүрд нь бичнэ. */
-  showEta: boolean;
   onQty: (qty: number) => void;
   onRemove: () => void;
 }) {
   const options = [line.size, line.color].filter(Boolean).join(" · ");
   const max = line.type === "ready" && line.stock > 0 ? line.stock : 50;
 
-  return (
-    <div className="grid grid-cols-[64px_1fr] gap-x-3 border-b border-line p-3.5">
-      <div className="h-16 w-16 overflow-hidden rounded-[8px] border border-line bg-surface">
-        <ProductImage src={line.image} alt={line.name} className="h-full w-full" />
-      </div>
-
-      <div className="flex min-w-0 flex-col gap-1.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="text-[14px] leading-[1.4]">{line.name}</div>
-          <button
-            type="button"
-            onClick={onRemove}
-            aria-label="Устгах"
-            className="-my-2.5 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-end border-0 bg-transparent text-muted"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
-              <path d="M4 4 L12 12 M12 4 L4 12" />
-            </svg>
-          </button>
-        </div>
-
-        {options && <div className="text-[13px] text-muted">{options}</div>}
-        {showEta && <div className="tnum text-[13px] text-muted">{etaOf(line)}</div>}
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex h-8 items-center rounded-[8px] border border-line">
-            <button
-              type="button"
-              aria-label="Хасах"
-              onClick={() => onQty(line.qty - 1)}
-              disabled={line.qty <= 1}
-              className="h-full w-8 cursor-pointer border-0 bg-transparent text-[15px] text-ink-2 disabled:opacity-30"
-            >
-              −
-            </button>
-            <span className="tnum w-7 text-center text-[14px]">{line.qty}</span>
-            <button
-              type="button"
-              aria-label="Нэмэх"
-              onClick={() => onQty(line.qty + 1)}
-              disabled={line.qty >= max}
-              className="h-full w-8 cursor-pointer border-0 bg-transparent text-[15px] text-ink-2 disabled:opacity-30"
-            >
-              +
-            </button>
-          </div>
-          <div className="tnum text-[15px] font-medium">{money(line.price * line.qty)}</div>
-        </div>
-      </div>
+  const qtyControl = (size: "sm" | "lg") => (
+    <div
+      className={`flex items-center rounded-[8px] border border-line ${size === "lg" ? "h-9" : "h-8"}`}
+    >
+      <button
+        type="button"
+        aria-label="Хасах"
+        onClick={() => onQty(line.qty - 1)}
+        disabled={line.qty <= 1}
+        className={`h-full cursor-pointer border-0 bg-transparent text-[15px] text-ink-2 disabled:opacity-30 ${size === "lg" ? "w-9" : "w-8"}`}
+      >
+        −
+      </button>
+      <span className="tnum w-7 text-center text-[14px]">{line.qty}</span>
+      <button
+        type="button"
+        aria-label="Нэмэх"
+        onClick={() => onQty(line.qty + 1)}
+        disabled={line.qty >= max}
+        className={`h-full cursor-pointer border-0 bg-transparent text-[15px] text-ink-2 disabled:opacity-30 ${size === "lg" ? "w-9" : "w-8"}`}
+      >
+        +
+      </button>
     </div>
+  );
+
+  return (
+    <>
+      {/* Мобайл — 64px зураг, тоо ба үнэ нэрийн доор */}
+      <div className="grid grid-cols-[64px_1fr] gap-x-3 border-b border-line p-3.5 lg:hidden">
+        <div className="h-16 w-16 overflow-hidden rounded-[8px] border border-line bg-surface">
+          <ProductImage src={line.image} alt={line.name} className="h-full w-full" />
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-[14px] leading-[1.4]">{line.name}</div>
+            <RemoveButton onRemove={onRemove} />
+          </div>
+          {options && <div className="text-[13px] text-muted">{options}</div>}
+          <div className="flex items-center justify-between gap-2">
+            {qtyControl("sm")}
+            <div className="tnum text-[15px] font-medium">{money(line.price * line.qty)}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Laptop — 72px зураг, тоо ба үнэ тусдаа баганад */}
+      <div className="hidden grid-cols-[72px_minmax(0,1fr)_120px_120px_40px] items-center gap-x-4 border-b border-line p-4 lg:grid">
+        <div className="h-[72px] w-[72px] overflow-hidden rounded-[8px] border border-line bg-surface">
+          <ProductImage src={line.image} alt={line.name} className="h-full w-full" />
+        </div>
+
+        <div className="min-w-0">
+          <div className="text-[15px]">{line.name}</div>
+          {options && <div className="text-[13px] text-muted">{options}</div>}
+        </div>
+
+        <div className="justify-self-start">{qtyControl("lg")}</div>
+
+        <div className="tnum text-right text-[16px] font-medium">
+          {money(line.price * line.qty)}
+        </div>
+
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Устгах"
+          className="flex size-8 cursor-pointer items-center justify-center rounded-[8px] border border-line bg-bg text-muted"
+        >
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+            <path d="M3 3 9 9 M9 3 3 9" />
+          </svg>
+        </button>
+      </div>
+    </>
+  );
+}
+
+function RemoveButton({ onRemove }: { onRemove: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onRemove}
+      aria-label="Устгах"
+      className="-my-2.5 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-end border-0 bg-transparent text-muted"
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round">
+        <path d="M4 4 L12 12 M12 4 L4 12" />
+      </svg>
+    </button>
   );
 }
 
@@ -392,31 +473,32 @@ function etaOf(line: CartLine): string {
 }
 
 /**
- * Захиалгын бараа болон бэлэн барааг тусад нь — дизайны хоёр бүлэг.
- * Бүлэг доторх огноо ялгаатай бол мөр бүрд нь бичиж, хөлд нь сануулна.
+ * Дизайны хоёр бүлэг — «Захиалгын бараа», «Бэлэн бараа».
+ *
+ * Ирэх огноо нь картын хөлд бичигддэг тул бүлгийг төрөл БА огноогоор нь
+ * задална: ингэснээр карт бүр яг нэг огноотой болж, дизайны «Эдгээр …
+ * ирнэ» гэсэн мөр үнэн болно.
  */
 function groupLines(lines: CartLine[]) {
-  const byType = new Map<"order" | "ready", { line: CartLine; index: number }[]>();
+  const groups = new Map<
+    string,
+    { key: string; label: string; note: string; lines: { line: CartLine; index: number }[] }
+  >();
 
   lines.forEach((line, index) => {
     const type = line.type === "ready" ? "ready" : "order";
-    const list = byType.get(type) ?? [];
-    list.push({ line, index });
-    byType.set(type, list);
+    const eta = etaOf(line);
+    const key = `${type}|${eta}`;
+    const group = groups.get(key) ?? {
+      key,
+      label: type === "ready" ? "Бэлэн бараа" : "Захиалгын бараа",
+      note: `Эдгээр ${eta.replace(/^./, (c) => c.toLowerCase())}`,
+      lines: [],
+    };
+    group.lines.push({ line, index });
+    groups.set(key, group);
   });
 
-  return [...byType.entries()].map(([type, list]) => {
-    const etas = new Set(list.map(({ line }) => etaOf(line)));
-    const mixedEta = etas.size > 1;
-    const first = list[0]!.line;
-    return {
-      key: type,
-      label: type === "ready" ? "Бэлэн бараа" : "Захиалгын бараа",
-      mixedEta,
-      note: mixedEta
-        ? "Бараа тус бүр өөр өдөр ирнэ — дээр тэмдэглэв"
-        : `Эдгээр ${etaOf(first).replace(/^./, (c) => c.toLowerCase())}`,
-      lines: list,
-    };
-  });
+  // Захиалгын бараа эхэнд, дотор нь огноогоор нь эрэмбэлнэ.
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
