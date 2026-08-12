@@ -322,9 +322,7 @@ function MapSection() {
         <h2 className='m-0 text-[20px] font-medium leading-[1.3] text-ink lg:text-[24px]'>
           Байршил
         </h2>
-        <p className='mt-1 mb-0 text-[13px] text-ink-2 lg:text-[15px]'>
-          Манай дэлгүүр хаана байрладаг вэ
-        </p>
+      
       </div>
 
       <div className='overflow-hidden rounded-[12px] border border-line shadow-sm'>
@@ -347,14 +345,13 @@ function MapSection() {
 function TrustBlock({ store }: { store: Store }) {
   return (
     <section className='relative z-10 mt-10 sm:mt-12'>
-      {/* GUTTER байхгүй → зүүн, баруун зайгүй. Бага зэргийн цэнхэр tint. */}
       <div className='rounded-none border-x-0 border-b-0 border-t border-line bg-primary-soft/60 p-5 sm:p-6 lg:p-8'>
         <div className={`${GUTTER}`}>
           <div className='flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-6'>
             {/* Logo */}
             <div className='shrink-0'>
               <Image
-                src='/logo.png'
+                src='/logo.webp'
                 alt={store?.storeName ?? "itgel"}
                 width={48}
                 height={48}
@@ -365,13 +362,7 @@ function TrustBlock({ store }: { store: Store }) {
 
             {/* Store information */}
             <div className='min-w-0 flex-1'>
-              <div className='text-[17px] font-medium leading-snug text-ink sm:text-[18px] lg:text-[20px]'>
-                Бид хаана байдаг вэ
-              </div>
-
-              <p className='mt-1.5 mb-5 text-[13px] leading-[1.6] text-ink-2 sm:mt-2 sm:mb-6'>
-                Манай дэлгүүрийн хаяг, ажлын цаг болон холбоо барих мэдээлэл.
-              </p>
+              
 
               <div className='grid gap-3.5 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-4 text-[14px]'>
                 <InfoRow label='Хаяг' value={store.address} />

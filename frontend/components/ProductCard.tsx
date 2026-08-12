@@ -5,13 +5,10 @@ import { useEffect, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { Badge, Button, Divider } from "@/components/ui";
 import { useCart } from "@/lib/cart";
-import { arrivalLabel, countdown, money } from "@/lib/format";
+import { countdown, money } from "@/lib/format";
 import type { Product } from "@/lib/types";
 
-/**
- * Дизайны хамгийн чухал элемент.
- * «Гарт очих» мөрийг хэзээ ч нуухгүй.
- */
+/** Дэлгүүрийн барааны карт. */
 export function ProductCard({ product }: { product: Product }) {
   const cart = useCart();
   const isOrder = product.type === "order";
@@ -50,23 +47,16 @@ export function ProductCard({ product }: { product: Product }) {
           {money(product.price)}
         </div>
 
-        <Divider className='my-0.5' />
-
-        {/* Нарийн картад багтахын тулд шошго дээр, утга доор нь. */}
-        <div className='flex flex-col gap-1.5'>
-          <CardFact
-            label='Гарт очих'
-            value={arrivalLabel(product)}
-            tone={closed ? "danger" : "neutral"}
-          />
-          {!isOrder && (
+        {!isOrder && (
+          <>
+            <Divider className='my-0.5' />
             <CardFact
               label='Үлдэгдэл'
               value={soldOut ? "Дууссан" : `${product.stock} ширхэг`}
               tone={soldOut ? "danger" : "ok"}
             />
-          )}
-        </div>
+          </>
+        )}
 
         <div className='mt-auto pt-1'>
           {closed || soldOut ? (
