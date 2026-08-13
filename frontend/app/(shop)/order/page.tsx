@@ -36,7 +36,10 @@ function OrderProductsContent() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.categories().then(setCategories).catch(() => {});
+    api
+      .categories()
+      .then(setCategories)
+      .catch(() => {});
   }, []);
 
   const load = useCallback(async () => {
@@ -87,15 +90,19 @@ function OrderProductsContent() {
   };
 
   return (
-    <div className="page pb-24">
+    <div className='page pb-24'>
       <div className={`${GUTTER} pt-6 lg:pt-8`}>
-        <h1 className="m-0 text-[22px] font-medium lg:text-[28px]">Захиалгын бараа</h1>
-        <p className="mt-1 mb-0 text-[13px] text-ink-2 lg:text-[15px]">
+        <h1 className='m-0 text-[22px] font-medium lg:text-[28px]'>
+          Захиалгын бараа
+        </h1>
+        <p className='mt-1 mb-0 text-[13px] text-ink-2 lg:text-[15px]'>
           Одоо захиалж, ирэхэд мэдэгдэнэ
         </p>
       </div>
 
-      <div className={`no-scrollbar flex gap-2 overflow-x-auto ${GUTTER} pt-4 lg:pt-5`}>
+      <div
+        className={`no-scrollbar flex gap-2 overflow-x-auto ${GUTTER} pt-4 lg:pt-5`}
+      >
         <Chip active={category === null} onClick={() => setCategory(null)}>
           Бүгд
         </Chip>
@@ -117,12 +124,14 @@ function OrderProductsContent() {
       )}
 
       {loading && (
-        <div className={`grid grid-cols-2 gap-4 pt-6 sm:grid-cols-3 lg:grid-cols-4 ${GUTTER}`}>
+        <div
+          className={`grid grid-cols-2 gap-4 pt-6 sm:grid-cols-3 lg:grid-cols-4 ${GUTTER}`}
+        >
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="flex flex-col gap-2.5">
-              <Skeleton className="aspect-square w-full rounded-[12px]" />
-              <Skeleton className="h-4 w-4/5" />
-              <Skeleton className="h-5 w-2/5" />
+            <div key={i} className='flex flex-col gap-2.5'>
+              <Skeleton className='aspect-square w-full rounded-[12px]' />
+              <Skeleton className='h-4 w-4/5' />
+              <Skeleton className='h-5 w-2/5' />
             </div>
           ))}
         </div>
@@ -135,7 +144,7 @@ function OrderProductsContent() {
       {!loading && items.length > 0 && (
         <>
           <div className={`${GUTTER} flex justify-end pt-4`}>
-            <span className="rounded-full bg-primary-soft px-3 py-1 text-[13px] font-medium text-primary">
+            <span className='rounded-full bg-primary-soft px-3 py-1 text-[13px] font-medium text-primary'>
               {total} бараа
             </span>
           </div>
@@ -148,7 +157,11 @@ function OrderProductsContent() {
           </div>
           {page < pages && (
             <div className={`flex justify-center pt-6 ${GUTTER}`}>
-              <Button variant="outline" onClick={loadMore} loading={moreLoading}>
+              <Button
+                variant='outline'
+                onClick={loadMore}
+                loading={moreLoading}
+              >
                 Цааш үзэх · {total - items.length} бараа
               </Button>
             </div>
@@ -161,12 +174,12 @@ function OrderProductsContent() {
           className={`fixed inset-x-0 bottom-4 z-20 flex justify-center px-4
             md:inset-x-auto md:right-6 md:bottom-6 md:justify-end md:px-0`}
         >
-          <Link href="/cart" className="no-underline">
+          <Link href='/cart' className='no-underline'>
             <Button
-              variant="outline"
-              size="sm"
-              className="bg-bg/90 backdrop-blur-sm opacity-60 transition-opacity duration-200
-                hover:opacity-100 active:opacity-100 focus:opacity-100"
+              variant='outline'
+              size='sm'
+              className='bg-bg/90 backdrop-blur-sm opacity-60 transition-opacity duration-200
+                hover:opacity-100 active:opacity-100 focus:opacity-100'
             >
               Сагс үзэх · {cart.count} бараа
             </Button>
@@ -188,7 +201,7 @@ function Chip({
 }) {
   return (
     <button
-      type="button"
+      type='button'
       onClick={onClick}
       className={`h-10 shrink-0 cursor-pointer whitespace-nowrap rounded-[8px] border px-4 text-[14px] leading-tight transition-all
         ${

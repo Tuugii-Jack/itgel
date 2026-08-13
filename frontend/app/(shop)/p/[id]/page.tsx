@@ -16,7 +16,7 @@ import {
 } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import { dayTimeLabel, money } from "@/lib/format";
+import { money } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -151,6 +151,19 @@ export default function ProductPage({
           </div>
 
           <div className='flex min-w-0 flex-col gap-5 lg:gap-6'>
+            {/* Single source of truth for description: under the gallery, visible on all viewports */}
+            {product.description && (
+              <div className='mt-4 lg:mt-6 rounded-[12px] border border-line bg-surface p-4 lg:p-5'>
+                <div className='text-[15px] font-medium lg:text-[17px]'>
+                  Тайлбар
+                </div>
+                <div className='mt-2 text-[14px] leading-[1.75] text-ink-2 lg:mt-2.5 lg:text-[15px] lg:max-w-[440px]'>
+                  <p className='m-0 whitespace-pre-line'>
+                    {product.description}
+                  </p>
+                </div>
+              </div>
+            )}
             {blocked && (
               <div
                 className={`rounded-[12px] border px-4 py-3 ${closed ? "border-warn bg-warn-bg" : "border-danger bg-danger-bg"}`}
@@ -171,9 +184,9 @@ export default function ProductPage({
             )}
 
             <div className='flex flex-col gap-2'>
-              <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
+              {/* <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
                 {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
-              </Badge>
+              </Badge> */}
               <h1 className='m-0 text-[22px] font-medium leading-[1.3] tracking-[-0.01em] lg:text-[26px]'>
                 {product.name}
               </h1>
@@ -182,7 +195,7 @@ export default function ProductPage({
               </div>
             </div>
 
-            <FlowCard product={product} />
+            {/* Product description is shown beneath the gallery to avoid duplicates */}
 
             <KeyFacts
               product={product}
@@ -235,7 +248,12 @@ export default function ProductPage({
 
             {notice && <ErrorNote>{notice}</ErrorNote>}
 
-            <HowItArrives product={product} />
+            {product.description && (
+              <ProductDescription
+                description={product.description}
+                className='lg:hidden'
+              />
+            )}
 
             <div className='hidden lg:flex lg:flex-col lg:gap-2'>
               {blocked ? (
@@ -263,68 +281,52 @@ export default function ProductPage({
                       {isOrder ? "Захиалах" : "Сагсанд хийх"}
                     </Button>
                   </div>
-                  <div className='text-[13px] text-muted'>
-                    Захиалахад дүнг бүтнээр төлнө.
-                  </div>
                 </>
               )}
             </div>
           </div>
         </div>
 
-        {(product.description || product.sizeChart.length > 0) && (
+        {product.sizeChart.length > 0 && (
           <div className='mt-10 grid gap-8 border-t border-line pt-8 lg:mt-12 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:gap-10 lg:pt-10'>
-            {product.description && (
-              <div className={product.sizeChart.length > 0 ? "" : "lg:col-span-2"}>
-                <div className='mb-2 text-[15px] font-medium lg:mb-3 lg:text-[17px]'>
-                  Тайлбар
-                </div>
-                <p className='m-0 max-w-[640px] whitespace-pre-line text-[14px] leading-[1.65] text-ink-2 lg:text-[15px]'>
-                  {product.description}
-                </p>
+            <div>
+              <div className='mb-2 text-[15px] font-medium lg:mb-3 lg:text-[17px]'>
+                Хэмжээсийн хүснэгт
               </div>
-            )}
-
-            {product.sizeChart.length > 0 && (
-              <div>
-                <div className='mb-2 text-[15px] font-medium lg:mb-3 lg:text-[17px]'>
-                  Хэмжээсийн хүснэгт
-                </div>
-                <Card className='overflow-hidden'>
-                  <table className='w-full border-collapse text-[13px]'>
-                    <thead>
-                      <tr className='bg-surface text-ink-2'>
-                        <th className='px-3 py-2.5 text-left font-normal'>
-                          Хэмжээ
-                        </th>
-                        <th className='px-3 py-2.5 text-left font-normal'>
-                          Өндөр, см
-                        </th>
-                        <th className='px-3 py-2.5 text-left font-normal'>
-                          Цээж, см
-                        </th>
+              <Card className='overflow-hidden'>
+                <table className='w-full border-collapse text-[13px]'>
+                  <thead>
+                    <tr className='bg-surface text-ink-2'>
+                      <th className='px-3 py-2.5 text-left font-normal'>
+                        Хэмжээ
+                      </th>
+                      <th className='px-3 py-2.5 text-left font-normal'>
+                        Өндөр, см
+                      </th>
+                      <th className='px-3 py-2.5 text-left font-normal'>
+                        Цээж, см
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className='text-[14px]'>
+                    {product.sizeChart.map((row, i) => (
+                      <tr
+                        key={`${row.size}-${i}`}
+                        className='border-t border-line'
+                      >
+                        <td className='px-3 py-2.5'>{row.size}</td>
+                        <td className='tnum px-3 py-2.5 text-ink-2'>
+                          {row.heightRange}
+                        </td>
+                        <td className='tnum px-3 py-2.5 text-ink-2'>
+                          {row.chestCm}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className='text-[14px]'>
-                      {product.sizeChart.map((row, i) => (
-                        <tr
-                          key={`${row.size}-${i}`}
-                          className='border-t border-line'
-                        >
-                          <td className='px-3 py-2.5'>{row.size}</td>
-                          <td className='tnum px-3 py-2.5 text-ink-2'>
-                            {row.heightRange}
-                          </td>
-                          <td className='tnum px-3 py-2.5 text-ink-2'>
-                            {row.chestCm}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </Card>
-              </div>
-            )}
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            </div>
           </div>
         )}
       </div>
@@ -403,30 +405,24 @@ function GalleryChip({
 }
 
 /**
- * Laptop дээрх «Энэ бараа хэрхэн ирэх вэ» — дизайны дагуу нээлттэй, алхам бүр
- * дээрээ зурвастай. Хар зурвас нь өнөөдөр хаана явааг заана.
+ * Барааны тайлбар — «Энэ бараа хэрхэн ирэх вэ» хэсгийн оронд, яг тэр
+ * байрлалд (desktop: үнэ ба key facts хооронд, mobile: qty stepper ба
+ * доод CTA хооронд) гарна.
  */
-function FlowCard({ product }: { product: Product }) {
-  const steps = flowSteps(product);
-
+function ProductDescription({
+  description,
+  className = "",
+}: {
+  description: string;
+  className?: string;
+}) {
   return (
-    <div className='hidden rounded-[12px] border border-line bg-surface p-5 lg:flex lg:flex-col lg:gap-3.5'>
-      <div className='text-[15px] font-medium'>Энэ бараа хэрхэн ирэх вэ</div>
-      <div
-        className={`grid gap-3 ${steps.length === 4 ? "grid-cols-4" : "grid-cols-3"}`}
-      >
-        {steps.map((step) => (
-          <div key={step.label} className='flex flex-col gap-2'>
-            <div
-              className={`h-1 rounded-full ${step.done ? "bg-ink" : "bg-line"}`}
-            />
-            <span className='text-[13px]'>{step.short}</span>
-            <span className='tnum text-[12px] text-ink-2'>{step.value}</span>
-          </div>
-        ))}
-      </div>
-      <div className='text-[13px] text-ink-2'>
-        Ирэх өдөр тодорхойгүй. Ирэхэд мэдэгдэнэ.
+    <div
+      className={`rounded-[12px] border border-line bg-surface p-4 lg:p-5 ${className}`}
+    >
+      <div className='text-[15px] font-medium lg:text-[17px]'>Тайлбар</div>
+      <div className='mt-2 text-[14px] leading-[1.75] text-ink-2 lg:mt-2.5 lg:max-w-[440px] lg:text-[15px]'>
+        <p className='m-0 whitespace-pre-line'>{description}</p>
       </div>
     </div>
   );
@@ -449,7 +445,7 @@ function KeyFacts({
 }) {
   const isOrder = product.type === "order";
 
-  // Laptop дээр эдгээр нь зурган дээрх шошго ба алхмын карт болж хуваагдана.
+  // Laptop дээр эдгээр нь зурган дээрх шошго болж хуваагдана.
   return (
     <div className='lg:hidden'>
       <div className='divide-y divide-line rounded-[12px] border border-line'>
@@ -470,8 +466,6 @@ function KeyFacts({
             tone={soldOut ? "danger" : "ok"}
           />
         )}
-
-        <Fact icon='card' label='Төлбөр' value='Захиалахад бүтнээр төлнө' />
       </div>
     </div>
   );
@@ -616,130 +610,4 @@ function Stepper({
       </button>
     </div>
   );
-}
-
-/**
- * Барааны замын алхмууд. Мобайл дээр timeline, laptop дээр зурвасан карт болж
- * хоёр газар хэрэглэгдэнэ.
- *
- * `short` — laptop-ийн нарийн баганад багтах богино нэр.
- * `done` — өнөөдрийн байдлаар хүрсэн (эсвэл яг одоо явж буй) алхам.
- */
-function flowSteps(
-  product: Product,
-): { label: string; short: string; value: string; done: boolean }[] {
-  if (!product.closeAt) {
-    return [
-      { label: "Агуулахад бэлэн", short: "Бэлэн", value: "Одоо", done: true },
-      {
-        label: "Захиалга баталгаажна",
-        short: "Баталгаажна",
-        value: "Төлбөр ормогц",
-        done: true,
-      },
-      {
-        label: "Гарт очно",
-        short: "Гарт очно",
-        value: "Шууд авах боломжтой",
-        done: false,
-      },
-    ];
-  }
-
-  // Ирэх өдөр тодорхойгүй тул зөвхөн хаагдах огноог харуулна.
-  const steps = [
-    {
-      label: "Захиалга хаагдана",
-      short: "Захиалга хаагдана",
-      value: dayTimeLabel(product.closeAt),
-      at: new Date(product.closeAt).getTime(),
-    },
-    {
-      label: "Нийлүүлэгч рүү явна",
-      short: "Нийлүүлэгч рүү",
-      value: "Хаагдсаны дараа",
-      at: new Date(addDays(product.closeAt, 1)).getTime(),
-    },
-    {
-      label: "Тээвэрлэгдэнэ",
-      short: "Тээвэрлэнэ",
-      value: "Замдаа",
-      at: new Date(product.arriveFrom).getTime(),
-    },
-    {
-      label: "Гарт очно",
-      short: "Гарт очно",
-      value: "Ирэхэд мэдэгдэнэ",
-      at: new Date(product.arriveTo).getTime(),
-    },
-  ];
-
-  // Одоо хаана явааг заана — өнгөрсөн алхмууд ба яг одоогийнх нь хар.
-  const now = Date.now();
-  const current = steps.findIndex((s) => s.at > now);
-  return steps.map(({ label, short, value }, i) => ({
-    label,
-    short,
-    value,
-    done: current === -1 || i <= current,
-  }));
-}
-
-/** Дизайны хамгийн чухал блок — 4 алхамын timeline, тус бүр огноотой. */
-function HowItArrives({ product }: { product: Product }) {
-  const steps = flowSteps(product);
-
-  return (
-    <div className='lg:hidden'>
-      {/* Дэлгэрэнгүй явц — сонирхсон хүн нээж үзнэ, эхний харцыг бөглөрүүлэхгүй. */}
-      <details className='group rounded-[12px] border border-line bg-surface'>
-        <summary className='flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-[15px] font-medium'>
-          Энэ бараа хэрхэн ирэх вэ
-          <svg
-            width='16'
-            height='16'
-            viewBox='0 0 16 16'
-            fill='none'
-            stroke='currentColor'
-            strokeWidth='1.4'
-            strokeLinecap='round'
-            strokeLinejoin='round'
-            className='shrink-0 text-muted transition-transform group-open:rotate-180'
-            aria-hidden
-          >
-            <path d='M4 6 L8 10 L12 6' />
-          </svg>
-        </summary>
-
-        <div className='flex flex-col gap-3 px-4 pb-4'>
-          <ol className='m-0 flex list-none flex-col gap-0 p-0'>
-            {steps.map((step, i) => (
-              <li key={step.label} className='flex gap-3'>
-                <div className='flex flex-col items-center'>
-                  <span className='mt-1.5 h-2 w-2 shrink-0 rounded-full border border-muted bg-bg' />
-                  {i < steps.length - 1 && (
-                    <span className='w-px flex-1 bg-line' />
-                  )}
-                </div>
-                <div className={`flex-1 ${i < steps.length - 1 ? "pb-4" : ""}`}>
-                  <div className='text-[14px]'>{step.label}</div>
-                  <div className='tnum text-[13px] text-ink-2'>
-                    {step.value}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ol>
-
-          <p className='m-0 text-[12px] text-muted'>
-            Ирэх өдөр тодорхойгүй. Ирэхэд мэдэгдэнэ.
-          </p>
-        </div>
-      </details>
-    </div>
-  );
-}
-
-function addDays(iso: string, days: number): string {
-  return new Date(new Date(iso).getTime() + days * 86_400_000).toISOString();
 }

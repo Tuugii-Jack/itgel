@@ -15,7 +15,10 @@ export function ProductCard({ product }: { product: Product }) {
   const soldOut =
     product.status === "SOLD_OUT" || (!isOrder && product.stock <= 0);
   const closed = product.status === "CLOSED";
-  const needsChoice = (product.options?.length ?? 0) > 0 || product.sizes.length > 0 || product.colors.length > 0;
+  const needsChoice =
+    (product.options?.length ?? 0) > 0 ||
+    product.sizes.length > 0 ||
+    product.colors.length > 0;
 
   return (
     <div className='flex flex-col overflow-hidden rounded-[12px] border border-line bg-bg'>
@@ -33,9 +36,9 @@ export function ProductCard({ product }: { product: Product }) {
       </Link>
 
       <div className='flex flex-1 flex-col gap-2 p-3.5'>
-        <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
+        {/* <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
           {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
-        </Badge>
+        </Badge> */}
 
         <Link href={`/p/${product.id}`} className='no-underline'>
           <div className='clamp-2 text-[15px] leading-[1.4] text-ink'>
