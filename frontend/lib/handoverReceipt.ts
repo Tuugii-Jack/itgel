@@ -1,5 +1,6 @@
 import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
+import { printHtml } from "@/lib/printHtml";
 
 export type HandoverReceiptItem = {
   orderCode: string;
@@ -161,18 +162,8 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
     <div class="sign-hint">______________________________</div>
   </div>
   <div class="foot">Барааг шалгаж аваарай.<br />Баярлалаа!</div>
-  <script>
-    window.onload = function () {
-      setTimeout(function () { window.print(); }, 80);
-    };
-  </script>
 </body>
 </html>`;
 
-  const w = window.open("", "_blank", "noopener,noreferrer,width=360,height=720");
-  if (!w) {
-    throw new Error("Хэвлэх цонх нээгдсэнгүй. Popup зөвшөөрнө үү.");
-  }
-  w.document.write(html);
-  w.document.close();
+  printHtml(html);
 }

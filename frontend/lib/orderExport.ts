@@ -1,6 +1,7 @@
 import { dayTimeLabel, money, phoneLabel, rangeLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { PAYMENT_LABEL } from "@/lib/payment";
+import { printHtml } from "@/lib/printHtml";
 import type { AdminOrderDetail, OrderItem } from "@/lib/types";
 
 const ITEM_STATUS_LABEL: Record<OrderItem["itemStatus"], string> = {
@@ -271,14 +272,8 @@ export function printOrders(orders: AdminOrderDetail[]) {
 <body>
   <h1>Захиалга — ${orders.length} ширхэг · ${escHtml(dayTimeLabel(new Date().toISOString()))}</h1>
   ${blocks}
-  <script>window.onload = function () { window.print(); };</script>
 </body>
 </html>`;
 
-  const w = window.open("", "_blank", "noopener,noreferrer,width=900,height=700");
-  if (!w) {
-    throw new Error("Хэвлэх цонх нээгдсэнгүй. Popup зөвшөөрнө үү.");
-  }
-  w.document.write(html);
-  w.document.close();
+  printHtml(html);
 }
