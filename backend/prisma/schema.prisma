@@ -363,7 +363,7 @@ model OrderItem {
 model Batch {
   id        String     @id @default(cuid())
   name      String
-  stage     BatchStage @default(COLLECTING)
+  stage     BatchStage @default(IN_TRANSIT)
 
   /// Захиалга авах эцсийн хугацаа — багцад бараа нэмэхэд тойргийн closeAt
   /// нь үүнээс анхдагчаар авна. Хугацаа өнгөрөхөд cron тойргуудыг хаана.

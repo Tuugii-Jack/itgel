@@ -3,7 +3,11 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { sweepAll } from '../lib/rateLimit.js';
 import { addDays, startOfUbDay, ubDateString, UB_TZ } from '../lib/date.js';
-import { changeOrderStatus, notifyArrival } from '../services/orders.js';
+import {
+  changeOrderStatus,
+  finalizeRoundClose,
+  notifyArrival,
+} from '../services/orders.js';
 import { getSettings } from '../services/settings.js';
 import { syncAllStorageFees } from '../services/storageFee.js';
 
@@ -27,6 +31,11 @@ export async function closeExpiredProducts(now = new Date()): Promise<number> {
     where: { id: { in: expired.map((r) => r.id) } },
     data: { status: 'CLOSED' },
   });
+
+  // Төлөгдөөгүйг цуцлаад, төлснийг «Зам дээр» болгоно.
+  for (const round of expired) {
+    await finalizeRoundClose(round.id, 'system');
+  }
 
   await audit({
     actor: 'system',

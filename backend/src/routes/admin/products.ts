@@ -316,7 +316,7 @@ adminProductsRouter.post(
     let batchId: string | null = body.batchId === undefined ? null : body.batchId;
     if (batchId) {
       const batch = await prisma.batch.findFirst({
-        where: { id: batchId, deletedAt: null, stage: 'COLLECTING' },
+        where: { id: batchId, deletedAt: null, stage: 'IN_TRANSIT' },
       });
       if (!batch) throw badRequest('Багц олдсонгүй, эсвэл захиалга авах шатнаас гарсан.');
     }

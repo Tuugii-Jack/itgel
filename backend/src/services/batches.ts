@@ -5,6 +5,7 @@ import { computeArrival } from '../lib/date.js';
 import { conflict, notFound } from '../lib/errors.js';
 import {
   BATCH_STAGE_LABEL,
+  canEditBatchComposition,
   canTransition,
   nextBatchStage,
   orderStatusForBatchStage,
@@ -58,8 +59,18 @@ export async function findOrderIdsForBatch(
         ? { batchOmittedAt: { not: null } }
         : { batchOmittedAt: null };
 
+  // Идэвхтэй жагсаалтад зөвхөн төлбөр бүрэн (эсвэл илүү) орсон захиалга.
+  // Төлөгдөөгүй нь хаагдах үед цуцлагдсан байх ёстой; хамгаалалт болгон шүүнэ.
+  const paidFilter = omitted === true ? {} : { dueAmount: { lte: 0 } };
+
   const byBatch = await tx.order.findMany({
-    where: { batchId, deletedAt: null, status: { not: 'CANCELLED' }, ...omitFilter },
+    where: {
+      batchId,
+      deletedAt: null,
+      status: { not: 'CANCELLED' },
+      ...omitFilter,
+      ...paidFilter,
+    },
     select: { id: true },
   });
 
@@ -71,6 +82,7 @@ export async function findOrderIdsForBatch(
             deletedAt: null,
             status: { not: 'CANCELLED' },
             ...omitFilter,
+            ...paidFilter,
             items: { some: { roundId: { in: rounds }, cancelledAt: null } },
           },
           select: { id: true },
@@ -80,8 +92,8 @@ export async function findOrderIdsForBatch(
 }
 
 /**
- * Тойрогт захиалсан (цуцлагдаагүй, гартаа өгөөгүй) захиалгуудыг багцад хавсаргана.
- * Аль хэдийн өөр багцад байгааг хөндөхгүй.
+ * Тойрогт захиалсан, төлбөр бүрэн орсон захиалгуудыг багцад хавсаргана.
+ * Төлөгдөөгүй (`dueAmount > 0`) захиалга орохгүй — хаагдах үед цуцлагдсан байх ёстой.
  */
 export async function attachOrdersForRound(
   tx: Tx,
@@ -94,6 +106,7 @@ export async function attachOrdersForRound(
       cancelledAt: null,
       order: {
         deletedAt: null,
+        dueAmount: { lte: 0 },
         status: { notIn: FROZEN_ORDER_STATUSES },
         OR: [{ batchId: null }, { batchId }],
       },
@@ -107,12 +120,84 @@ export async function attachOrdersForRound(
     where: {
       id: { in: orderIds },
       deletedAt: null,
+      dueAmount: { lte: 0 },
       status: { notIn: FROZEN_ORDER_STATUSES },
       OR: [{ batchId: null }, { batchId }],
     },
     data: { batchId },
   });
   return result.count;
+}
+
+/**
+ * Багцын шатанд тохирох захиалгын төлөв рүү ахиулна (жишээ: IN_TRANSIT).
+ * Гаргалт холбосны дараа дуудна.
+ */
+export async function promoteOrdersForBatchStage(
+  tx: Tx,
+  batchId: string,
+  stage: Batch['stage'],
+  actor: string,
+  orderIds: string[],
+): Promise<number> {
+  const target = orderStatusForBatchStage(stage);
+  if (!target || orderIds.length === 0) return 0;
+
+  const orders = await tx.order.findMany({
+    where: { id: { in: orderIds }, deletedAt: null, status: { notIn: FROZEN_ORDER_STATUSES } },
+    select: { id: true, code: true, status: true },
+  });
+
+  const now = new Date();
+  let moved = 0;
+  const groups = new Map<OrderStatus, typeof orders>();
+  for (const order of orders) {
+    const list = groups.get(order.status) ?? [];
+    list.push(order);
+    groups.set(order.status, list);
+  }
+
+  for (const [from, group] of groups) {
+    const sample = group[0];
+    if (!sample) continue;
+    const steps = stepsToStatus(from, target);
+    if (steps.length === 0) continue;
+
+    let current = from;
+    const timestamps: Record<string, Date> = {};
+    for (const step of steps) {
+      if (!canTransition(current, step)) {
+        throw conflict(
+          `${sample.code} захиалгыг "${step}" руу шилжүүлэх боломжгүй.`,
+          { orderCode: sample.code, from: current, to: step },
+        );
+      }
+      const field = STATUS_TIMESTAMP[step];
+      if (field) timestamps[field] = now;
+      current = step;
+    }
+
+    await tx.order.updateMany({
+      where: { id: { in: group.map((o) => o.id) } },
+      data: { status: target, batchId, ...timestamps },
+    });
+
+    await tx.auditLog.createMany({
+      data: group.map((order) => ({
+        actor,
+        action: 'STATUS_CHANGE',
+        entity: 'Order',
+        entityId: order.id,
+        before: { status: from },
+        after: {
+          status: target,
+          reason: `Багц → ${BATCH_STAGE_LABEL[stage]}`,
+        },
+      })),
+    });
+    moved += group.length;
+  }
+  return moved;
 }
 
 /**
@@ -250,20 +335,8 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
 
     const updatedBatch = await tx.batch.update({
       where: { id: batch.id },
-      data: {
-        stage: next,
-        ...(next === 'CLOSED' && !batch.closedAt ? { closedAt: new Date() } : {}),
-      },
+      data: { stage: next },
     });
-
-    // Багц захиалга авахаа болиход түүнд зориулж гаргасан, идэвхтэй хэвээр
-    // байгаа тойргууд хамт хаагдана — дэлгүүрээс шууд нуугдана.
-    if (next === 'CLOSED') {
-      await tx.productRound.updateMany({
-        where: { batchId: batch.id, status: 'ACTIVE', deletedAt: null },
-        data: { status: 'CLOSED', closeAt: new Date() },
-      });
-    }
 
     const target = orderStatusForBatchStage(next);
     let moved = 0;
@@ -411,19 +484,8 @@ export async function revertBatch(batchId: string, actor: string): Promise<Advan
 
     const updatedBatch = await tx.batch.update({
       where: { id: batch.id },
-      data: {
-        stage: prev,
-        ...(fromStage === 'CLOSED' && prev === 'COLLECTING' ? { closedAt: null } : {}),
-      },
+      data: { stage: prev },
     });
-
-    // Хаагдсан тойргуудыг дахин нээнэ (цуглуулж байгаа шат руу буцах үед).
-    if (fromStage === 'CLOSED' && prev === 'COLLECTING') {
-      await tx.productRound.updateMany({
-        where: { batchId: batch.id, status: 'CLOSED', deletedAt: null },
-        data: { status: 'ACTIVE' },
-      });
-    }
 
     let moved = 0;
     let skipped = 0;
@@ -514,7 +576,7 @@ export async function revertBatch(batchId: string, actor: string): Promise<Advan
 }
 
 /**
- * Багцаас захиалга хасах (Хаагдсан үед төлбөр дутууг нийлүүлэгчид оруулахгүй).
+ * Багцаас захиалга хасах (Зам дээр байхад төлбөр дутууг урагшлуулахгүй).
  * batchId хэвээр үлдээнэ — төлбөр орвол дахин оруулна.
  */
 export async function omitOrderFromBatch(
@@ -525,8 +587,8 @@ export async function omitOrderFromBatch(
   await prisma.$transaction(async (tx) => {
     const batch = await tx.batch.findFirst({ where: { id: batchId, deletedAt: null } });
     if (!batch) throw notFound('Багц олдсонгүй.');
-    if (batch.stage !== 'COLLECTING' && batch.stage !== 'CLOSED') {
-      throw conflict('Зам дээр гарсан багцаас захиалга хасах боломжгүй.');
+    if (!canEditBatchComposition(batch.stage)) {
+      throw conflict('Агуулахад орсон багцаас захиалга хасах боломжгүй.');
     }
 
     const order = await tx.order.findFirst({

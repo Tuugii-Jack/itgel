@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import {
@@ -30,18 +30,26 @@ import { dayLabel, money, rangeLabel } from "@/lib/format";
 import type {
   AdminBatch,
   AdminBatchDetail,
-  AdminProduct,
   BatchOrderRow,
+  BatchProduct,
   BatchStage,
 } from "@/lib/types";
 
-const STAGES: BatchStage[] = [
-  "COLLECTING",
-  "CLOSED",
-  "AT_SUPPLIER",
-  "IN_TRANSIT",
-  "AT_WAREHOUSE",
-  "DONE",
+const STAGES: BatchStage[] = ["IN_TRANSIT", "AT_WAREHOUSE", "DONE"];
+
+const MONTH_LABELS = [
+  "1-р сар",
+  "2-р сар",
+  "3-р сар",
+  "4-р сар",
+  "5-р сар",
+  "6-р сар",
+  "7-р сар",
+  "8-р сар",
+  "9-р сар",
+  "10-р сар",
+  "11-р сар",
+  "12-р сар",
 ];
 
 /** Огноог input[type=date]-д тохирох хэлбэрт. */
@@ -122,7 +130,7 @@ export default function BatchesPage() {
     <div>
       <PageHead
         title="Ачааны багц"
-        hint="Багц үүсгэж бараагаа нэмээрэй — тэдгээрийн захиалга баталгаажихдаа багцад автоматаар орно."
+        hint="Ирсэн хаагдсан барааг он/сараар сонгож багцад хийгээд Зам дээр → Агуулахад → Дууссан урагшлуулна."
         actions={
           <Button onClick={() => setCreating((v) => !v)}>
             {creating ? "Болих" : "Багц үүсгэх"}
@@ -136,7 +144,7 @@ export default function BatchesPage() {
             setCreating(false);
             setBatches((prev) => [batch, ...prev]);
             setOpenBatchId(batch.id);
-            toast.success("Багц үүслээ. Одоо бараагаа нэмээрэй.");
+            toast.success("Багц үүслээ. Хаагдсан бараагаа сараар нэмээрэй.");
           }}
         />
       )}
@@ -222,7 +230,7 @@ function StageBar({ stage }: { stage: BatchStage }) {
         <span
           key={s}
           title={BATCH_STAGE_LABEL[s]}
-          className={`h-1 flex-1 rounded-full ${i <= index ? "bg-ink" : "bg-line"}`}
+          className={`h-1 flex-1 rounded-full ${index >= 0 && i <= index ? "bg-ink" : "bg-line"}`}
         />
       ))}
     </div>
@@ -232,7 +240,6 @@ function StageBar({ stage }: { stage: BatchStage }) {
 function CreateBatchForm({ onCreated }: { onCreated: (batch: AdminBatch) => void }) {
   const toast = useToast();
   const [name, setName] = useState("");
-  const [deadline, setDeadline] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -240,11 +247,15 @@ function CreateBatchForm({ onCreated }: { onCreated: (batch: AdminBatch) => void
     setBusy(true);
     setError(null);
     try {
-      const batch = await adminApi.createBatch({
-        name: name.trim(),
-        deadline: deadline || null,
+      const batch = await adminApi.createBatch({ name: name.trim() });
+      onCreated({
+        ...batch,
+        orderCount: 0,
+        totalValue: 0,
+        nextStage: "AT_WAREHOUSE",
+        previousStage: null,
+        createdAt: new Date().toISOString(),
       });
-      onCreated({ ...batch, orderCount: 0, totalValue: 0, nextStage: "CLOSED", createdAt: new Date().toISOString() });
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Багц үүсгэж чадсангүй.";
       setError(message);
@@ -259,23 +270,14 @@ function CreateBatchForm({ onCreated }: { onCreated: (batch: AdminBatch) => void
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
           <div className="mb-1.5 text-[13px] text-ink-2">Багцын нэр</div>
-          <Input value={name} onChange={setName} placeholder="Жишээ: 9-р сарын ачаа" />
-        </div>
-        <div>
-          <div className="mb-1.5 text-[13px] text-ink-2">Захиалга хаагдах огноо</div>
-          <input
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            className="h-11 w-full rounded-[8px] border border-line bg-bg px-3 text-[14px] sm:w-auto"
-          />
+          <Input value={name} onChange={setName} placeholder="Жишээ: 8-р сарын ачаа" />
         </div>
         <Button onClick={create} loading={busy} disabled={!name.trim()}>
           Үүсгэх
         </Button>
       </div>
       <p className="mt-2 mb-0 text-[12px] text-muted">
-        Багцад нэмсэн бараанууд энэ огноог хүртэл захиалга авна. Огноог дараа нь өөрчилж болно.
+        Багц «Зам дээр» шатаас эхэлнэ. Дараа нь хаагдсан гаргалтыг он/сараар сонгож нэмнэ.
       </p>
       {error && (
         <div className="mt-3">
@@ -392,8 +394,8 @@ function BatchDetail({
     );
   }
 
-  const collecting = batch.stage === "COLLECTING";
-  const canOmit = batch.stage === "COLLECTING" || batch.stage === "CLOSED";
+  const editable = batch.stage === "IN_TRANSIT";
+  const canOmit = editable;
   const unpaidCount = batch.orders.filter((o) => o.dueAmount > 0).length;
 
   const omitOrder = async (order: BatchOrderRow) => {
@@ -481,9 +483,9 @@ function BatchDetail({
       <Card className="mb-4 p-4">
         <div className="flex items-center">
           {STAGES.map((stage, i) => {
-            const index = STAGES.indexOf(batch.stage);
-            const passed = i < index;
-            const current = i === index;
+            const index = Math.max(STAGES.indexOf(batch.stage), 0);
+            const passed = STAGES.includes(batch.stage) && i < index;
+            const current = stage === batch.stage;
             return (
               <div key={stage} className="flex flex-1 flex-col items-center gap-1.5">
                 <div className="flex w-full items-center">
@@ -529,7 +531,7 @@ function BatchDetail({
       {/* --- Багцын бараанууд --- */}
       <div className="mb-2 flex items-center justify-between">
         <h2 className="m-0 text-[16px] font-medium">Багцын бараа</h2>
-        {collecting && (
+        {editable && (
           <Button size="sm" onClick={() => setPicking((v) => !v)}>
             {picking ? "Болих" : "Бараа нэмэх"}
           </Button>
@@ -537,21 +539,33 @@ function BatchDetail({
       </div>
 
       {picking && (
-        <ProductPicker
+        <ClosedRoundPicker
           batch={batch}
-          onAdded={(product) => {
+          onAdded={(products) => {
             setBatch((prev) =>
-              prev ? { ...prev, products: [...prev.products, product] } : prev,
+              prev
+                ? {
+                    ...prev,
+                    products: [
+                      ...prev.products,
+                      ...products.filter(
+                        (p) => !prev.products.some((x) => x.roundId === p.roundId),
+                      ),
+                    ],
+                  }
+                : prev,
             );
-            toast.success(`«${product.name}» багцад нэмэгдлээ.`);
+            toast.success(`${products.length} гаргалт багцад нэмэгдлээ.`);
+            void load(true);
+            onListChanged();
           }}
         />
       )}
 
       {batch.products.length === 0 ? (
         <Empty>
-          {collecting
-            ? "Бараа нэмээгүй байна. «Бараа нэмэх» товчоор каталогоос сонгоорой."
+          {editable
+            ? "Бараа нэмээгүй байна. «Бараа нэмэх» товчоор хаагдсан гаргалтыг сараар сонгоорой."
             : "Энэ багцад бараа холбогдоогүй."}
         </Empty>
       ) : (
@@ -560,10 +574,10 @@ function BatchDetail({
             <tr>
               <Th>Бараа</Th>
               <Th className="text-right">Зарах үнэ</Th>
-              <Th>Хаагдах</Th>
+              <Th>Хаагдсан</Th>
               <Th className="text-right">Захиалга</Th>
               <Th>Төлөв</Th>
-              {collecting && <Th />}
+              {editable && <Th />}
             </tr>
           </thead>
           <tbody>
@@ -598,14 +612,13 @@ function BatchDetail({
                 <Td>
                   <ProductStatusBadge status={p.status} />
                 </Td>
-                {collecting && (
+                {editable && (
                   <Td className="text-right">
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => removeProduct(p.roundId, p.name)}
                       loading={busyKey === `remove:${p.roundId}`}
-                      disabled={p.orderedQty > 0}
                     >
                       Хасах
                     </Button>
@@ -623,12 +636,12 @@ function BatchDetail({
         <Card className="mb-3 border-warn bg-warn-bg p-3">
           <div className="text-[13px] text-warn">
             <span className="tnum font-medium">{unpaidCount}</span> захиалгын төлбөр дутуу
-            {batch.stage === "CLOSED" && " — нийлүүлэгчид оруулахгүй бол «Хасах»."}
+            {editable && " — урагшлуулахгүй бол «Хасах»."}
           </div>
         </Card>
       )}
       {batch.orders.length === 0 ? (
-        <Empty>Захиалга алга. Барааны захиалгууд баталгаажихдаа энд орж ирнэ.</Empty>
+        <Empty>Захиалга алга. Хаагдсан гаргалт нэмэхэд захиалгууд энд орно.</Empty>
       ) : (
         <Table>
           <thead>
@@ -698,8 +711,7 @@ function BatchDetail({
         <>
           <h2 className="mt-6 mb-1 text-[16px] font-medium">Хассан захиалгууд</h2>
           <p className="mt-0 mb-2 text-[13px] text-ink-2">
-            Төлбөр ороогүй тул нийлүүлэгчид оруулаагүй. Мөнгө орвол (хоцорсон ч) дахин оруулж
-            бэлдэнэ.
+            Төлбөр ороогүй тул багцаас хассан. Мөнгө орвол (хоцорсон ч) дахин оруулж бэлдэнэ.
           </p>
           <Table>
             <thead>
@@ -859,227 +871,201 @@ function EditBatchForm({
   );
 }
 
-/** Каталогоос бараа хайж багцад нэмэх / одоогийн гаргалт холбох. */
-function ProductPicker({
+/** Хаагдсан гаргалтыг он/сараар сонгож багцад нэмэх. */
+function ClosedRoundPicker({
   batch,
   onAdded,
 }: {
   batch: AdminBatchDetail;
-  onAdded: (product: AdminBatchDetail["products"][number]) => void;
+  onAdded: (products: BatchProduct[]) => void;
 }) {
-  const [mode, setMode] = useState<"create" | "link">("link");
-  const [search, setSearch] = useState("");
-  const [results, setResults] = useState<AdminProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [addingId, setAddingId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const toast = useToast();
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const fetchProducts = useCallback(
-    async (q: string) => {
-      setLoading(true);
-      try {
-        const res = await adminApi.products({
-          type: mode === "link" ? "order" : undefined,
-          q: q.trim() || undefined,
-          pageSize: 30,
-        });
-        setResults(res.data);
-        setError(null);
-      } catch (e) {
-        setError(e instanceof ApiError ? e.message : "Хайлт амжилтгүй.");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [mode],
-  );
+  const [months, setMonths] = useState<
+    { year: number; month: number; key: string; count: number }[]
+  >([]);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [rounds, setRounds] = useState<BatchProduct[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [loadingMonths, setLoadingMonths] = useState(true);
+  const [loadingRounds, setLoadingRounds] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchProducts("");
-  }, [fetchProducts]);
+    void (async () => {
+      setLoadingMonths(true);
+      try {
+        const list = await adminApi.batchEligibleMonths();
+        setMonths(list);
+        if (list[0]) setSelectedKey(list[0].key);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "Сарууд ачаалж чадсангүй.");
+      } finally {
+        setLoadingMonths(false);
+      }
+    })();
+  }, []);
 
-  const onSearch = (value: string) => {
-    setSearch(value);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => void fetchProducts(value), 350);
+  useEffect(() => {
+    if (!selectedKey) {
+      setRounds([]);
+      return;
+    }
+    const [y, m] = selectedKey.split("-").map(Number);
+    void (async () => {
+      setLoadingRounds(true);
+      setSelected(new Set());
+      try {
+        const list = await adminApi.batchEligibleRounds(y!, m!);
+        setRounds(list);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "Гаргалт ачаалж чадсангүй.");
+      } finally {
+        setLoadingRounds(false);
+      }
+    })();
+  }, [selectedKey]);
+
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
-  const addNew = async (product: AdminProduct) => {
-    setAddingId(product.id);
+  const addSelected = async () => {
+    if (selected.size === 0) return;
+    setBusy(true);
     try {
-      const added = await adminApi.addBatchProduct(batch.id, { productId: product.id });
-      onAdded(added);
-      toast.success(`«${product.name}» шинэ гаргалттай нэмэгдлээ.`);
+      const result = await adminApi.addBatchProduct(batch.id, {
+        roundIds: [...selected],
+      });
+      const list = Array.isArray(result) ? result : [result];
+      onAdded(list);
+      setSelected(new Set());
+      setRounds((prev) => prev.filter((r) => !selected.has(r.roundId)));
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Нэмж чадсангүй.");
     } finally {
-      setAddingId(null);
+      setBusy(false);
     }
   };
 
-  const linkRound = async (product: AdminProduct, roundId: string, label: string) => {
-    setAddingId(roundId);
-    try {
-      const added = await adminApi.addBatchProduct(batch.id, { roundId });
-      onAdded(added);
-      toast.success(`«${label}» холбогдлоо — захиалгууд багцад орлоо.`);
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Холбож чадсангүй.");
-    } finally {
-      setAddingId(null);
-    }
-  };
-
-  const inBatch = new Set(batch.products.map((p) => p.productId));
-  const inBatchRounds = new Set(batch.products.map((p) => p.roundId));
-
-  type LinkRow = {
-    key: string;
-    product: AdminProduct;
-    roundId: string;
-    roundNo: number;
-    sellPrice: number;
-    orderedQty: number;
-  };
-
-  const linkRows: LinkRow[] = [];
-  if (mode === "link") {
-    for (const product of results) {
-      for (const round of product.rounds) {
-        if (round.closeAt == null) continue;
-        if (round.batchId) continue;
-        if (round.status === "ARCHIVED") continue;
-        linkRows.push({
-          key: round.id,
-          product,
-          roundId: round.id,
-          roundNo: round.roundNo,
-          sellPrice: round.sellPrice,
-          orderedQty: round.orderedQty,
-        });
-      }
-    }
-  }
+  const inBatch = new Set(batch.products.map((p) => p.roundId));
 
   return (
     <Card className="mb-4 p-4">
-      <div className="mb-3 flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant={mode === "link" ? "primary" : "outline"}
-          onClick={() => setMode("link")}
-        >
-          Одоогийн гаргалт холбох
-        </Button>
-        <Button
-          size="sm"
-          variant={mode === "create" ? "primary" : "outline"}
-          onClick={() => setMode("create")}
-        >
-          Шинэ гаргалт үүсгэх
-        </Button>
-      </div>
-      <Input value={search} onChange={onSearch} placeholder="Каталогоос бараа хайх…" />
-      <p className="mt-2 mb-0 text-[12px] text-muted">
-        {mode === "link"
-          ? "Урьдчилсан захиалгын цэсээр үүсгэсэн, багцгүй гаргалтыг холбоно. Захиалсан хүмүүс багцад дагана."
-          : "Сонгосон бараа энэ багцын хаагдах огноогоор шинэ гаргалт болно."}
+      <div className="mb-2 text-[14px] font-medium">Хаагдсан гаргалт — он/сараар</div>
+      <p className="mt-0 mb-3 text-[12px] text-muted">
+        Захиалга хаагдсан сараар шүүж сонгоод багцад оруулна. Захиалгууд дагаж орно.
       </p>
-      {error && (
-        <div className="mt-3">
-          <ErrorNote>{error}</ErrorNote>
+
+      {loadingMonths ? (
+        <div className="flex justify-center py-6">
+          <Spinner className="text-muted" />
         </div>
-      )}
-      <div className="mt-3 max-h-[320px] overflow-y-auto">
-        {loading ? (
-          <div className="flex justify-center py-8">
-            <Spinner className="text-muted" />
-          </div>
-        ) : mode === "link" ? (
-          linkRows.length === 0 ? (
-            <div className="py-6 text-center text-[13px] text-muted">
-              Холбох боломжтой урьдчилсан гаргалт алга.
-            </div>
-          ) : (
-            <div className="flex flex-col">
-              {linkRows.map((row) => {
-                const linked = inBatchRounds.has(row.roundId);
-                return (
-                  <div
-                    key={row.key}
-                    className="flex items-center gap-3 border-b border-line py-2 last:border-b-0"
-                  >
-                    <ProductImage
-                      src={row.product.images[0] ?? null}
-                      alt={row.product.name}
-                      className="h-10 w-10 shrink-0 rounded-[8px]"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14px]">{row.product.name}</div>
-                      <div className="tnum text-[12px] text-muted">
-                        #{row.roundNo} · {money(row.sellPrice)}
-                        {row.orderedQty > 0 ? ` · ${row.orderedQty} захиалга` : ""}
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant={linked ? "outline" : "primary"}
-                      disabled={linked}
-                      loading={addingId === row.roundId}
-                      onClick={() =>
-                        linkRound(row.product, row.roundId, `${row.product.name} #${row.roundNo}`)
-                      }
-                    >
-                      {linked ? "Холбогдсон" : "Холбох"}
-                    </Button>
-                  </div>
-                );
-              })}
-            </div>
-          )
-        ) : results.length === 0 ? (
-          <div className="py-6 text-center text-[13px] text-muted">Бараа олдсонгүй.</div>
-        ) : (
-          <div className="flex flex-col">
-            {results.map((product) => {
-              const added = inBatch.has(product.id);
-              const lastRound = product.rounds[0] ?? null;
+      ) : months.length === 0 ? (
+        <div className="py-4 text-center text-[13px] text-muted">
+          Нэмэх боломжтой хаагдсан гаргалт алга.
+        </div>
+      ) : (
+        <>
+          <div className="no-scrollbar mb-3 flex gap-2 overflow-x-auto">
+            {months.map((m) => {
+              const active = m.key === selectedKey;
               return (
-                <div
-                  key={product.id}
-                  className="flex items-center gap-3 border-b border-line py-2 last:border-b-0"
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setSelectedKey(m.key)}
+                  className={`h-9 shrink-0 cursor-pointer rounded-[8px] border px-3 text-[13px] ${
+                    active
+                      ? "border-ink bg-ink text-white"
+                      : "border-line bg-bg text-ink hover:border-ink/40"
+                  }`}
                 >
-                  <ProductImage
-                    src={product.images[0] ?? null}
-                    alt={product.name}
-                    className="h-10 w-10 shrink-0 rounded-[8px]"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[14px]">{product.name}</div>
-                    <div className="text-[12px] text-muted">
-                      {product.category?.name ?? ""}
-                      {lastRound
-                        ? ` · сүүлд ${money(lastRound.sellPrice)}`
-                        : " · үнэгүй тул нэмэхэд үнэ асуух болно"}
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={added ? "outline" : "primary"}
-                    disabled={added}
-                    loading={addingId === product.id}
-                    onClick={() => addNew(product)}
-                  >
-                    {added ? "Нэмэгдсэн" : "Нэмэх"}
-                  </Button>
-                </div>
+                  {m.year} · {MONTH_LABELS[m.month - 1]}
+                  <span className="tnum ml-1.5 opacity-70">{m.count}</span>
+                </button>
               );
             })}
           </div>
-        )}
-      </div>
+
+          {error && (
+            <div className="mb-3">
+              <ErrorNote>{error}</ErrorNote>
+            </div>
+          )}
+
+          {loadingRounds ? (
+            <div className="flex justify-center py-8">
+              <Spinner className="text-muted" />
+            </div>
+          ) : rounds.length === 0 ? (
+            <div className="py-6 text-center text-[13px] text-muted">
+              Энэ сард нэмэх гаргалт алга.
+            </div>
+          ) : (
+            <div className="max-h-[320px] overflow-y-auto">
+              {rounds.map((row) => {
+                const linked = inBatch.has(row.roundId);
+                const checked = selected.has(row.roundId);
+                return (
+                  <label
+                    key={row.roundId}
+                    className={`flex cursor-pointer items-center gap-3 border-b border-line py-2 last:border-b-0 ${
+                      linked ? "opacity-50" : ""
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={linked}
+                      checked={linked || checked}
+                      onChange={() => toggle(row.roundId)}
+                      className="size-4"
+                    />
+                    <ProductImage
+                      src={row.image}
+                      alt={row.name}
+                      className="h-10 w-10 shrink-0 rounded-[8px]"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[14px]">{row.name}</div>
+                      <div className="tnum text-[12px] text-muted">
+                        #{row.roundNo}
+                        {row.closeAt ? ` · ${dayLabel(row.closeAt)}` : ""}
+                        {` · ${money(row.sellPrice)}`}
+                        {row.orderedQty > 0
+                          ? ` · ${row.orderedQty} ш · ${row.customerCount} хүн`
+                          : ""}
+                      </div>
+                    </div>
+                    {linked && (
+                      <span className="text-[12px] text-muted">Багцад байна</span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="tnum text-[13px] text-muted">{selected.size} сонгосон</span>
+            <Button
+              size="sm"
+              onClick={() => void addSelected()}
+              loading={busy}
+              disabled={selected.size === 0}
+            >
+              Багцад нэмэх
+            </Button>
+          </div>
+        </>
+      )}
     </Card>
   );
 }

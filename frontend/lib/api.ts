@@ -748,22 +748,26 @@ export const adminApi = {
       method: "POST",
     }).then((r) => r.data),
 
-  /** Багцад бараа нэмнэ — шинэ тойрог, эсвэл `roundId`-аар одоогийн урьдчилсан гаргалт. */
+  /** Багцад нэмэх боломжтой хаагдсан гаргалтын сарууд. */
+  batchEligibleMonths: () =>
+    request<{ year: number; month: number; key: string; count: number }[]>(
+      "/admin/batches/eligible-months",
+      adminAuth,
+    ).then((r) => r.data),
+
+  /** Тухайн сарын хаагдсан, багцгүй гаргалт. */
+  batchEligibleRounds: (year: number, month: number) =>
+    request<BatchProduct[]>("/admin/batches/eligible-rounds", {
+      ...adminAuth,
+      query: { year, month },
+    }).then((r) => r.data),
+
+  /** Хаагдсан гаргалтыг багцад холбоно. */
   addBatchProduct: (
     batchId: string,
-    body: {
-      productId?: string;
-      roundId?: string;
-      costPrice?: number;
-      sellPrice?: number;
-      closeAt?: string;
-      leadMinDays?: number;
-      leadMaxDays?: number;
-      note?: string;
-      status?: "ACTIVE" | "DRAFT" | "HIDDEN";
-    },
+    body: { roundId?: string; roundIds?: string[] },
   ) =>
-    request<BatchProduct>(`/admin/batches/${batchId}/products`, {
+    request<BatchProduct | BatchProduct[]>(`/admin/batches/${batchId}/products`, {
       ...adminAuth,
       method: "POST",
       body,

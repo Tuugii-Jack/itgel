@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BATCH_STAGES,
+  canEditBatchComposition,
   canTransition,
   nextBatchStage,
   ORDER_FLOW,
@@ -45,30 +46,41 @@ describe('Захиалгын төлөв шилжилт', () => {
 });
 
 describe('Багцын шат', () => {
-  it('дараалал зөв', () => {
-    expect(nextBatchStage('COLLECTING')).toBe('CLOSED');
+  it('дараалал зөв — Зам дээрээс эхэлнэ', () => {
     expect(nextBatchStage('IN_TRANSIT')).toBe('AT_WAREHOUSE');
+    expect(nextBatchStage('AT_WAREHOUSE')).toBe('DONE');
     expect(nextBatchStage('DONE')).toBeNull();
   });
 
   it('буцах дараалал зөв', () => {
-    expect(previousBatchStage('COLLECTING')).toBeNull();
-    expect(previousBatchStage('CLOSED')).toBe('COLLECTING');
+    expect(previousBatchStage('IN_TRANSIT')).toBeNull();
     expect(previousBatchStage('AT_WAREHOUSE')).toBe('IN_TRANSIT');
     expect(previousBatchStage('DONE')).toBe('AT_WAREHOUSE');
   });
 
-  it('шат бүр 6 ширхэг, 0–5', () => {
-    expect(BATCH_STAGES).toHaveLength(6);
+  it('идэвхтэй шат 3 ширхэг', () => {
+    expect(BATCH_STAGES).toEqual(['IN_TRANSIT', 'AT_WAREHOUSE', 'DONE']);
+  });
+
+  it('хуучин шатууд ladder-д байхгүй', () => {
+    expect(nextBatchStage('COLLECTING')).toBeNull();
+    expect(nextBatchStage('CLOSED')).toBeNull();
+    expect(nextBatchStage('AT_SUPPLIER')).toBeNull();
   });
 
   it('шат нь захиалгын төлөвт буулгагдана', () => {
-    expect(orderStatusForBatchStage('COLLECTING')).toBeNull();
-    expect(orderStatusForBatchStage('CLOSED')).toBe('IN_BATCH');
-    expect(orderStatusForBatchStage('AT_SUPPLIER')).toBe('IN_BATCH');
     expect(orderStatusForBatchStage('IN_TRANSIT')).toBe('IN_TRANSIT');
     expect(orderStatusForBatchStage('AT_WAREHOUSE')).toBe('ARRIVED');
     expect(orderStatusForBatchStage('DONE')).toBeNull();
+    expect(orderStatusForBatchStage('COLLECTING')).toBeNull();
+    expect(orderStatusForBatchStage('CLOSED')).toBeNull();
+    expect(orderStatusForBatchStage('AT_SUPPLIER')).toBeNull();
+  });
+
+  it('бүрэлдэхүүн зөвхөн Зам дээр засна', () => {
+    expect(canEditBatchComposition('IN_TRANSIT')).toBe(true);
+    expect(canEditBatchComposition('AT_WAREHOUSE')).toBe(false);
+    expect(canEditBatchComposition('DONE')).toBe(false);
   });
 });
 

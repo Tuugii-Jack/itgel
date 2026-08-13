@@ -55,17 +55,16 @@ export function canRevert(from: OrderStatus): boolean {
   return previousInFlow(from) !== null;
 }
 
-/** Багцын шат ахихад дотор байгаа захиалга шилжих төлөв (шаардлагагүй бол null). */
+/**
+ * Багцын шат ахихад дотор байгаа захиалга шилжих төлөв.
+ * Хуучин COLLECTING/CLOSED/AT_SUPPLIER — ladder-ээс гарсан; null.
+ */
 export function orderStatusForBatchStage(stage: BatchStage): OrderStatus | null {
   switch (stage) {
-    case 'CLOSED':
-    case 'AT_SUPPLIER':
-      return 'IN_BATCH';
     case 'IN_TRANSIT':
       return 'IN_TRANSIT';
     case 'AT_WAREHOUSE':
       return 'ARRIVED';
-    // COLLECTING — захиалга цуглуулж байгаа, DONE — тус бүрчлэн хүлээлгэн өгнө.
     default:
       return null;
   }
@@ -83,14 +82,11 @@ export function stepsToStatus(from: OrderStatus, target: OrderStatus): OrderStat
   return ORDER_FLOW.slice(fromIndex + 1, targetIndex + 1);
 }
 
-export const BATCH_STAGES: BatchStage[] = [
-  'COLLECTING',
-  'CLOSED',
-  'AT_SUPPLIER',
-  'IN_TRANSIT',
-  'AT_WAREHOUSE',
-  'DONE',
-];
+/**
+ * Идэвхтэй багцын шатууд: Зам дээр → Агуулахад → Дууссан.
+ * (COLLECTING/CLOSED/AT_SUPPLIER enum-д үлдсэн ч ladder-д байхгүй.)
+ */
+export const BATCH_STAGES: BatchStage[] = ['IN_TRANSIT', 'AT_WAREHOUSE', 'DONE'];
 
 export const BATCH_STAGE_LABEL: Record<BatchStage, string> = {
   COLLECTING: 'Цуглуулж байна',
@@ -100,6 +96,11 @@ export const BATCH_STAGE_LABEL: Record<BatchStage, string> = {
   AT_WAREHOUSE: 'Агуулахад',
   DONE: 'Дууссан',
 };
+
+/** Багцын бүрэлдэхүүн (бараа нэмэх/хасах) зөвшөөрөгдөх эсэх. */
+export function canEditBatchComposition(stage: BatchStage): boolean {
+  return stage === 'IN_TRANSIT';
+}
 
 /** Дараагийн шат — эцсийн шатанд null. */
 export function nextBatchStage(stage: BatchStage): BatchStage | null {

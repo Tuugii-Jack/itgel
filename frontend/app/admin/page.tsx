@@ -370,7 +370,7 @@ export default function AdminOrdersPage() {
               placeholder="Багцад нэмэх"
               className="h-9 text-[13px]"
               options={batches
-                .filter((b) => b.stage === "COLLECTING" || b.stage === "CLOSED")
+                .filter((b) => b.stage === "IN_TRANSIT")
                 .map((b) => ({ value: b.id, label: b.name }))}
             />
             <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>

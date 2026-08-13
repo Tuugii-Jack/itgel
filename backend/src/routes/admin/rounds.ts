@@ -13,6 +13,7 @@ import {
   detachOrdersForRound,
   resyncArrivalsForBatch,
 } from '../../services/batches.js';
+import { finalizeRoundClose } from '../../services/orders.js';
 import { adminRound } from '../../services/serialize.js';
 import { productStatus, roundFields } from './products.js';
 import { selectionsOf, sizeColorFromSelections } from '../../lib/options.js';
@@ -176,7 +177,7 @@ const patchBody = z
     leadMaxDays: roundFields.leadMaxDays,
     status: productStatus.optional(),
     note: roundFields.note.nullable(),
-    /** null = багцаас салгах; string = COLLECTING багцад холбох. */
+    /** null = багцаас салгах; string = IN_TRANSIT багцад холбох. */
     batchId: z.string().min(1).nullable().optional(),
   })
   .partial();
@@ -216,7 +217,7 @@ adminRoundsRouter.patch(
     let batchId: string | null | undefined = body.batchId;
     if (batchId) {
       const batch = await prisma.batch.findFirst({
-        where: { id: batchId, deletedAt: null, stage: 'COLLECTING' },
+        where: { id: batchId, deletedAt: null, stage: 'IN_TRANSIT' },
       });
       if (!batch) throw badRequest('Багц олдсонгүй, эсвэл захиалга авах шатнаас гарсан.');
     }
@@ -293,6 +294,11 @@ adminRoundsRouter.patch(
       after: adminRound(after),
     });
 
+    // Хаагдах үед: төлөгдөөгүйг цуцлаад, төлснийг «Зам дээр» болгоно.
+    if (before.status !== 'CLOSED' && after.status === 'CLOSED') {
+      await finalizeRoundClose(after.id, actorOf(req));
+    }
+
     res.json({ data: adminRound(after) });
   }),
 );
@@ -321,6 +327,17 @@ adminRoundsRouter.post(
     });
 
     const skipped = ids.length - result.count;
+
+    if (status === 'CLOSED') {
+      const closed = await prisma.productRound.findMany({
+        where: { id: { in: ids }, deletedAt: null, status: 'CLOSED' },
+        select: { id: true },
+      });
+      const actor = actorOf(req);
+      for (const round of closed) {
+        await finalizeRoundClose(round.id, actor);
+      }
+    }
 
     await audit({
       actor: actorOf(req),

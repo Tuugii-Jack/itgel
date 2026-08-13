@@ -3,7 +3,12 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
-import { nextBatchStage, previousBatchStage } from '../../lib/orderStatus.js';
+import { addUbMonths, parseUbDay, startOfUbMonth, ubMonthKey } from '../../lib/date.js';
+import {
+  canEditBatchComposition,
+  nextBatchStage,
+  previousBatchStage,
+} from '../../lib/orderStatus.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import {
@@ -12,23 +17,22 @@ import {
   detachOrdersForRound,
   findOrderIdsForBatch,
   omitOrderFromBatch,
+  promoteOrdersForBatchStage,
   reinstateOrderInBatch,
   resyncArrivalsForBatch,
   revertBatch,
 } from '../../services/batches.js';
 import { roundStats } from '../../services/roundStats.js';
+import { finalizeRoundClose } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, PAYMENT_STATE_LABEL } from '../../services/money.js';
-import { getSettings } from '../../services/settings.js';
 
 export const adminBatchesRouter = Router();
 
 const idParams = z.object({ id: z.string().min(1) });
 
 const listQuery = z.object({
-  stage: z
-    .enum(['COLLECTING', 'CLOSED', 'AT_SUPPLIER', 'IN_TRANSIT', 'AT_WAREHOUSE', 'DONE'])
-    .optional(),
+  stage: z.enum(['IN_TRANSIT', 'AT_WAREHOUSE', 'DONE']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -78,6 +82,94 @@ adminBatchesRouter.get(
   }),
 );
 
+/**
+ * GET /batches/eligible-months — багцад нэмэх боломжтой хаагдсан гаргалтын сарууд.
+ */
+adminBatchesRouter.get(
+  '/eligible-months',
+  asyncHandler(async (_req, res) => {
+    const rounds = await prisma.productRound.findMany({
+      where: {
+        deletedAt: null,
+        batchId: null,
+        closeAt: { not: null },
+        status: 'CLOSED',
+      },
+      select: { closeAt: true },
+    });
+
+    const counts = new Map<string, number>();
+    for (const r of rounds) {
+      if (!r.closeAt) continue;
+      const key = ubMonthKey(r.closeAt);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    const months = [...counts.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, count]) => {
+        const [y, m] = key.split('-');
+        return { year: Number(y), month: Number(m), key, count };
+      });
+
+    res.json({ data: months });
+  }),
+);
+
+/**
+ * GET /batches/eligible-rounds?year=&month= — тухайн сарын хаагдсан, багцгүй гаргалт.
+ */
+adminBatchesRouter.get(
+  '/eligible-rounds',
+  validate({
+    query: z.object({
+      year: z.coerce.number().int().min(2020).max(2100),
+      month: z.coerce.number().int().min(1).max(12),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const q = query<{ year: number; month: number }>(req);
+    const monthStart = startOfUbMonth(
+      parseUbDay(`${q.year}-${String(q.month).padStart(2, '0')}-01`),
+    );
+    const monthEnd = new Date(addUbMonths(monthStart, 1).getTime() - 1);
+
+    const rounds = await prisma.productRound.findMany({
+      where: {
+        deletedAt: null,
+        batchId: null,
+        status: 'CLOSED',
+        closeAt: { gte: monthStart, lte: monthEnd },
+      },
+      orderBy: { closeAt: 'desc' },
+      include: {
+        product: { select: { id: true, name: true, images: true } },
+      },
+    });
+
+    const stats = await roundStats(rounds.map((r) => r.id));
+
+    res.json({
+      data: rounds.map((r) => {
+        const s = stats.get(r.id);
+        return {
+          roundId: r.id,
+          roundNo: r.roundNo,
+          productId: r.product.id,
+          name: r.product.name,
+          image: r.product.images[0] ?? null,
+          sellPrice: r.sellPrice,
+          status: r.status,
+          closeAt: r.closeAt?.toISOString() ?? null,
+          orderedQty: s?.qty ?? 0,
+          customerCount: s?.customerCount ?? 0,
+        };
+      }),
+      meta: { year: q.year, month: q.month, total: rounds.length },
+    });
+  }),
+);
+
 adminBatchesRouter.get(
   '/:id',
   validate({ params: idParams }),
@@ -96,8 +188,8 @@ adminBatchesRouter.get(
     });
     if (!batch) throw notFound('Багц олдсонгүй.');
 
-    // Цуглуулж байгаа үед тойрогт захиалсан ч batchId-гүй захиалгыг хавсаргана.
-    if (batch.stage === 'COLLECTING' && batch.rounds.length > 0) {
+    // Зам дээр байхад тойрогт захиалсан ч batchId-гүй захиалгыг хавсаргана.
+    if (canEditBatchComposition(batch.stage) && batch.rounds.length > 0) {
       await prisma.$transaction(async (tx) => {
         for (const round of batch.rounds) {
           await attachOrdersForRound(tx, round.id, batch.id);
@@ -185,11 +277,7 @@ adminBatchesRouter.get(
 );
 
 /**
- * POST /batches — шинэ багц үүсгэнэ.
- *
- * Багц-түрүүлэх урсгал: багцыг ЭХЛЭЭД (хоосон) үүсгэж, дараа нь бараагаа
- * нэмнэ. Тэдгээр барааны захиалгууд баталгаажихдаа автоматаар энэ багц
- * руу орно. `orderIds` өгвөл байгаа баталгаажсан захиалгуудыг шууд хавсаргана.
+ * POST /batches — шинэ багц (Зам дээр). Хаагдсан гаргалтыг дараа нь сараар нэмнэ.
  */
 adminBatchesRouter.post(
   '/',
@@ -218,17 +306,19 @@ adminBatchesRouter.post(
           where: {
             deletedAt: null,
             batchId: null,
-            status: 'CONFIRMED',
+            status: { in: ['CONFIRMED', 'IN_BATCH'] },
             id: { in: body.orderIds },
           },
           select: { id: true },
         })
       : [];
 
+    const actor = actorOf(req);
     const batch = await prisma.$transaction(async (tx) => {
       const created = await tx.batch.create({
         data: {
           name: body.name,
+          stage: 'IN_TRANSIT',
           deadline: body.deadline ?? null,
           weightKg: body.weightKg ?? null,
           etaFrom: body.etaFrom ?? null,
@@ -236,20 +326,22 @@ adminBatchesRouter.post(
         },
       });
       if (orders.length > 0) {
+        const ids = orders.map((o) => o.id);
         await tx.order.updateMany({
-          where: { id: { in: orders.map((o) => o.id) } },
+          where: { id: { in: ids } },
           data: { batchId: created.id },
         });
+        await promoteOrdersForBatchStage(tx, created.id, 'IN_TRANSIT', actor, ids);
       }
       return created;
     });
 
     await audit({
-      actor: actorOf(req),
+      actor,
       action: 'CREATE',
       entity: 'Batch',
       entityId: batch.id,
-      after: { name: batch.name, deadline: batch.deadline, orderCount: orders.length },
+      after: { name: batch.name, stage: batch.stage, orderCount: orders.length },
     });
 
     res.status(201).json({
@@ -311,10 +403,8 @@ adminBatchesRouter.patch(
 );
 
 /**
- * POST /batches/:id/products — багцад бараа нэмнэ.
- *
- * - `roundId` өгвөл одоо байгаа урьдчилсан гаргалтыг холбоно (захиалгууд дагана).
- * - Эсвэл `productId`-аар ШИНЭ тойрог үүсгэнэ.
+ * POST /batches/:id/products — хаагдсан гаргалтыг багцад холбоно.
+ * `roundId` эсвэл `roundIds` — шинэ гаргалт үүсгэхгүй.
  */
 adminBatchesRouter.post(
   '/:id/products',
@@ -323,194 +413,99 @@ adminBatchesRouter.post(
     body: z
       .object({
         roundId: z.string().min(1).optional(),
-        productId: z.string().min(1).optional(),
-        costPrice: z.coerce.number().int().min(0).optional(),
-        sellPrice: z.coerce.number().int().min(0).optional(),
-        closeAt: z.coerce.date().optional(),
-        leadMinDays: z.coerce.number().int().min(0).max(365).optional(),
-        leadMaxDays: z.coerce.number().int().min(0).max(365).optional(),
-        note: z.string().trim().max(300).optional(),
-        /** Анхдагчаар шууд идэвхтэй — багцад нэмсэн бараа дэлгүүрт гарна. */
-        status: z.enum(['ACTIVE', 'DRAFT', 'HIDDEN']).default('ACTIVE'),
+        roundIds: z.array(z.string().min(1)).max(100).optional(),
       })
-      .refine((b) => Boolean(b.roundId || b.productId), {
-        message: 'productId эсвэл roundId заавал.',
+      .refine((b) => Boolean(b.roundId || (b.roundIds && b.roundIds.length > 0)), {
+        message: 'roundId эсвэл roundIds заавал.',
       }),
   }),
   asyncHandler(async (req, res) => {
-    const body = req.body as {
-      roundId?: string;
-      productId?: string;
-      costPrice?: number;
-      sellPrice?: number;
-      closeAt?: Date;
-      leadMinDays?: number;
-      leadMaxDays?: number;
-      note?: string;
-      status: 'ACTIVE' | 'DRAFT' | 'HIDDEN';
-    };
+    const body = req.body as { roundId?: string; roundIds?: string[] };
+    const ids = [...new Set([...(body.roundIds ?? []), ...(body.roundId ? [body.roundId] : [])])];
 
     const batch = await prisma.batch.findFirst({
       where: { id: req.params.id, deletedAt: null },
     });
     if (!batch) throw notFound('Багц олдсонгүй.');
-    if (batch.stage !== 'COLLECTING') {
-      throw conflict('Захиалга авах шатнаас гарсан багцад бараа нэмэх боломжгүй.');
+    if (!canEditBatchComposition(batch.stage)) {
+      throw conflict('Агуулахад орсон багцад бараа нэмэх боломжгүй.');
     }
 
-    // --- Одоо байгаа урьдчилсан гаргалт холбох ---
-    if (body.roundId) {
-      const existing = await prisma.productRound.findFirst({
-        where: { id: body.roundId, deletedAt: null },
+    const actor = actorOf(req);
+
+    // Төлөгдөөгүйг цуцлаад, төлснийг «Зам дээр» болгоно (хаагдах үед хийгдээгүй бол).
+    for (const id of ids) {
+      await finalizeRoundClose(id, actor);
+    }
+
+    const linked = await prisma.$transaction(async (tx) => {
+      const rounds = await tx.productRound.findMany({
+        where: { id: { in: ids }, deletedAt: null },
         include: { product: { select: { id: true, name: true, images: true } } },
       });
-      if (!existing) throw notFound('Гаргалт олдсонгүй.');
-      if (existing.closeAt === null) {
-        throw badRequest('Бэлэн барааг багцад холбох боломжгүй — зөвхөн урьдчилсан.');
-      }
-      if (existing.batchId === batch.id) {
-        throw conflict('Энэ гаргалт багцад аль хэдийн холбогдсон.');
-      }
-      if (existing.batchId) {
-        throw conflict('Энэ гаргалт өөр багцад холбогдсон байна.');
+      if (rounds.length !== ids.length) throw notFound('Зарим гаргалт олдсонгүй.');
+
+      for (const existing of rounds) {
+        if (existing.closeAt === null) {
+          throw badRequest(`«${existing.product.name}» бэлэн бараа — багцад холбох боломжгүй.`);
+        }
+        if (existing.status !== 'CLOSED') {
+          throw conflict(`«${existing.product.name}» хаагдаагүй — зөвхөн хаагдсан гаргалт нэмнэ.`);
+        }
+        if (existing.batchId === batch.id) {
+          throw conflict(`«${existing.product.name}» багцад аль хэдийн холбогдсон.`);
+        }
+        if (existing.batchId) {
+          throw conflict(`«${existing.product.name}» өөр багцад холбогдсон байна.`);
+        }
       }
 
-      const linked = await prisma.$transaction(async (tx) => {
-        const closeAt = body.closeAt ?? batch.deadline ?? existing.closeAt;
+      const out = [];
+      for (const existing of rounds) {
         const round = await tx.productRound.update({
           where: { id: existing.id },
-          data: {
-            batchId: batch.id,
-            ...(closeAt ? { closeAt } : {}),
-          },
+          data: { batchId: batch.id },
           include: { product: { select: { id: true, name: true, images: true } } },
         });
         await attachOrdersForRound(tx, round.id, batch.id);
-        await resyncArrivalsForBatch(tx, batch, [
-          {
-            id: round.id,
-            closeAt: round.closeAt,
-            leadMinDays: round.leadMinDays,
-            leadMaxDays: round.leadMaxDays,
-          },
-        ]);
-        return round;
-      });
-
-      const stats = await roundStats([linked.id]);
-      const s = stats.get(linked.id);
-
-      await audit({
-        actor: actorOf(req),
-        action: 'BATCH_PRODUCT_LINK',
-        entity: 'ProductRound',
-        entityId: linked.id,
-        after: {
-          batchId: batch.id,
-          batchName: batch.name,
-          productId: linked.product.id,
-          productName: linked.product.name,
-          roundNo: linked.roundNo,
-        },
-      });
-
-      res.status(201).json({
-        data: {
-          roundId: linked.id,
-          roundNo: linked.roundNo,
-          productId: linked.product.id,
-          name: linked.product.name,
-          image: linked.product.images[0] ?? null,
-          sellPrice: linked.sellPrice,
-          costPrice: linked.costPrice,
-          status: linked.status,
-          closeAt: linked.closeAt?.toISOString() ?? null,
-          orderedQty: s?.qty ?? 0,
-          customerCount: s?.customerCount ?? 0,
-        },
-      });
-      return;
-    }
-
-    // --- Шинэ тойрог үүсгэх ---
-    const closeAt = body.closeAt ?? batch.deadline;
-    if (!closeAt) {
-      throw badRequest('Хаах огноо алга — багцын хугацааг тохируулах эсвэл огноо өгнө үү.');
-    }
-
-    const product = await prisma.product.findFirst({
-      where: { id: body.productId!, deletedAt: null },
-      include: { rounds: { where: { deletedAt: null }, orderBy: { roundNo: 'desc' } } },
-    });
-    if (!product) throw notFound('Бараа олдсонгүй.');
-
-    if (product.rounds.some((r) => r.batchId === batch.id)) {
-      throw conflict('Энэ бараа багцад аль хэдийн нэмэгдсэн байна.');
-    }
-
-    const last = product.rounds[0];
-    const costPrice = body.costPrice ?? last?.costPrice;
-    const sellPrice = body.sellPrice ?? last?.sellPrice;
-    if (costPrice === undefined || sellPrice === undefined) {
-      throw badRequest('Өмнөх тойрог байхгүй тул үнийг заавал өгнө үү.');
-    }
-
-    const settings = await getSettings();
-    const leadMinDays = body.leadMinDays ?? last?.leadMinDays ?? settings.defaultLeadMinDays;
-    const leadMaxDays = body.leadMaxDays ?? last?.leadMaxDays ?? settings.defaultLeadMaxDays;
-    if (leadMinDays > leadMaxDays) throw badRequest('leadMinDays нь leadMaxDays-с их байж болохгүй.');
-
-    const maxNo = await prisma.productRound.aggregate({
-      where: { productId: product.id },
-      _max: { roundNo: true },
+        const orderIds = await findOrderIdsForBatch(tx, batch.id, [round.id]);
+        await promoteOrdersForBatchStage(tx, batch.id, batch.stage, actor, orderIds);
+        out.push(round);
+      }
+      return out;
     });
 
-    const round = await prisma.productRound.create({
-      data: {
-        productId: product.id,
-        batchId: batch.id,
-        roundNo: (maxNo._max.roundNo ?? 0) + 1,
-        costPrice,
-        sellPrice,
-        stock: 0,
-        closeAt,
-        leadMinDays,
-        leadMaxDays,
-        status: body.status,
-        note: body.note ?? null,
-      },
-    });
+    const stats = await roundStats(linked.map((r) => r.id));
 
     await audit({
-      actor: actorOf(req),
-      action: 'BATCH_PRODUCT_ADD',
-      entity: 'ProductRound',
-      entityId: round.id,
+      actor,
+      action: 'BATCH_PRODUCT_LINK',
+      entity: 'Batch',
+      entityId: batch.id,
       after: {
-        batchId: batch.id,
         batchName: batch.name,
-        productId: product.id,
-        productName: product.name,
-        roundNo: round.roundNo,
-        sellPrice,
-        closeAt: round.closeAt,
+        roundIds: linked.map((r) => r.id),
+        count: linked.length,
       },
     });
 
     res.status(201).json({
-      data: {
-        roundId: round.id,
-        roundNo: round.roundNo,
-        productId: product.id,
-        name: product.name,
-        image: product.images[0] ?? null,
-        sellPrice: round.sellPrice,
-        costPrice: round.costPrice,
-        status: round.status,
-        closeAt: round.closeAt?.toISOString() ?? null,
-        orderedQty: 0,
-        customerCount: 0,
-      },
+      data: linked.map((r) => {
+        const s = stats.get(r.id);
+        return {
+          roundId: r.id,
+          roundNo: r.roundNo,
+          productId: r.product.id,
+          name: r.product.name,
+          image: r.product.images[0] ?? null,
+          sellPrice: r.sellPrice,
+          costPrice: r.costPrice,
+          status: r.status,
+          closeAt: r.closeAt?.toISOString() ?? null,
+          orderedQty: s?.qty ?? 0,
+          customerCount: s?.customerCount ?? 0,
+        };
+      }),
     });
   }),
 );
@@ -526,6 +521,12 @@ adminBatchesRouter.delete(
   asyncHandler(async (req, res) => {
     const batchId = req.params.id!;
     const roundId = req.params.roundId!;
+
+    const batch = await prisma.batch.findFirst({ where: { id: batchId, deletedAt: null } });
+    if (!batch) throw notFound('Багц олдсонгүй.');
+    if (!canEditBatchComposition(batch.stage)) {
+      throw conflict('Агуулахад орсон багцаас бараа хасах боломжгүй.');
+    }
 
     const round = await prisma.productRound.findFirst({
       where: { id: roundId, batchId, deletedAt: null },
@@ -629,8 +630,8 @@ adminBatchesRouter.post(
     });
     if (!batch) throw notFound('Багц олдсонгүй.');
 
-    if (batch.stage !== 'COLLECTING' && batch.stage !== 'CLOSED') {
-      throw conflict('Зам дээр гарсан багцын бүрэлдэхүүнийг өөрчлөх боломжгүй.');
+    if (!canEditBatchComposition(batch.stage)) {
+      throw conflict('Агуулахад орсон багцын бүрэлдэхүүнийг өөрчлөх боломжгүй.');
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -670,7 +671,7 @@ adminBatchesRouter.post(
 
 /**
  * POST /batches/:id/orders/:orderId/omit — багцаас хасах (төлбөр дутуу гэх мэт).
- * Хаагдсан / цуглуулж байгаа үед.
+ * Зөвхөн Зам дээр байхад.
  */
 adminBatchesRouter.post(
   '/:id/orders/:orderId/omit',

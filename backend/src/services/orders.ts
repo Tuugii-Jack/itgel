@@ -167,6 +167,108 @@ export async function changeOrderStatus(
 }
 
 /**
+ * Тойрог хаагдахад төлбөр дутуу (`dueAmount > 0`) захиалгыг цуцална.
+ * Багцад орохгүй, жагсаалтад харагдахгүй (soft-delete — 10 хоног хадгална).
+ */
+export async function cancelUnpaidOrdersForRound(
+  roundId: string,
+  actor: string,
+  reason = 'Захиалга хаагдсан — төлбөр ороогүй.',
+): Promise<number> {
+  const unpaid = await prisma.order.findMany({
+    where: {
+      deletedAt: null,
+      dueAmount: { gt: 0 },
+      status: { notIn: ['CANCELLED', 'HANDED_OVER'] },
+      items: { some: { roundId, cancelledAt: null } },
+    },
+    select: { id: true, code: true },
+    take: 500,
+  });
+  if (unpaid.length === 0) return 0;
+
+  const now = new Date();
+  let cancelled = 0;
+  for (const order of unpaid) {
+    try {
+      await changeOrderStatus(order.id, 'CANCELLED', { actor, reason, now });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { deletedAt: now },
+      });
+      await audit({
+        actor,
+        action: 'SOFT_DELETE',
+        entity: 'Order',
+        entityId: order.id,
+        after: { reason: 'round_closed_unpaid', roundId, code: order.code },
+      });
+      cancelled += 1;
+    } catch (error) {
+      console.error(`[round-close] ${order.code} цуцлаж чадсангүй:`, error);
+    }
+  }
+
+  if (cancelled > 0) {
+    console.info(
+      `[round-close] ${cancelled} төлөгдөөгүй захиалга цуцлагдлаа (тойрог ${roundId}).`,
+    );
+  }
+  return cancelled;
+}
+
+/**
+ * Тойрог хаагдахад төлбөр бүрэн орсон захиалгыг «Зам дээр» (IN_TRANSIT) болгоно.
+ */
+export async function promotePaidOrdersInTransitForRound(
+  roundId: string,
+  actor: string,
+  reason = 'Захиалга хаагдсан — замд гарлаа.',
+): Promise<number> {
+  const paid = await prisma.order.findMany({
+    where: {
+      deletedAt: null,
+      dueAmount: { lte: 0 },
+      status: { notIn: ['CANCELLED', 'HANDED_OVER', 'IN_TRANSIT', 'ARRIVED'] },
+      items: { some: { roundId, cancelledAt: null } },
+    },
+    select: { id: true, code: true, status: true },
+    take: 500,
+  });
+  if (paid.length === 0) return 0;
+
+  const now = new Date();
+  let moved = 0;
+  for (const order of paid) {
+    try {
+      const steps = stepsToStatus(order.status, 'IN_TRANSIT');
+      if (steps.length === 0) continue;
+      let current = order.status;
+      for (const step of steps) {
+        await changeOrderStatus(order.id, step, { actor, reason, now });
+        current = step;
+      }
+      if (current === 'IN_TRANSIT') moved += 1;
+    } catch (error) {
+      console.error(`[round-close] ${order.code} замд шилжүүлж чадсангүй:`, error);
+    }
+  }
+
+  if (moved > 0) {
+    console.info(
+      `[round-close] ${moved} захиалга «Зам дээр» боллоо (тойрог ${roundId}).`,
+    );
+  }
+  return moved;
+}
+
+/** Тойрог хаагдсаны дараах стандарт үйлдэл: төлөгдөөгүйг цуцлах, төлснийг замд. */
+export async function finalizeRoundClose(roundId: string, actor: string): Promise<void> {
+  await cancelUnpaidOrdersForRound(roundId, actor);
+  await promotePaidOrdersInTransitForRound(roundId, actor);
+}
+
+/**
  * Төлвийг нэг алхам буцаана (админ санамсаргүй урагшлуулсан үед).
  * CANCELLED бол audit-аас цуцлахаас өмнөх төлөв рүү.
  */
@@ -324,7 +426,7 @@ async function batchForOrder(
   if (!batchId) return null;
 
   const batch = await tx.batch.findFirst({
-    where: { id: batchId, deletedAt: null, stage: { in: ['COLLECTING', 'CLOSED'] } },
+    where: { id: batchId, deletedAt: null, stage: 'IN_TRANSIT' },
     select: { id: true },
   });
   return batch?.id ?? null;

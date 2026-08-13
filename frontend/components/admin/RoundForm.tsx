@@ -80,7 +80,7 @@ export function RoundForm({
 
   useEffect(() => {
     void adminApi
-      .batches({ stage: "COLLECTING", pageSize: 50 })
+      .batches({ stage: "IN_TRANSIT", pageSize: 50 })
       .then((list) => setBatches(list.data))
       .catch(() => undefined);
   }, []);

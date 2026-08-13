@@ -915,7 +915,7 @@ components:
 
     BatchStage:
       type: string
-      enum: [COLLECTING, CLOSED, AT_SUPPLIER, IN_TRANSIT, AT_WAREHOUSE, DONE]
+      enum: [IN_TRANSIT, AT_WAREHOUSE, DONE]
 
     PublicCategory:
       type: object
