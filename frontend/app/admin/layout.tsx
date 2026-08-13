@@ -28,7 +28,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] 
   {
     label: "Каталог",
     items: [
-      { href: "/admin/products", label: "Барааtestt" },
+      { href: "/admin/products", label: "Бараа" },
       { href: "/admin/preorders", label: "Урьдчилсан захиалга" },
       { href: "/admin/ready", label: "Бэлэн бараа" },
       { href: "/admin/storefront", label: "Дэлгүүр" },
