@@ -54,6 +54,7 @@ function previousStatus(from: OrderStatus): OrderStatus | null {
 
 const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "BANK_TRANSFER", label: "Шилжүүлэг" },
+  { value: "QPAY", label: "QPay" },
   { value: "CASH", label: "Бэлэн" },
   { value: "CARD", label: "Карт" },
   { value: "OTHER", label: "Бусад" },

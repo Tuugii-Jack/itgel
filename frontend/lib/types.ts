@@ -36,7 +36,7 @@ export type PaymentState =
   | "REFUNDED";
 
 export type PaymentKind = "PAYMENT" | "REFUND";
-export type PaymentMethod = "BANK_TRANSFER" | "CASH" | "CARD" | "OTHER";
+export type PaymentMethod = "BANK_TRANSFER" | "CASH" | "CARD" | "QPAY" | "OTHER";
 
 export interface Payment {
   id: string;
@@ -369,12 +369,25 @@ export interface Store {
   facebookUrl: string;
   deliveryFees: { district: string; fee: number }[];
   bank: BankAccount | null;
+  /** QPay — enabled=flag, ready=credential бэлэн (код ирсний дараа). */
+  qpay: { enabled: boolean; ready: boolean };
   /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
   unpaidCancelHours: number;
   /** Агуулахад ирснээс хойш үнэгүй хадгалах хоног. */
   storageFreeDays: number;
   /** Үнэгүй хоногоос хойш хоног бүрийн хураамж ₮. 0 = унтраана. */
   storageFeePerDay: number;
+}
+
+/** QPay нэхэмжлэл — QR + банкны deeplink. */
+export interface QpayInvoice {
+  invoiceId: string;
+  qrText: string;
+  qrImage: string | null;
+  shortUrl: string | null;
+  urls: { name: string; description: string; link: string }[];
+  amount: number;
+  createdAt: string | null;
 }
 
 export interface Slot {

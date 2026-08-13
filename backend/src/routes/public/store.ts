@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../middleware/validate.js';
+import { qpayPublicStatus } from '../../services/qpay.js';
 import { districtList, getSettingsCached } from '../../services/settings.js';
 
 export const publicStoreRouter = Router();
@@ -9,6 +10,7 @@ publicStoreRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
     const settings = await getSettingsCached();
+    const qpay = qpayPublicStatus();
     res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
     res.json({
       data: {
@@ -27,6 +29,8 @@ publicStoreRouter.get(
               note: settings.paymentNote,
             }
           : null,
+        /** QPay сонголт — enabled=flag, ready=credential бэлэн. */
+        qpay,
         /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
         unpaidCancelHours: settings.unpaidCancelHours,
         /** Агуулахад ирснээс хойш үнэгүй хадгалах хоног. */

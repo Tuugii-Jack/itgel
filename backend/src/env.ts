@@ -55,6 +55,29 @@ const schema = z.object({
 
   ADMIN_EMAIL: z.string().email().default('admin@itgel.mn'),
   ADMIN_PASSWORD: z.string().default('admin123'),
+
+  /**
+   * QPay (merchant.qpay.mn v2).
+   * QPAY_ENABLED=true + username/password/invoice_code бөглөгдсөн үед идэвхжинэ.
+   * Одоогоор код байхгүй бол хоосон үлдээнэ — UI дээр «Удахгүй» харагдана.
+   */
+  QPAY_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  QPAY_BASE_URL: z.preprocess(
+    emptyToUndef,
+    z.string().url().default('https://merchant.qpay.mn/v2'),
+  ),
+  QPAY_USERNAME: z.preprocess(emptyToUndef, z.string().optional()),
+  QPAY_PASSWORD: z.preprocess(emptyToUndef, z.string().optional()),
+  /** QPay-ээс олгосон invoice_code (жишээ: ITGEL_INVOICE). */
+  QPAY_INVOICE_CODE: z.preprocess(emptyToUndef, z.string().optional()),
+  /**
+   * Callback URL — QPay төлбөр орсон үед дуудна.
+   * Жишээ: https://api.itgelshop.mn/api/orders/qpay/callback
+   */
+  QPAY_CALLBACK_URL: z.preprocess(emptyToUndef, z.string().url().optional()),
 });
 
 const parsed = schema.safeParse(process.env);

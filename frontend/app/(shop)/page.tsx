@@ -151,7 +151,7 @@ export default function HomePage() {
         <Section
           id='order'
           title='Захиалгын бараа'
-          hint='Одоо захиалж, 2-3 долоо хоногийн дараа авна'
+          hint='Одоо захиалж, ирэхэд мэдэгдэнэ'
           data={orderData}
           moreHref={
             orderData.total > ORDER_PREVIEW

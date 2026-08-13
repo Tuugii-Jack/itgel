@@ -2,8 +2,9 @@ import { PrismaClient } from '@prisma/client';
 import { isProd } from './env.js';
 
 /**
- * Serverless дээр холболт дахин дахин нээгдэхээс сэргийлнэ.
- * Vercel + Supabase pooler: connection_limit=1 зөвлөмжтэй.
+ * Serverless (Vercel): instance бүрт connection_limit=1 — pooler-ийг дүүргэхгүй.
+ * Local long-running: Promise.all + cron зэрэг query хийдэг тул жижиг pool хэрэгтэй.
+ * (limit=1 үед P2024 «Timed out fetching a new connection» гардаг.)
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -13,10 +14,10 @@ function datasourceUrl(): string | undefined {
   try {
     const u = new URL(url);
     if (!u.searchParams.has('connection_limit')) {
-      u.searchParams.set('connection_limit', '1');
+      u.searchParams.set('connection_limit', isProd ? '1' : '5');
     }
     if (!u.searchParams.has('pool_timeout')) {
-      u.searchParams.set('pool_timeout', '10');
+      u.searchParams.set('pool_timeout', isProd ? '10' : '20');
     }
     return u.toString();
   } catch {

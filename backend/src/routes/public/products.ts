@@ -14,11 +14,11 @@ export const publicProductsRouter = Router();
  * учир нь үнэ, хаах огноо, ирэх огноо нь өөр өөр.
  */
 
-/** Хэрэглэгчид харагдах төлвүүд — DRAFT, HIDDEN, ARCHIVED нуугдана. */
-const VISIBLE_STATUSES: ProductStatus[] = ['ACTIVE', 'CLOSED', 'SOLD_OUT'];
-
-/** Хаагдсан захиалгын бараа нүүрэнд хэдэн цаг үлдэх вэ. */
-const CLOSED_VISIBLE_MS = 2 * 60 * 60 * 1000;
+/**
+ * Дэлгүүрт зөвхөн идэвхтэй / дууссан (SOLD_OUT) тойрог.
+ * CLOSED — багц эсвэл гараар хаасны дараа нүүрэнд гарахгүй.
+ */
+const VISIBLE_STATUSES: ProductStatus[] = ['ACTIVE', 'SOLD_OUT'];
 
 const listQuery = z.object({
   category: z.string().min(1).optional(),
@@ -54,36 +54,15 @@ const roundInclude = {
   },
 };
 
-/** Хаагдсанаас хойш 2 цаг өнгөрсөн CLOSED тойрог — дэлгүүрээс нууна. */
-function notStaleClosed(now = new Date()): Prisma.ProductRoundWhereInput {
-  const visibleSince = new Date(now.getTime() - CLOSED_VISIBLE_MS);
-  return {
-    NOT: {
-      status: 'CLOSED',
-      OR: [{ closeAt: null }, { closeAt: { lte: visibleSince } }],
-    },
-  };
-}
-
 publicProductsRouter.get(
   '/',
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
-    const now = new Date();
 
     const where: Prisma.ProductRoundWhereInput = {
       deletedAt: null,
       status: { in: VISIBLE_STATUSES },
-      ...notStaleClosed(now),
-      // Барааг дахин гаргасан бол хуучин хаагдсан тойргийг нуумаар байдаг:
-      // эс бөгөөс нэг бараа хоёр карт болж хэрэглэгчийг эргэлзүүлнэ.
-      // Идэвхтэй тойрог огт байхгүй үед л хаагдсаныг нь харуулна.
-      OR: [
-        { status: 'ACTIVE' },
-        { product: { rounds: { none: { status: 'ACTIVE', deletedAt: null } } } },
-      ],
-      // Загвар нь устгагдсан бол тойрог нь ч харагдахгүй.
       product: {
         deletedAt: null,
         ...(q.category ? { categoryId: q.category } : {}),
@@ -128,7 +107,6 @@ publicProductsRouter.get(
         id: req.params.id,
         deletedAt: null,
         status: { in: VISIBLE_STATUSES },
-        ...notStaleClosed(),
         product: { deletedAt: null },
       },
       include: roundInclude,

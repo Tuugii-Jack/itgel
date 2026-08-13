@@ -257,11 +257,11 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
     });
 
     // Багц захиалга авахаа болиход түүнд зориулж гаргасан, идэвхтэй хэвээр
-    // байгаа тойргууд хамт хаагдана — дэлгүүрт «Захиалга хаагдсан» болно.
+    // байгаа тойргууд хамт хаагдана — дэлгүүрээс шууд нуугдана.
     if (next === 'CLOSED') {
       await tx.productRound.updateMany({
         where: { batchId: batch.id, status: 'ACTIVE', deletedAt: null },
-        data: { status: 'CLOSED' },
+        data: { status: 'CLOSED', closeAt: new Date() },
       });
     }
 

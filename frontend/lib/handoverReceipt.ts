@@ -30,7 +30,7 @@ function esc(s: string): string {
 }
 
 /**
- * Кассын жижиг (58мм) цаасанд хэвлэх хүлээлгэн өгөх баримт.
+ * 80мм кассын цаасанд хэвлэх хүлээлгэн өгөх баримт.
  * Гарын үсэг зуруулсны дараа бараа өгнө.
  */
 export function printHandoverReceipt(data: HandoverReceiptData) {
@@ -63,18 +63,21 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
   <meta charset="utf-8" />
   <title>Хүлээлгэн өгөх</title>
   <style>
+    /* 80mm thermal — printable ~72–74mm after margins */
     @page {
-      size: 58mm auto;
-      margin: 2mm;
+      size: 80mm auto;
+      margin: 3mm 4mm;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 72mm;
+      max-width: 72mm;
+    }
     body {
-      width: 58mm;
-      max-width: 58mm;
       margin: 0 auto;
-      padding: 2mm 1.5mm 4mm;
+      padding: 2mm 0 5mm;
       font-family: "Courier New", Courier, ui-monospace, monospace;
-      font-size: 11px;
+      font-size: 12px;
       line-height: 1.35;
       color: #000;
       background: #fff;
@@ -82,34 +85,52 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
       print-color-adjust: exact;
     }
     .center { text-align: center; }
-    .brand { font-size: 14px; font-weight: 700; letter-spacing: 0.04em; }
-    .title { font-size: 11px; margin-top: 2px; }
+    .brand { font-size: 16px; font-weight: 700; letter-spacing: 0.06em; }
+    .title { font-size: 12px; margin-top: 3px; font-weight: 700; }
     .dash {
       border: none;
       border-top: 1px dashed #000;
-      margin: 6px 0;
+      margin: 7px 0;
     }
     .cust { margin: 4px 0; }
-    .cust strong { font-size: 12px; }
-    .muted { font-size: 10px; }
-    .line { margin-bottom: 6px; }
-    .row { display: flex; justify-content: space-between; gap: 4px; align-items: flex-start; }
-    .name { font-weight: 700; font-size: 11px; word-break: break-word; }
-    .qty { font-weight: 700; white-space: nowrap; }
-    .sel { font-size: 10px; margin-top: 1px; }
-    .meta { font-size: 9px; opacity: 0.85; margin-top: 1px; }
-    .sum { font-size: 11px; font-weight: 700; }
+    .cust strong { font-size: 13px; }
+    .muted { font-size: 11px; }
+    .line { margin-bottom: 7px; }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      gap: 6px;
+      align-items: flex-start;
+    }
+    .name {
+      font-weight: 700;
+      font-size: 12px;
+      word-break: break-word;
+      flex: 1;
+      min-width: 0;
+    }
+    .qty { font-weight: 700; white-space: nowrap; font-size: 12px; }
+    .sel { font-size: 11px; margin-top: 1px; }
+    .meta { font-size: 10px; opacity: 0.85; margin-top: 1px; }
+    .sum { font-size: 12px; font-weight: 700; }
     .sign-box {
       margin-top: 10px;
       border: 1px dashed #000;
-      min-height: 28mm;
-      padding: 4px 6px;
+      min-height: 24mm;
+      padding: 5px 6px;
     }
-    .sign-label { font-size: 10px; margin-bottom: 4px; }
-    .sign-hint { font-size: 9px; opacity: 0.75; margin-top: 18mm; }
-    .foot { margin-top: 8px; font-size: 9px; text-align: center; }
+    .sign-label { font-size: 11px; margin-bottom: 4px; }
+    .sign-hint { font-size: 10px; opacity: 0.75; margin-top: 14mm; }
+    .foot { margin-top: 8px; font-size: 10px; text-align: center; }
     @media print {
-      html, body { width: 58mm; }
+      html, body { width: 72mm; max-width: 72mm; }
+    }
+    @media screen {
+      body {
+        border: 1px dashed #ccc;
+        padding: 4mm;
+        margin: 8px auto;
+      }
     }
   </style>
 </head>
@@ -148,7 +169,7 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
 </body>
 </html>`;
 
-  const w = window.open("", "_blank", "noopener,noreferrer,width=320,height=640");
+  const w = window.open("", "_blank", "noopener,noreferrer,width=360,height=720");
   if (!w) {
     throw new Error("Хэвлэх цонх нээгдсэнгүй. Popup зөвшөөрнө үү.");
   }

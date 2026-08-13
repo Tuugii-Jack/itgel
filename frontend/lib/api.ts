@@ -32,6 +32,7 @@ import type {
   Product,
   ProductReportRow,
   PublicOrder,
+  QpayInvoice,
   RevenueReport,
   RoundOrders,
   Settings,
@@ -299,6 +300,18 @@ export const api = {
     request<{ code: string; paymentClaimedAt: string | null }>(
       `/orders/${code}/payment-claim`,
       { method: "POST" },
+    ).then((r) => r.data),
+
+  /** QPay нэхэмжлэл үүсгэх — QR + deeplink. */
+  createQpayInvoice: (code: string) =>
+    request<QpayInvoice>(`/orders/${code}/qpay/invoice`, { method: "POST" }).then(
+      (r) => r.data,
+    ),
+
+  /** QPay төлбөрийн статус шалгах (poll). */
+  qpayStatus: (code: string) =>
+    request<{ paid: boolean; invoiceId: string | null }>(
+      `/orders/${code}/qpay/status`,
     ).then((r) => r.data),
 
   chooseFulfilment: (

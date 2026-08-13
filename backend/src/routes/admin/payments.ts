@@ -15,7 +15,7 @@ export const adminPaymentsRouter = Router({ mergeParams: true });
 
 const idParams = z.object({ id: z.string().min(1) });
 
-const methodEnum = z.enum(['BANK_TRANSFER', 'CASH', 'CARD', 'OTHER']);
+const methodEnum = z.enum(['BANK_TRANSFER', 'CASH', 'CARD', 'QPAY', 'OTHER']);
 
 /** Захиалгын төлбөрийн түүх ба одоогийн байдал. */
 adminPaymentsRouter.get(

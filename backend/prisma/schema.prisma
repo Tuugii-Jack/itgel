@@ -66,6 +66,7 @@ enum PaymentMethod {
   BANK_TRANSFER
   CASH
   CARD
+  QPAY
   OTHER
 }
 
@@ -275,6 +276,10 @@ model Order {
   /// Хэрэглэгч "мөнгө шилжүүлсэн" гэж мэдэгдсэн огноо. Админ эдгээрийг
   /// эхэнд шалгана; автомат цуцлалтад ч өртөхгүй. Төлбөр орсны баталгаа БИШ.
   paymentClaimedAt DateTime?
+
+  /// QPay нэхэмжлэлийн id — invoice үүсгэсний дараа. Төлбөр шалгах/webhook-д ашиглана.
+  qpayInvoiceId String?
+  qpayInvoiceAt DateTime?
 
   customer Customer    @relation(fields: [customerId], references: [id])
   batch    Batch?      @relation(fields: [batchId], references: [id])

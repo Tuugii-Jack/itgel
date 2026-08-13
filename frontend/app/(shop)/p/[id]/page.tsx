@@ -16,7 +16,7 @@ import {
 } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
-import { arrivalLabel, dayLabel, dayTimeLabel, money, rangeLabel } from "@/lib/format";
+import { dayTimeLabel, money } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -426,7 +426,7 @@ function FlowCard({ product }: { product: Product }) {
         ))}
       </div>
       <div className='text-[13px] text-ink-2'>
-        Огноо ойролцоо. Өөрчлөгдвөл мэдэгдэнэ.
+        Ирэх өдөр тодорхойгүй. Ирэхэд мэдэгдэнэ.
       </div>
     </div>
   );
@@ -453,13 +453,6 @@ function KeyFacts({
   return (
     <div className='lg:hidden'>
       <div className='divide-y divide-line rounded-[12px] border border-line'>
-        <Fact
-          icon='truck'
-          label='Гарт очих'
-          value={arrivalLabel(product)}
-          strong
-        />
-
         {isOrder && !closed && closeLabel && (
           <Fact
             icon='clock'
@@ -641,18 +634,19 @@ function flowSteps(
       {
         label: "Захиалга баталгаажна",
         short: "Баталгаажна",
-        value: "Тухайн өдөртөө",
+        value: "Төлбөр ормогц",
         done: true,
       },
       {
         label: "Гарт очно",
         short: "Гарт очно",
-        value: arrivalLabel(product),
+        value: "Шууд авах боломжтой",
         done: false,
       },
     ];
   }
 
+  // Ирэх өдөр тодорхойгүй тул зөвхөн хаагдах огноог харуулна.
   const steps = [
     {
       label: "Захиалга хаагдана",
@@ -663,19 +657,19 @@ function flowSteps(
     {
       label: "Нийлүүлэгч рүү явна",
       short: "Нийлүүлэгч рүү",
-      value: dayLabel(addDays(product.closeAt, 1)),
+      value: "Хаагдсаны дараа",
       at: new Date(addDays(product.closeAt, 1)).getTime(),
     },
     {
       label: "Тээвэрлэгдэнэ",
       short: "Тээвэрлэнэ",
-      value: rangeLabel(addDays(product.closeAt, 2), product.arriveFrom),
+      value: "Замдаа",
       at: new Date(product.arriveFrom).getTime(),
     },
     {
       label: "Гарт очно",
       short: "Гарт очно",
-      value: rangeLabel(product.arriveFrom, product.arriveTo),
+      value: "Ирэхэд мэдэгдэнэ",
       at: new Date(product.arriveTo).getTime(),
     },
   ];
@@ -738,7 +732,7 @@ function HowItArrives({ product }: { product: Product }) {
           </ol>
 
           <p className='m-0 text-[12px] text-muted'>
-            Огноо ойролцоо. Өөрчлөгдвөл мэдэгдэнэ.
+            Ирэх өдөр тодорхойгүй. Ирэхэд мэдэгдэнэ.
           </p>
         </div>
       </details>

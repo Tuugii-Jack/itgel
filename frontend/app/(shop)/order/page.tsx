@@ -91,7 +91,7 @@ function OrderProductsContent() {
       <div className={`${GUTTER} pt-6 lg:pt-8`}>
         <h1 className="m-0 text-[22px] font-medium lg:text-[28px]">Захиалгын бараа</h1>
         <p className="mt-1 mb-0 text-[13px] text-ink-2 lg:text-[15px]">
-          Одоо захиалж, 2-3 долоо хоногийн дараа авна
+          Одоо захиалж, ирэхэд мэдэгдэнэ
         </p>
       </div>
 

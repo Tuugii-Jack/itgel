@@ -14,7 +14,7 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "itgel — захиалгын дэлгүүр",
   description:
-    "Гадаадаас захиалгаар бараа авчирдаг дэлгүүр. Одоо захиалж, 2-3 долоо хоногийн дараа авна.",
+    "Гадаадаас захиалгаар бараа авчирдаг дэлгүүр. Одоо захиалж, ирэхэд мэдэгдэнэ.",
 };
 
 export const viewport: Viewport = {

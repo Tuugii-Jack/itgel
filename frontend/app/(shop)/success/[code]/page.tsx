@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import { PaymentPanel } from "@/components/PaymentPanel";
 import { Qr } from "@/components/Qr";
 import { Button, ErrorNote, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { money, phoneLabel, rangeLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
-import { useToast } from "@/lib/toast";
 import { usePolling } from "@/lib/usePolling";
 import type { PublicOrder, Store } from "@/lib/types";
 
@@ -96,32 +96,8 @@ function Pending({
   store: Store | null;
   onClaimed: () => void;
 }) {
-  const [claimedAt, setClaimedAt] = useState(order.paymentClaimedAt);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const toast = useToast();
-  const bank = store?.bank ?? null;
-
-  const claim = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.claimPayment(order.code);
-      setClaimedAt(result.paymentClaimedAt);
-      toast.success("Шилжүүлсэн гэж мэдэгдлээ.");
-      onClaimed();
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Мэдэгдэж чадсангүй.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="px-4 pt-8 lg:mx-auto lg:max-w-[1000px] lg:px-10">
-      {/* Laptop дээр гарчиг зүүн зэрэгцээ, мобайл дээр төвд */}
       <div className="flex flex-col items-center gap-3 lg:items-start lg:gap-2">
         <div className="flex items-center gap-2 lg:gap-2.5">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#B45309" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
@@ -131,112 +107,41 @@ function Pending({
           <span className="text-[17px] text-warn lg:text-[20px]">Төлбөр хүлээгдэж байна</span>
         </div>
         <p className="m-0 max-w-[300px] text-center text-[15px] leading-[1.6] text-ink-2 lg:max-w-[560px] lg:text-left">
-          {bank
-            ? "Доорх дансанд шилжүүлнэ үү. Гүйлгээг баталгаажуулсны дараа захиалга баталгаажна."
-            : "Дансны мэдээллийг авахаар бидэнтэй холбогдоно уу."}
+          Дансаар шилжүүлэх эсвэл QPay сонгоно уу. Гүйлгээг баталгаажуулсны дараа захиалга
+          баталгаажна.
         </p>
       </div>
 
       <div className="mt-5 flex flex-col gap-5 lg:mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8">
         <div className="flex flex-col gap-5">
-      {/* Дансны карт */}
-      <div className="overflow-hidden rounded-[12px] border border-line">
-        <div className="flex flex-col gap-3 p-4 lg:gap-4 lg:p-6">
-          <div className="flex items-baseline justify-between gap-3 lg:gap-4">
-            <span className="text-[13px] text-muted lg:text-[14px]">Шилжүүлэх дүн</span>
-            <span className="tnum text-[24px] font-medium lg:text-[32px]">
-              {money(order.dueAmount)}
-            </span>
-          </div>
-          {bank && (
-            <>
-              <div className="h-px bg-line" />
-              {/* Laptop дээр 2×2 сүлжээ — дизайны байрлал */}
-              <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4">
-                {bank.name && <BankRow label="Банк" value={bank.name} />}
-                <BankRow label="Дансны дугаар" value={bank.accountNumber} tnum />
-                {bank.accountName && <BankRow label="Хүлээн авагч" value={bank.accountName} />}
-                <BankRow label="Валют" value="MNT" />
-              </div>
-            </>
+          {store ? (
+            <PaymentPanel order={order} store={store} onClaimed={onClaimed} />
+          ) : (
+            <Skeleton className="h-56 w-full rounded-[12px]" />
           )}
-          {!bank && store && (
-            <>
-              <div className="h-px bg-line" />
-              <BankRow label="Утас" value={store.phone} tnum />
-            </>
-          )}
-        </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-3.5 lg:px-6 lg:py-4">
-          <div className="min-w-0">
-            <div className="text-[13px] text-muted">Гүйлгээний утга</div>
-            <div className="tnum text-[18px] font-medium tracking-[0.02em] lg:text-[20px]">
-              {order.code}
-            </div>
+          <div className="hidden rounded-[12px] border border-line p-5 lg:block">
+            <div className="mb-3 text-[15px] font-medium">Захиалгын хураангуй</div>
+            <OrderSummary order={order} />
           </div>
-          <CopyButton value={order.code} />
-        </div>
-      </div>
-
-      <div className="rounded-[12px] border border-warn-bd bg-warn-bg p-3.5 text-[14px] leading-[1.6] text-warn lg:px-5 lg:py-4">
-        Гүйлгээний утгад захиалгын кодоо заавал бичнэ үү.
-        {store && store.unpaidCancelHours > 0 && (
-          <>
-            {" "}
-            <span className="tnum">{store.unpaidCancelHours}</span> цагийн дотор шилжүүлээгүй бол
-            захиалга цуцлагдана.
-          </>
-        )}
-      </div>
-
-      {/* Laptop дээр захиалгын хураангуй энд, мобайл дээр хэрэггүй */}
-      <div className="hidden rounded-[12px] border border-line p-5 lg:block">
-        <div className="mb-3 text-[15px] font-medium">Захиалгын хураангуй</div>
-        <OrderSummary order={order} />
-      </div>
         </div>
 
         <div className="flex flex-col gap-4 lg:sticky lg:top-6">
-      {claimedAt ? (
-        <div className="flex items-center gap-3 rounded-[12px] border border-line bg-surface p-4">
-          <span className="size-2.5 shrink-0 rounded-full bg-warn" />
-          <div className="min-w-0 flex-1">
-            <div className="text-[14px]">Шилжүүлэг шалгагдаж байна</div>
-            <div className="text-[13px] text-ink-2">Админ гүйлгээг шалгаад баталгаажуулна</div>
+          <div className="flex flex-col items-center gap-3 pt-1 lg:pt-0">
+            <Link href={`/t/${order.code}`} className="w-full no-underline">
+              <Button full size="bar" variant="outline">
+                Захиалгаа хянах
+              </Button>
+            </Link>
+            {store && (
+              <p className="m-0 text-center text-[13px] text-ink-2">
+                Асуух зүйл байвал{" "}
+                <a href={`tel:${store.phone.replace(/\D/g, "")}`} className="tnum">
+                  {store.phone}
+                </a>
+              </p>
+            )}
           </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3 rounded-[12px] border border-line bg-surface p-4">
-          <div>
-            <div className="text-[15px] font-medium">Шилжүүлэгээ хийсэн үү?</div>
-            <div className="mt-0.5 text-[13px] leading-[1.5] text-ink-2">
-              Мэдэгдвэл админ дарааллын эхэнд шалгана
-            </div>
-          </div>
-          <Button full onClick={claim} loading={busy}>
-            Шилжүүлсэн гэж мэдэгдэх
-          </Button>
-        </div>
-      )}
-
-      {error && <ErrorNote>{error}</ErrorNote>}
-
-      <div className="flex flex-col items-center gap-3 pt-1 lg:pt-0">
-        <Link href={`/t/${order.code}`} className="w-full no-underline">
-          <Button full size="bar" variant="outline">
-            Захиалгаа хянах
-          </Button>
-        </Link>
-        {store && (
-          <p className="m-0 text-center text-[13px] text-ink-2">
-            Асуух зүйл байвал{" "}
-            <a href={`tel:${store.phone.replace(/\D/g, "")}`} className="tnum">
-              {store.phone}
-            </a>
-          </p>
-        )}
-      </div>
         </div>
       </div>
     </div>
@@ -273,15 +178,6 @@ function OrderSummary({ order }: { order: PublicOrder }) {
           {money(order.dueAmount > 0 ? order.subtotal : order.paidAmount - order.refundedAmount)}
         </span>
       </div>
-    </div>
-  );
-}
-
-function BankRow({ label, value, tnum }: { label: string; value: string; tnum?: boolean }) {
-  return (
-    <div className="flex justify-between gap-3">
-      <span className="text-[14px] text-muted">{label}</span>
-      <span className={`text-[14px] ${tnum ? "tnum" : ""}`}>{value}</span>
     </div>
   );
 }
