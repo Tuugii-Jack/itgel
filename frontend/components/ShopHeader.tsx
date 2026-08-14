@@ -47,7 +47,7 @@ export function ShopHeader() {
           </span>
 
           <span className='flex items-center gap-1 text-[10px] font-medium text-ink-2 sm:gap-1.5 sm:text-[11px] lg:text-[12.5px] xl:text-[13px]'>
-            Үйлдвэрийн үнээр
+            Захиалгын бараа
           </span>
         </span>
       </Link>
