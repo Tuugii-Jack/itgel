@@ -35,6 +35,8 @@ import type {
   QpayInvoice,
   RevenueReport,
   RoundOrders,
+  OrdersByProductDate,
+  OrdersByProductRow,
   Settings,
   Slot,
   Store,
@@ -652,6 +654,15 @@ export const adminApi = {
   /** Шүүлт/сонголтын дагуу дэлгэрэнгүй захиалга (Excel, хэвлэх). */
   exportOrders: (query?: Query) =>
     request<AdminOrderDetail[]>("/admin/orders/export", { ...adminAuth, query }),
+
+  ordersByProduct: (query?: Query) =>
+    request<OrdersByProductRow[]>("/admin/orders/by-product", { ...adminAuth, query }),
+
+  ordersByProductDates: (closed?: "all" | "open" | "closed") =>
+    request<OrdersByProductDate[]>("/admin/orders/by-product/dates", {
+      ...adminAuth,
+      query: { closed },
+    }).then((r) => r.data),
 
   order: (id: string) =>
     request<AdminOrderDetail>(`/admin/orders/${id}`, adminAuth).then((r) => r.data),

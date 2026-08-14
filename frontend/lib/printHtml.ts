@@ -4,12 +4,17 @@
  * Brave: `about:blank` + document.write / 0×0 iframe ихэвчлэн цагаан хоосон гарна.
  * Blob URL + шинэ цонх (noopener биш) ашиглана. Popup хаагдвал iframe.
  */
-export function printHtml(html: string): void {
+export function printHtml(
+  html: string,
+  size?: { width?: number; height?: number },
+): void {
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
+  const width = size?.width ?? 420;
+  const height = size?.height ?? 720;
 
   // noopener хэрэглэхгүй — reference null болж хоосон цагаан таб үлдэнэ.
-  const w = window.open(url, "_blank", "width=420,height=720");
+  const w = window.open(url, "_blank", `width=${width},height=${height}`);
   if (!w) {
     printViaIframe(url);
     return;

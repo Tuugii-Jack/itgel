@@ -81,6 +81,82 @@ export function formatSelectionsLabel(selections: Record<string, string>): strin
   return entries.map(([k, v]) => `${k}: ${v}`).join(' · ');
 }
 
+const KIND_PRIORITY = ['Хэмжээ', 'SIZE', 'Өнгө', 'COLOR'];
+
+export type VariantTally = {
+  selections: Record<string, string>;
+  size: string | null;
+  color: string | null;
+  qty: number;
+};
+
+export type KindTally = {
+  kind: string;
+  rows: { value: string; qty: number }[];
+};
+
+/** Захиалгын мөрийг сонголт болон бүлэг (хэмжээ/өнгө) бүрээр нэгтгэнэ. */
+export function tallyVariants(
+  rows: {
+    selections: Record<string, string>;
+    size?: string | null;
+    color?: string | null;
+    qty: number;
+  }[],
+): { byVariant: VariantTally[]; byKind: KindTally[] } {
+  const variantMap = new Map<string, VariantTally>();
+  const kindMap = new Map<string, Map<string, number>>();
+
+  const addKind = (kind: string, value: string, qty: number) => {
+    if (!kind || !value) return;
+    const inner = kindMap.get(kind) ?? new Map<string, number>();
+    inner.set(value, (inner.get(value) ?? 0) + qty);
+    kindMap.set(kind, inner);
+  };
+
+  for (const row of rows) {
+    const { size, color } = sizeColorFromSelections(row.selections);
+    const resolvedSize = size ?? row.size ?? null;
+    const resolvedColor = color ?? row.color ?? null;
+    const key = variantKey(row.selections);
+    const entry =
+      variantMap.get(key) ??
+      ({
+        selections: row.selections,
+        size: resolvedSize,
+        color: resolvedColor,
+        qty: 0,
+      } satisfies VariantTally);
+    entry.qty += row.qty;
+    variantMap.set(key, entry);
+
+    const entries = Object.entries(row.selections);
+    if (entries.length > 0) {
+      for (const [kind, value] of entries) addKind(kind, value, row.qty);
+    } else {
+      if (resolvedSize) addKind('Хэмжээ', resolvedSize, row.qty);
+      if (resolvedColor) addKind('Өнгө', resolvedColor, row.qty);
+    }
+  }
+
+  const kindRank = (kind: string) => {
+    const i = KIND_PRIORITY.indexOf(kind);
+    return i === -1 ? KIND_PRIORITY.length : i;
+  };
+
+  return {
+    byVariant: [...variantMap.values()].sort((a, b) => b.qty - a.qty),
+    byKind: [...kindMap.entries()]
+      .sort((a, b) => kindRank(a[0]) - kindRank(b[0]) || a[0].localeCompare(b[0], 'mn'))
+      .map(([kind, values]) => ({
+        kind,
+        rows: [...values.entries()]
+          .map(([value, qty]) => ({ value, qty }))
+          .sort((a, b) => b.qty - a.qty || a.value.localeCompare(b.value, 'mn')),
+      })),
+  };
+}
+
 /** Админ хадгалахад — бүлэг бүрийн утгуудыг ProductVariant мөр болгоно. */
 export function variantRowsFromOptions(options: ProductOption[]) {
   const rows: { kind: string; value: string; sortOrder: number }[] = [];

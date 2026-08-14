@@ -171,7 +171,7 @@ export interface RoundBuyer {
   dueAmount: number;
   paymentClaimedAt: string | null;
   createdAt: string;
-  customer: { id: string; name: string | null; phone: string };
+  customer: { id: string; name: string | null; phone: string | null; email?: string | null };
   selections: Record<string, string>;
   size: string | null;
   color: string | null;
@@ -192,6 +192,10 @@ export interface RoundOrders {
     costPrice: number;
     status: ProductStatus;
     closeAt: string | null;
+    createdAt?: string;
+    closed?: boolean;
+    daysOpen?: number | null;
+    daysSinceClose?: number | null;
   };
   summary: {
     customerCount: number;
@@ -209,8 +213,45 @@ export interface RoundOrders {
       color: string | null;
       qty: number;
     }[];
+    /** Хэмжээ, өнгө гэх мэт бүлэг бүрээр. */
+    byKind?: { kind: string; rows: { value: string; qty: number }[] }[];
   };
   orders: RoundBuyer[];
+}
+
+/** GET /admin/orders/by-product — захиалгыг бараагаар. */
+export interface OrdersByProductRow {
+  roundId: string;
+  roundNo: number;
+  productId: string;
+  name: string;
+  image: string | null;
+  status: ProductStatus;
+  closed: boolean;
+  closeAt: string | null;
+  createdAt: string;
+  daysOpen: number | null;
+  daysSinceClose: number | null;
+  sellPrice: number;
+  customerCount: number;
+  orderCount: number;
+  qty: number;
+  revenue: number;
+  byKind: { kind: string; rows: { value: string; qty: number }[] }[];
+  byVariant: {
+    selections: Record<string, string>;
+    size: string | null;
+    color: string | null;
+    qty: number;
+  }[];
+}
+
+export interface OrdersByProductDate {
+  date: string;
+  year: number;
+  month: number;
+  day: number;
+  count: number;
 }
 
 /**

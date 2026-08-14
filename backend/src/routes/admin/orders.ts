@@ -24,6 +24,7 @@ import {
   publicDelivery,
 } from '../../services/serialize.js';
 import { syncOrderStorageFee } from '../../services/storageFee.js';
+import { listOrdersByProduct, ordersByProductDates } from '../../services/ordersByProduct.js';
 
 export const adminOrdersRouter = Router();
 
@@ -212,6 +213,90 @@ adminOrdersRouter.get(
       data: sorted.map((order) => adminOrderDetail(order)),
       meta: { total: sorted.length, limit: q.limit },
     });
+  }),
+);
+
+const byProductQuery = z
+  .object({
+    closed: z.enum(['all', 'open', 'closed']).default('all'),
+    year: z.coerce.number().int().min(2020).max(2100).optional(),
+    month: z.coerce.number().int().min(1).max(12).optional(),
+    /** Нэг өдөр — хуучин клиент. */
+    day: z.coerce.number().int().min(1).max(31).optional(),
+    /** Олон өдөр — «1,5,14». */
+    days: z
+      .string()
+      .trim()
+      .regex(/^(\d{1,2})(,\d{1,2}){0,30}$/, 'Өдөр буруу байна.')
+      .optional(),
+    q: z.string().trim().min(1).max(80).optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .superRefine((body, ctx) => {
+    const hasDays = body.days !== undefined || body.day !== undefined;
+    if ((body.month !== undefined || hasDays) && body.year === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Он сонгоно уу.',
+        path: ['year'],
+      });
+    }
+    if (hasDays && body.month === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Сар сонгоно уу.',
+        path: ['month'],
+      });
+    }
+  });
+
+/**
+ * GET /orders/by-product — захиалгыг бараа/гаргалтаар. `/:id`-ээс өмнө.
+ */
+adminOrdersRouter.get(
+  '/by-product',
+  validate({ query: byProductQuery }),
+  asyncHandler(async (req, res) => {
+    const q = query<z.infer<typeof byProductQuery>>(req);
+    const days = q.days
+      ? [...new Set(q.days.split(',').map((s) => Number(s.trim())))].filter(
+          (n) => Number.isInteger(n) && n >= 1 && n <= 31,
+        )
+      : q.day
+        ? [q.day]
+        : [];
+    const result = await listOrdersByProduct({
+      closed: q.closed,
+      year: q.year,
+      month: q.month,
+      days,
+      q: q.q,
+      page: q.page,
+      pageSize: q.pageSize,
+    });
+    res.json({
+      data: result.rows,
+      meta: {
+        total: result.total,
+        page: result.page,
+        pageSize: result.pageSize,
+        pages: Math.ceil(result.total / result.pageSize),
+      },
+    });
+  }),
+);
+
+adminOrdersRouter.get(
+  '/by-product/dates',
+  validate({
+    query: z.object({
+      closed: z.enum(['all', 'open', 'closed']).default('all'),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const q = query<{ closed: 'all' | 'open' | 'closed' }>(req);
+    res.json({ data: await ordersByProductDates(q.closed) });
   }),
 );
 

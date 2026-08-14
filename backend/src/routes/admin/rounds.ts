@@ -16,9 +16,9 @@ import {
 import { finalizeRoundClose } from '../../services/orders.js';
 import { adminRound } from '../../services/serialize.js';
 import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
-import { selectionsOf, sizeColorFromSelections } from '../../lib/options.js';
+import { selectionsOf, sizeColorFromSelections, tallyVariants } from '../../lib/options.js';
+import { computeArrival, diffUbDays } from '../../lib/date.js';
 import { productStatus, roundFields } from './products.js';
-import { computeArrival } from '../../lib/date.js';
 
 /**
  * Барааны тойрог — үнэ, хаах огноо, үлдэгдэл, төлөв нь энд байна.
@@ -100,6 +100,7 @@ adminRoundsRouter.get(
           id: item.order.customer.id,
           name: item.order.customer.name,
           phone: item.order.customer.phone,
+          email: item.order.customer.email,
         },
         selections,
         size: size ?? item.size,
@@ -113,24 +114,10 @@ adminRoundsRouter.get(
     });
 
     const live = rows.filter((r) => !r.cancelled);
-
-    // Сонголтоор задаргаа — нийлүүлэгч рүү явуулах жагсаалт.
-    const variantMap = new Map<
-      string,
-      { selections: Record<string, string>; size: string | null; color: string | null; qty: number }
-    >();
-    for (const row of live) {
-      const key = JSON.stringify(row.selections);
-      const entry =
-        variantMap.get(key) ?? {
-          selections: row.selections,
-          size: row.size,
-          color: row.color,
-          qty: 0,
-        };
-      entry.qty += row.qty;
-      variantMap.set(key, entry);
-    }
+    const tallied = tallyVariants(live);
+    const now = new Date();
+    const closed =
+      round.status === 'CLOSED' || (round.closeAt !== null && round.closeAt <= now);
 
     const byStatus: Record<string, number> = {};
     for (const row of live) byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
@@ -150,6 +137,14 @@ adminRoundsRouter.get(
           costPrice: round.costPrice,
           status: round.status,
           closeAt: round.closeAt?.toISOString() ?? null,
+          createdAt: round.createdAt.toISOString(),
+          closed,
+          daysOpen:
+            round.closeAt !== null
+              ? Math.max(0, diffUbDays(round.closeAt, round.createdAt))
+              : null,
+          daysSinceClose:
+            closed && round.closeAt ? Math.max(0, diffUbDays(now, round.closeAt)) : null,
         },
         summary: {
           customerCount: new Set(live.map((r) => r.customer.id)).size,
@@ -157,11 +152,11 @@ adminRoundsRouter.get(
           qty: live.reduce((sum, r) => sum + r.qty, 0),
           revenue: live.reduce((sum, r) => sum + r.total, 0),
           profit: profitOf(liveItems),
-          /** Мөнгө нь ороогүй захиалгын тоо — эдгээр эргэлзээтэй. */
           unpaidCount: live.filter((r) => r.dueAmount > 0).length,
           cancelledCount: rows.length - live.length,
           byStatus,
-          byVariant: [...variantMap.values()].sort((a, b) => b.qty - a.qty),
+          byVariant: tallied.byVariant,
+          byKind: tallied.byKind,
         },
         orders: rows,
       },

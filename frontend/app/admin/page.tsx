@@ -260,6 +260,12 @@ export default function AdminOrdersPage() {
             >
               {selected.size > 0 ? `Excel (${selected.size})` : "Excel"}
             </Button>
+            <Link
+              href="/admin/orders/by-product"
+              className="inline-flex h-9 items-center rounded-[8px] border border-line bg-bg px-3 text-[13px] text-ink"
+            >
+              Бараагаар
+            </Link>
             {!showDeleted && (
               <Link
                 href="/admin/orders/new"

@@ -4,9 +4,16 @@ import { useCallback, useEffect, useState } from "react";
 import { Metric, OrderBadge, PageHead, Table, Td, Th } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { dayLabel, dayTimeLabel, money, phoneLabel } from "@/lib/format";
+import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
+import {
+  closeHint,
+  DEFAULT_PRODUCT_PRINT,
+  printProductOrders,
+  roundOrdersToPrintProduct,
+  type ProductPrintOptions,
+} from "@/lib/roundPrint";
 import type { RoundOrders } from "@/lib/types";
 
 /**
@@ -28,6 +35,8 @@ export function RoundBuyers({
   const [data, setData] = useState<RoundOrders | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [printOpts, setPrintOpts] = useState<ProductPrintOptions>(DEFAULT_PRODUCT_PRINT);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -72,20 +81,102 @@ export function RoundBuyers({
   const { round, summary, orders } = data;
   const live = orders.filter((o) => !o.cancelled);
   const cancelled = orders.filter((o) => o.cancelled);
+  const closed = round.closed ?? round.status === "CLOSED";
 
   return (
     <div className="max-w-[1000px]">
       <PageHead
         title={round.name}
-        hint={`#${round.roundNo} гаргалт · ${money(round.sellPrice)}${
-          round.closeAt ? ` · ${dayTimeLabel(round.closeAt)}-нд хаагдана` : " · бэлэн бараа"
-        }`}
+        hint={`#${round.roundNo} гаргалт · ${money(round.sellPrice)} · ${closeHint({
+          closed,
+          closeAt: round.closeAt,
+          daysOpen: round.daysOpen ?? null,
+          daysSinceClose: round.daysSinceClose ?? null,
+        })}`}
         actions={
-          <Button variant="ghost" onClick={onClose}>
-            Буцах
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPrintOpen((v) => !v)}>
+              Хэвлэх
+            </Button>
+            <Button variant="ghost" onClick={onClose}>
+              Буцах
+            </Button>
+          </div>
         }
       />
+
+      {printOpen && (
+        <Card className="mb-5 flex flex-col gap-3 p-4">
+          <div className="text-[14px] font-medium">Хэвлэх сонголт</div>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={printOpts.customers}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setPrintOpts((o) => ({
+                    ...o,
+                    customers: v,
+                    phone: v ? o.phone : false,
+                    code: v ? o.code : false,
+                  }));
+                }}
+              />
+              Худалдан авагчид
+            </label>
+            <label
+              className={`flex items-center gap-2 text-[13px] ${printOpts.customers ? "cursor-pointer" : "cursor-not-allowed text-muted"}`}
+            >
+              <input
+                type="checkbox"
+                checked={printOpts.phone}
+                disabled={!printOpts.customers}
+                onChange={(e) => setPrintOpts((o) => ({ ...o, phone: e.target.checked }))}
+              />
+              Утас
+            </label>
+            <label
+              className={`flex items-center gap-2 text-[13px] ${printOpts.customers ? "cursor-pointer" : "cursor-not-allowed text-muted"}`}
+            >
+              <input
+                type="checkbox"
+                checked={printOpts.code}
+                disabled={!printOpts.customers}
+                onChange={(e) => setPrintOpts((o) => ({ ...o, code: e.target.checked }))}
+              />
+              Захиалгын код
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-[13px]">
+              <input
+                type="checkbox"
+                checked={printOpts.amounts}
+                onChange={(e) => setPrintOpts((o) => ({ ...o, amounts: e.target.checked }))}
+              />
+              Үнэ
+            </label>
+          </div>
+          <div>
+            <Button
+              size="sm"
+              onClick={() =>
+                printProductOrders([roundOrdersToPrintProduct(data)], printOpts, {
+                  title: data.round.name,
+                  hint: closeHint({
+                    closed,
+                    closeAt: round.closeAt,
+                    daysOpen: round.daysOpen ?? null,
+                    daysSinceClose: round.daysSinceClose ?? null,
+                  }),
+                  countLabel: `${summary.qty} ш`,
+                })
+              }
+            >
+              Хэвлэх
+            </Button>
+          </div>
+        </Card>
+      )}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Хэдэн хүн авсан" value={summary.customerCount} />
@@ -111,6 +202,26 @@ export function RoundBuyers({
             </div>
             <span className="tnum text-[20px] font-medium">{summary.qty} ш</span>
           </div>
+          {(summary.byKind ?? []).length > 0 && (
+            <div className="mb-4 flex flex-col gap-3">
+              {summary.byKind!.map((kind) => (
+                <div key={kind.kind}>
+                  <div className="mb-1.5 text-[13px] text-ink-2">{kind.kind}</div>
+                  <div className="flex flex-wrap gap-2">
+                    {kind.rows.map((row) => (
+                      <div
+                        key={row.value}
+                        className="flex items-baseline gap-2 rounded-[8px] border border-line bg-surface px-3 py-2"
+                      >
+                        <span className="text-[14px]">{row.value}</span>
+                        <span className="tnum text-[15px] font-medium">{row.qty} ш</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {summary.byVariant.map((v, i) => (
               <div

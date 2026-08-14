@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Spinner } from "@/components/ui";
 import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 
@@ -17,6 +17,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] 
     items: [
       { href: "/admin", label: "Захиалга" },
       { href: "/admin/orders/new", label: "Захиалга оруулах" },
+      { href: "/admin/orders/by-product", label: "Бараагаар" },
       { href: "/admin/handover", label: "Хүлээлгэн өгөх" },
       { href: "/admin/deliveries", label: "Хүргэлт" },
     ],
@@ -65,32 +66,77 @@ function isActive(pathname: string, href: string): boolean {
   return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
 }
 
+function groupHasActive(
+  pathname: string,
+  items: { href: string; label: string }[],
+): boolean {
+  return items.some((item) => isActive(pathname, item.href));
+}
+
 function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+  const activeGroup =
+    NAV_GROUPS.find((group) => groupHasActive(pathname, group.items))?.label ?? null;
+  const [open, setOpen] = useState<string | null>(activeGroup);
+
+  useEffect(() => {
+    if (activeGroup) setOpen(activeGroup);
+  }, [activeGroup]);
+
   return (
-    <nav className="flex flex-col gap-4">
-      {NAV_GROUPS.map((group) => (
-        <div key={group.label}>
-          <div className="mb-1 px-3 text-[11px] font-medium tracking-wide text-muted uppercase">
-            {group.label}
+    <nav className="flex flex-col gap-0.5">
+      {NAV_GROUPS.map((group) => {
+        const expanded = open === group.label;
+        const current = groupHasActive(pathname, group.items);
+        return (
+          <div key={group.label}>
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setOpen((prev) => (prev === group.label ? null : group.label))}
+              className={`flex h-10 w-full cursor-pointer items-center justify-between rounded-[8px] border-0 px-3 text-left text-[14px] transition-colors
+                ${
+                  current
+                    ? "bg-surface-2 font-medium text-ink"
+                    : "bg-transparent text-ink-2 hover:bg-surface-2 hover:text-ink"
+                }`}
+            >
+              {group.label}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className={`shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`}
+                aria-hidden
+              >
+                <path d="M3 5.5 7 9.5 11 5.5" />
+              </svg>
+            </button>
+            {expanded && (
+              <div className="mt-0.5 mb-1 flex flex-col gap-0.5 pl-2">
+                {group.items.map((item) => {
+                  const active = isActive(pathname, item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={onNavigate}
+                      className={`rounded-[8px] px-3 py-2 text-[14px] no-underline transition-colors
+                        ${active ? "bg-ink font-medium text-white" : "text-ink-2 hover:bg-surface-2 hover:text-ink"}`}
+                    >
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </div>
-          <div className="flex flex-col gap-0.5">
-            {group.items.map((item) => {
-              const active = isActive(pathname, item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onNavigate}
-                  className={`rounded-[8px] px-3 py-2 text-[14px] no-underline transition-colors
-                    ${active ? "bg-ink font-medium text-white" : "text-ink-2 hover:bg-surface-2"}`}
-                >
-                  {item.label}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </nav>
   );
 }
