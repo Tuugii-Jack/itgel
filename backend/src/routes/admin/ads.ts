@@ -1,11 +1,11 @@
-import { Router } from 'express';
+import { Router, raw as rawBody } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
-import { notFound } from '../../lib/errors.js';
+import { badRequest, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
-import { presignAdImage } from '../../services/storage.js';
+import { presignAdImage, uploadAdImage } from '../../services/storage.js';
 
 export const adminAdsRouter = Router();
 
@@ -123,6 +123,34 @@ adminAdsRouter.delete(
     });
 
     res.json({ data: { id: deleted.id, deletedAt: deleted.deletedAt?.toISOString() ?? null } });
+  }),
+);
+
+const imageUploadBody = rawBody({
+  type: (req) => {
+    const t = req.headers['content-type'] ?? '';
+    return t.startsWith('image/') || t.startsWith('application/octet-stream');
+  },
+  limit: '5mb',
+});
+
+/** POST /:id/image/upload — серверээр дамжуулж байршуулна (R2 CORS шаардлагагүй). */
+adminAdsRouter.post(
+  '/:id/image/upload',
+  imageUploadBody,
+  validate({ params: idParams }),
+  asyncHandler(async (req, res) => {
+    const ad = await prisma.ad.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+    });
+    if (!ad) throw notFound('Зар олдсонгүй.');
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      throw badRequest('Зураг файл илгээнэ үү.');
+    }
+
+    const contentType = String(req.headers['content-type'] ?? 'application/octet-stream');
+    const stored = await uploadAdImage(ad.id, contentType, req.body);
+    res.json({ data: stored });
   }),
 );
 

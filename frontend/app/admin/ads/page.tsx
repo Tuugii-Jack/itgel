@@ -14,7 +14,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { fileToWebp } from "@/lib/imageUpload";
+import { IMAGE_SIZE_HINT, assertImageUnderLimit, prepareAdminImage } from "@/lib/imageUpload";
 import { useToast } from "@/lib/toast";
 import type { AdminAd } from "@/lib/types";
 
@@ -203,17 +203,12 @@ function AdForm({
         setDraftId(adId);
       }
 
-      const webp = await fileToWebp(file, { maxEdge: 2400, quality: 0.85 });
-      const presigned = await adminApi.presignAdImage(adId, webp.type);
-      const res = await fetch(presigned.uploadUrl, {
-        method: "PUT",
-        headers: presigned.headers,
-        body: webp,
-      });
-      if (!res.ok) throw new Error("Зураг байршуулж чадсангүй.");
+      const webp = await prepareAdminImage(file, { maxEdge: 2400, quality: 0.85 });
+      assertImageUnderLimit(webp);
+      const stored = await adminApi.uploadAdImage(adId, webp);
 
-      setImageUrl(presigned.publicUrl);
-      await adminApi.updateAd(adId, { imageUrl: presigned.publicUrl });
+      setImageUrl(stored.publicUrl);
+      await adminApi.updateAd(adId, { imageUrl: stored.publicUrl });
       onError(null);
     } catch (e) {
       onError(e instanceof ApiError ? e.message : e instanceof Error ? e.message : "Зураг байршуулж чадсангүй.");
@@ -317,7 +312,7 @@ function AdForm({
               {uploading ? "Байршуулж байна…" : imageUrl ? "Зураг солих" : "Зураг сонгох"}
             </Button>
             <p className="m-0 text-[12px] text-muted">
-              Дурын зураг → WebP. Зөвлөмж: 1200×400px (3:1)
+              Дурын зураг → WebP. {IMAGE_SIZE_HINT} Зөвлөмж: 1200×400px (3:1)
             </p>
           </div>
         </div>

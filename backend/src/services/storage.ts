@@ -25,6 +25,12 @@ export interface PresignedUpload {
   provider: StorageProvider;
 }
 
+export interface StoredObject {
+  publicUrl: string;
+  key: string;
+  provider: StorageProvider;
+}
+
 const r2Configured = Boolean(env.R2_BUCKET && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY);
 
 const r2 = r2Configured
@@ -69,32 +75,77 @@ function r2PublicUrl(key: string): string {
   return `https://${env.R2_BUCKET}.s3.${env.R2_REGION}.amazonaws.com/${key}`; // AWS S3 fallback
 }
 
-/**
- * Барааны зураг байршуулах presigned URL.
- * Клиент `uploadUrl` руу `headers`-тэйгээ PUT хийж, дараа нь
- * `PATCH /admin/products/:id/images`-ээр `publicUrl`-г бүртгэнэ.
- */
-export async function presignProductImage(
-  productId: string,
-  contentType: string,
-): Promise<PresignedUpload> {
-  if (!ALLOWED_MIME.has(contentType)) {
+export function normalizeImageContentType(contentType: string): string {
+  const mime = contentType.split(';')[0]!.trim().toLowerCase();
+  if (!ALLOWED_MIME.has(mime)) {
     throw badRequest(`Зөвхөн зураг байршуулна: ${[...ALLOWED_MIME].join(', ')}`);
   }
+  return mime;
+}
 
-  const key = `products/${productId}/${randomUUID()}.${EXT[contentType]}`;
+function objectKey(folder: string, id: string, contentType: string): string {
+  return `${folder}/${id}/${randomUUID()}.${EXT[contentType]}`;
+}
+
+function publicUrlFor(provider: StorageProvider, key: string, placeholder: string): string {
+  if (provider === 'r2') return r2PublicUrl(key);
+  if (provider === 'supabase') {
+    return supabase!.storage.from(env.SUPABASE_STORAGE_BUCKET).getPublicUrl(key).data.publicUrl;
+  }
+  return placeholder;
+}
+
+async function putBytes(key: string, contentType: string, body: Buffer): Promise<StoredObject> {
+  if (!body.length) throw badRequest('Хоосон файл илгээсэн байна.');
+
   const provider = pickProvider();
+
+  if (provider === 'r2') {
+    await r2!.send(
+      new PutObjectCommand({
+        Bucket: env.R2_BUCKET!,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+      }),
+    );
+    return { publicUrl: r2PublicUrl(key), key, provider };
+  }
+
+  if (provider === 'supabase') {
+    const bucket = supabase!.storage.from(env.SUPABASE_STORAGE_BUCKET);
+    const { error } = await bucket.upload(key, body, { contentType, upsert: false });
+    if (error) {
+      throw new AppError(502, 'STORAGE_ERROR', `Supabase storage алдаа: ${error.message}`);
+    }
+    return { publicUrl: bucket.getPublicUrl(key).data.publicUrl, key, provider };
+  }
+
+  return {
+    publicUrl: `https://placehold.co/800x800?text=${encodeURIComponent(key.split('/')[0] ?? 'image')}`,
+    key,
+    provider: 'mock',
+  };
+}
+
+async function presignPut(key: string, contentType: string, placeholder: string): Promise<PresignedUpload> {
+  const provider = pickProvider();
+  const publicUrl = publicUrlFor(provider, key, placeholder);
 
   if (provider === 'r2') {
     const expiresInSec = 600;
     const uploadUrl = await getSignedUrl(
       r2!,
       new PutObjectCommand({ Bucket: env.R2_BUCKET!, Key: key, ContentType: contentType }),
-      { expiresIn: expiresInSec },
+      {
+        expiresIn: expiresInSec,
+        // Browser PUT зөвхөн Content-Type илгээдэг — нэмэлт checksum header гарын үсгийг эвдэнэ.
+        signableHeaders: new Set(['host', 'content-type']),
+      },
     );
     return {
       uploadUrl,
-      publicUrl: r2PublicUrl(key),
+      publicUrl,
       key,
       expiresInSec,
       method: 'PUT',
@@ -111,7 +162,7 @@ export async function presignProductImage(
     }
     return {
       uploadUrl: data.signedUrl,
-      publicUrl: bucket.getPublicUrl(key).data.publicUrl,
+      publicUrl,
       key,
       // Supabase-ийн signed upload URL 2 цагийн хүчинтэй.
       expiresInSec: 2 * 60 * 60,
@@ -124,7 +175,7 @@ export async function presignProductImage(
   // Storage тохируулаагүй dev орчинд flow тасрахгүй байх үүднээс.
   return {
     uploadUrl: `mock://upload/${key}`,
-    publicUrl: `https://placehold.co/800x800?text=${encodeURIComponent(productId)}`,
+    publicUrl,
     key,
     expiresInSec: 600,
     method: 'PUT',
@@ -133,59 +184,40 @@ export async function presignProductImage(
   };
 }
 
+/**
+ * Барааны зураг байршуулах presigned URL.
+ * Клиент `uploadUrl` руу `headers`-тэйгээ PUT хийж, дараа нь
+ * `PATCH /admin/products/:id/images`-ээр `publicUrl`-г бүртгэнэ.
+ */
+export async function presignProductImage(
+  productId: string,
+  contentType: string,
+): Promise<PresignedUpload> {
+  const mime = normalizeImageContentType(contentType);
+  const key = objectKey('products', productId, mime);
+  return presignPut(key, mime, `https://placehold.co/800x800?text=${encodeURIComponent(productId)}`);
+}
+
 /** Зар сурталчилгааны баннер байршуулах presigned URL. */
 export async function presignAdImage(adId: string, contentType: string): Promise<PresignedUpload> {
-  if (!ALLOWED_MIME.has(contentType)) {
-    throw badRequest(`Зөвхөн зураг байршуулна: ${[...ALLOWED_MIME].join(', ')}`);
-  }
+  const mime = normalizeImageContentType(contentType);
+  const key = objectKey('ads', adId, mime);
+  return presignPut(key, mime, `https://placehold.co/1200x400?text=${encodeURIComponent('Ad')}`);
+}
 
-  const key = `ads/${adId}/${randomUUID()}.${EXT[contentType]}`;
-  const provider = pickProvider();
+/** Сервер өөрөө storage руу PUT хийнэ — браузерын CORS шаардлагагүй. */
+export async function uploadProductImage(
+  productId: string,
+  contentType: string,
+  body: Buffer,
+): Promise<StoredObject> {
+  const mime = normalizeImageContentType(contentType);
+  return putBytes(objectKey('products', productId, mime), mime, body);
+}
 
-  if (provider === 'r2') {
-    const expiresInSec = 600;
-    const uploadUrl = await getSignedUrl(
-      r2!,
-      new PutObjectCommand({ Bucket: env.R2_BUCKET!, Key: key, ContentType: contentType }),
-      { expiresIn: expiresInSec },
-    );
-    return {
-      uploadUrl,
-      publicUrl: r2PublicUrl(key),
-      key,
-      expiresInSec,
-      method: 'PUT',
-      headers: { 'content-type': contentType },
-      provider,
-    };
-  }
-
-  if (provider === 'supabase') {
-    const bucket = supabase!.storage.from(env.SUPABASE_STORAGE_BUCKET);
-    const { data, error } = await bucket.createSignedUploadUrl(key);
-    if (error || !data) {
-      throw new AppError(502, 'STORAGE_ERROR', `Supabase storage алдаа: ${error?.message ?? 'тодорхойгүй'}`);
-    }
-    return {
-      uploadUrl: data.signedUrl,
-      publicUrl: bucket.getPublicUrl(key).data.publicUrl,
-      key,
-      expiresInSec: 2 * 60 * 60,
-      method: 'PUT',
-      headers: { 'content-type': contentType },
-      provider,
-    };
-  }
-
-  return {
-    uploadUrl: `mock://upload/${key}`,
-    publicUrl: `https://placehold.co/1200x400?text=${encodeURIComponent('Ad')}`,
-    key,
-    expiresInSec: 600,
-    method: 'PUT',
-    headers: { 'content-type': contentType },
-    provider: 'mock',
-  };
+export async function uploadAdImage(adId: string, contentType: string, body: Buffer): Promise<StoredObject> {
+  const mime = normalizeImageContentType(contentType);
+  return putBytes(objectKey('ads', adId, mime), mime, body);
 }
 
 export const storageConfigured = r2Configured || Boolean(supabase);

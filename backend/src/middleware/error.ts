@@ -22,6 +22,18 @@ export function errorHandler(
     return;
   }
 
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    (error as { status?: number }).status === 413
+  ) {
+    res.status(413).json({
+      error: { code: 'PAYLOAD_TOO_LARGE', message: 'Зураг хэт том байна (дээд тал нь 5MB).' },
+    });
+    return;
+  }
+
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === 'P2025') {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Олдсонгүй.' } });

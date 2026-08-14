@@ -116,6 +116,32 @@ interface RequestOptions {
   cache?: RequestCache;
 }
 
+async function parseEnvelope<T>(res: Response): Promise<Envelope<T>> {
+  const text = await res.text();
+  let json: Record<string, unknown> = {};
+  if (text) {
+    try {
+      json = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      json = {};
+    }
+  }
+
+  if (!res.ok) {
+    const error = json.error as
+      | { code?: string; message?: string; details?: unknown }
+      | undefined;
+    throw new ApiError(
+      res.status,
+      error?.code ?? "ERROR",
+      error?.message ?? "Алдаа гарлаа.",
+      error?.details,
+    );
+  }
+
+  return json as unknown as Envelope<T>;
+}
+
 async function request<T>(
   path: string,
   options: RequestOptions = {},
@@ -144,22 +170,34 @@ async function request<T>(
     );
   }
 
-  const text = await res.text();
-  const json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  return parseEnvelope<T>(res);
+}
 
-  if (!res.ok) {
-    const error = json.error as
-      | { code?: string; message?: string; details?: unknown }
-      | undefined;
+/** Админ зураг — JSON биш, түүхий файл илгээнэ. */
+async function uploadBinary<T>(path: string, file: Blob): Promise<Envelope<T>> {
+  const headers: Record<string, string> = {
+    "content-type": file.type || "application/octet-stream",
+  };
+  const token = readToken("admin");
+  if (token) headers.authorization = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers,
+      body: file,
+      cache: "no-store",
+    });
+  } catch {
     throw new ApiError(
-      res.status,
-      error?.code ?? "ERROR",
-      error?.message ?? "Алдаа гарлаа.",
-      error?.details,
+      0,
+      "NETWORK",
+      "Сервертэй холбогдож чадсангүй. Интернэтээ шалгана уу.",
     );
   }
 
-  return json as unknown as Envelope<T>;
+  return parseEnvelope<T>(res);
 }
 
 /** Токен хүчингүй болсон эсэх — дахин нэвтрүүлэхэд ашиглана. */
@@ -512,6 +550,12 @@ export const adminApi = {
       body: { contentType },
     }).then((r) => r.data),
 
+  uploadImage: (id: string, file: Blob) =>
+    uploadBinary<{ publicUrl: string; key: string }>(
+      `/admin/products/${id}/images/upload`,
+      file,
+    ).then((r) => r.data),
+
   saveImages: (id: string, images: string[]) =>
     request<{ images: string[] }>(`/admin/products/${id}/images`, {
       ...adminAuth,
@@ -587,6 +631,12 @@ export const adminApi = {
       method: "POST",
       body: { contentType },
     }).then((r) => r.data),
+
+  uploadAdImage: (id: string, file: Blob) =>
+    uploadBinary<{ publicUrl: string; key: string }>(
+      `/admin/ads/${id}/image/upload`,
+      file,
+    ).then((r) => r.data),
 
   orders: (query?: Query) =>
     request<AdminOrderRow[]>("/admin/orders", { ...adminAuth, query }),

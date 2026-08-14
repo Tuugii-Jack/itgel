@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, raw as rawBody } from 'express';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
@@ -10,7 +10,7 @@ import { variantRowsFromOptions, type ProductOption } from '../../lib/options.js
 import { roundStats } from '../../services/roundStats.js';
 import { adminProduct } from '../../services/serialize.js';
 import { getSettings } from '../../services/settings.js';
-import { presignProductImage } from '../../services/storage.js';
+import { presignProductImage, uploadProductImage } from '../../services/storage.js';
 
 export const adminProductsRouter = Router();
 
@@ -404,6 +404,35 @@ adminProductsRouter.post(
     });
 
     res.json({ data: { deleted } });
+  }),
+);
+
+const imageUploadBody = rawBody({
+  type: (req) => {
+    const t = req.headers['content-type'] ?? '';
+    return t.startsWith('image/') || t.startsWith('application/octet-stream');
+  },
+  limit: '5mb',
+});
+
+/** POST /:id/images/upload — серверээр дамжуулж байршуулна (R2 CORS шаардлагагүй). */
+adminProductsRouter.post(
+  '/:id/images/upload',
+  imageUploadBody,
+  validate({ params: idParams }),
+  asyncHandler(async (req, res) => {
+    const product = await prisma.product.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+    });
+    if (!product) throw notFound('Бараа олдсонгүй.');
+    if (product.images.length >= 12) throw conflict('Нэг бараанд дээд тал нь 12 зураг.');
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+      throw badRequest('Зураг файл илгээнэ үү.');
+    }
+
+    const contentType = String(req.headers['content-type'] ?? 'application/octet-stream');
+    const stored = await uploadProductImage(product.id, contentType, req.body);
+    res.json({ data: stored });
   }),
 );
 

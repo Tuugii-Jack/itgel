@@ -3,6 +3,17 @@
 const DEFAULT_QUALITY = 0.85;
 /** Хамгийн урт тал — том зургийг багасна. */
 const MAX_EDGE = 2400;
+const PASSTHROUGH = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+export const IMAGE_MAX_MB = 5;
+export const IMAGE_MAX_BYTES = IMAGE_MAX_MB * 1024 * 1024;
+
+export const IMAGE_SIZE_HINT = `Файл ${IMAGE_MAX_MB}MB-аас бага байх ёстой.`;
+
+export function assertImageUnderLimit(file: File): void {
+  if (file.size > IMAGE_MAX_BYTES) {
+    throw new Error(IMAGE_SIZE_HINT);
+  }
+}
 
 export async function fileToWebp(
   file: File,
@@ -81,4 +92,19 @@ function canvasToWebp(canvas: HTMLCanvasElement, quality: number): Promise<Blob>
       quality,
     );
   });
+}
+
+/** WebP болгож чадахгүй бол эх файлыг (JPEG/PNG) хэвээр илгээнэ. */
+export async function prepareAdminImage(
+  file: File,
+  options?: { quality?: number; maxEdge?: number },
+): Promise<File> {
+  try {
+    return await fileToWebp(file, options);
+  } catch (error) {
+    if (PASSTHROUGH.has(file.type) && file.size > 0 && file.size <= IMAGE_MAX_BYTES) {
+      return file;
+    }
+    throw error instanceof Error ? error : new Error("Зургийг уншиж чадсангүй.");
+  }
 }

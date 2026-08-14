@@ -13,7 +13,7 @@ import {
   Textarea,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { fileToWebp } from "@/lib/imageUpload";
+import { IMAGE_SIZE_HINT, assertImageUnderLimit, prepareAdminImage } from "@/lib/imageUpload";
 import { OPTION_PRESETS } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminCategory, AdminProduct, ProductOption, SizeChartRow } from "@/lib/types";
@@ -142,15 +142,10 @@ export function ProductForm({
       let next = [...images];
       let ok = 0;
       for (const file of batch) {
-        const webp = await fileToWebp(file);
-        const presigned = await adminApi.presignImage(id, webp.type);
-        const res = await fetch(presigned.uploadUrl, {
-          method: "PUT",
-          headers: presigned.headers,
-          body: webp,
-        });
-        if (!res.ok) throw new Error(`Байршуулалт амжилтгүй (${res.status})`);
-        next = [...next, presigned.publicUrl];
+        const webp = await prepareAdminImage(file);
+        assertImageUnderLimit(webp);
+        const stored = await adminApi.uploadImage(id, webp);
+        next = [...next, stored.publicUrl];
         setImages(next);
         ok += 1;
       }
@@ -388,7 +383,7 @@ export function ProductForm({
                 ? "Зураг нэмэхийн тулд ангилал сонгоно уу."
                 : images.length >= 12
                   ? "Дээд тал нь 12 зураг."
-                  : "Олон зураг сонгож болно → автоматаар WebP."}
+                  : `Олон зураг сонгож болно → автоматаар WebP. ${IMAGE_SIZE_HINT}`}
             </p>
           </div>
         </Card>
