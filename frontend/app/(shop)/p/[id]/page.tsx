@@ -134,7 +134,7 @@ export default function ProductPage({
         </nav>
 
         <div className='grid gap-6 pt-4 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:items-start lg:gap-10 lg:pt-6'>
-          <div>
+          <div className="min-w-0">
             <ProductGallery
               images={product.images}
               alt={product.name}

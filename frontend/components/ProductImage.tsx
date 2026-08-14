@@ -24,14 +24,22 @@ export function ProductImage({
     return <ImagePlaceholder className={className} />;
   }
 
+  const classes = [
+    className,
+    "bg-surface",
+    className.includes("object-") ? "" : "object-cover",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
       alt={alt}
-      loading="lazy"
+      loading='lazy'
       onError={() => setFailedSrc(src)}
-      className={`${className} bg-surface object-cover`}
+      className={classes}
     />
   );
 }
