@@ -223,6 +223,12 @@ model Customer {
   notifyArrival Boolean @default(true)
   notifyPromo   Boolean @default(false)
 
+  /// Төлбөрийн данс / шилжүүлгийн сонголт.
+  bankName          String  @default("")
+  bankAccountNumber String  @default("")
+  bankAccountName   String  @default("")
+  defaultPayoutBank Boolean @default(false)
+
   orders Order[]
 }
 

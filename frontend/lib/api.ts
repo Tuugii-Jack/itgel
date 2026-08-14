@@ -89,7 +89,10 @@ export function readToken(kind: keyof typeof TOKEN_KEYS): string | null {
 
 function syncAdminSessionCookie(token: string | null): void {
   if (typeof document === "undefined") return;
-  const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
+  const secure =
+    typeof window !== "undefined" && window.location.protocol === "https:"
+      ? "; Secure"
+      : "";
   if (token) {
     // 30 хоног — JWT-ийн хугацаатай ойролцоо; гарахад cookie арилна.
     document.cookie = `${ADMIN_SESSION_COOKIE}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax${secure}`;
@@ -161,7 +164,8 @@ async function request<T>(
     res = await fetch(`${API_BASE}${path}${qs(options.query)}`, {
       method: options.method ?? "GET",
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      body:
+        options.body === undefined ? undefined : JSON.stringify(options.body),
       cache: options.cache ?? "no-store",
     });
   } catch {
@@ -242,12 +246,19 @@ export const api = {
     }>("/auth/otp", { method: "POST", body: { phone } }).then((r) => r.data),
 
   verifyOtp: (phone: string, code: string, name?: string) =>
-    request<{ token: string; customer: { id: string; phone: string; name: string | null } }>(
-      "/auth/verify",
-      { method: "POST", body: { phone, code, name } },
-    ).then((r) => r.data),
+    request<{
+      token: string;
+      customer: { id: string; phone: string; name: string | null };
+    }>("/auth/verify", { method: "POST", body: { phone, code, name } }).then(
+      (r) => r.data,
+    ),
 
-  register: (body: { email: string; password: string; name?: string; phone: string }) =>
+  register: (body: {
+    email: string;
+    password: string;
+    name?: string;
+    phone: string;
+  }) =>
     request<{
       token: string;
       customer: {
@@ -271,7 +282,9 @@ export const api = {
         emailVerified: boolean;
         hasPassword: boolean;
       };
-    }>("/auth/login", { method: "POST", body: { login, password } }).then((r) => r.data),
+    }>("/auth/login", { method: "POST", body: { login, password } }).then(
+      (r) => r.data,
+    ),
 
   verifyEmail: (email: string, code: string) =>
     request<{
@@ -284,7 +297,9 @@ export const api = {
         emailVerified: boolean;
         hasPassword: boolean;
       };
-    }>("/auth/email/verify", { method: "POST", body: { email, code } }).then((r) => r.data),
+    }>("/auth/email/verify", { method: "POST", body: { email, code } }).then(
+      (r) => r.data,
+    ),
 
   resendEmailCode: (email: string) =>
     request<{
@@ -292,7 +307,9 @@ export const api = {
       expiresInSec: number;
       resendAfterSec: number;
       devCode?: string;
-    }>("/auth/email/resend", { method: "POST", body: { email } }).then((r) => r.data),
+    }>("/auth/email/resend", { method: "POST", body: { email } }).then(
+      (r) => r.data,
+    ),
 
   forgotPassword: (email: string) =>
     request<{
@@ -301,7 +318,9 @@ export const api = {
       resendAfterSec: number;
       message?: string;
       devCode?: string;
-    }>("/auth/password/forgot", { method: "POST", body: { email } }).then((r) => r.data),
+    }>("/auth/password/forgot", { method: "POST", body: { email } }).then(
+      (r) => r.data,
+    ),
 
   resetPassword: (email: string, code: string, password: string) =>
     request<{
@@ -314,9 +333,10 @@ export const api = {
         emailVerified: boolean;
         hasPassword: boolean;
       };
-    }>("/auth/password/reset", { method: "POST", body: { email, code, password } }).then(
-      (r) => r.data,
-    ),
+    }>("/auth/password/reset", {
+      method: "POST",
+      body: { email, code, password },
+    }).then((r) => r.data),
 
   createOrder: (body: {
     name?: string;
@@ -329,9 +349,11 @@ export const api = {
       color?: string;
     }[];
   }) =>
-    request<CreatedOrder>("/orders", { method: "POST", body, auth: "customer" }).then(
-      (r) => r.data,
-    ),
+    request<CreatedOrder>("/orders", {
+      method: "POST",
+      body,
+      auth: "customer",
+    }).then((r) => r.data),
 
   order: (code: string) =>
     request<PublicOrder>(`/orders/${code}`).then((r) => r.data),
@@ -348,9 +370,9 @@ export const api = {
 
   /** QPay нэхэмжлэл үүсгэх — QR + deeplink. */
   createQpayInvoice: (code: string) =>
-    request<QpayInvoice>(`/orders/${code}/qpay/invoice`, { method: "POST" }).then(
-      (r) => r.data,
-    ),
+    request<QpayInvoice>(`/orders/${code}/qpay/invoice`, {
+      method: "POST",
+    }).then((r) => r.data),
 
   /** Манай дэвтэр — QPay-г poll хийхгүй. */
   qpayStatus: (code: string) =>
@@ -383,20 +405,28 @@ export const api = {
       deliveryFee: number;
       dueAmount: number;
       delivery: PublicOrder["delivery"];
-    }>(`/orders/${code}/fulfilment`, { method: "POST", body }).then((r) => r.data),
+    }>(`/orders/${code}/fulfilment`, { method: "POST", body }).then(
+      (r) => r.data,
+    ),
 
   me: () => request<Me>("/me", { auth: "customer" }).then((r) => r.data),
 
-  updateMe: (body: Partial<{
-    name: string | null;
-    phone: string | null;
-    district: string | null;
-    khoroo: string | null;
-    addressText: string | null;
-    notifyPayment: boolean;
-    notifyArrival: boolean;
-    notifyPromo: boolean;
-  }>) =>
+  updateMe: (
+    body: Partial<{
+      name: string | null;
+      phone: string | null;
+      district: string | null;
+      khoroo: string | null;
+      addressText: string | null;
+      notifyPayment: boolean;
+      notifyArrival: boolean;
+      notifyPromo: boolean;
+      bankName: string | null;
+      bankAccountNumber: string | null;
+      bankAccountName: string | null;
+      defaultPayoutBank: boolean;
+    }>,
+  ) =>
     request<Me>("/me", { method: "PATCH", body, auth: "customer" }).then(
       (r) => r.data,
     ),
@@ -422,7 +452,9 @@ export const api = {
     }).then((r) => r.data),
 
   myOrders: () =>
-    request<MyOrder[]>("/me/orders", { auth: "customer" }) as unknown as Promise<{
+    request<MyOrder[]>("/me/orders", {
+      auth: "customer",
+    }) as unknown as Promise<{
       data: MyOrder[];
       meta: PageMeta & { totalSpent: number; activeCount: number };
     }>,
@@ -455,13 +487,17 @@ export const adminApi = {
     }).then((r) => r.data),
 
   summary: () =>
-    request<AdminSummary>("/admin/reports/summary", adminAuth).then((r) => r.data),
+    request<AdminSummary>("/admin/reports/summary", adminAuth).then(
+      (r) => r.data,
+    ),
 
   products: (query?: Query) =>
     request<AdminProduct[]>("/admin/products", { ...adminAuth, query }),
 
   product: (id: string) =>
-    request<AdminProduct>(`/admin/products/${id}`, adminAuth).then((r) => r.data),
+    request<AdminProduct>(`/admin/products/${id}`, adminAuth).then(
+      (r) => r.data,
+    ),
 
   createProduct: (body: unknown) =>
     request<AdminProduct>("/admin/products", {
@@ -506,7 +542,12 @@ export const adminApi = {
       status?: string;
       note?: string;
       batchId?: string | null;
-      optionPrices?: { kind: string; value: string; sellPrice: number; costPrice?: number }[];
+      optionPrices?: {
+        kind: string;
+        value: string;
+        sellPrice: number;
+        costPrice?: number;
+      }[];
     },
   ) =>
     request<AdminProduct>(`/admin/products/${productId}/rounds`, {
@@ -527,7 +568,12 @@ export const adminApi = {
       status: string;
       note: string | null;
       batchId: string | null;
-      optionPrices: { kind: string; value: string; sellPrice: number; costPrice?: number }[];
+      optionPrices: {
+        kind: string;
+        value: string;
+        sellPrice: number;
+        costPrice?: number;
+      }[];
     }>,
   ) =>
     request<AdminRound>(`/admin/rounds/${roundId}`, {
@@ -538,7 +584,9 @@ export const adminApi = {
 
   /** Энэ гаргалтыг хэн хэн авсан бэ — хураангуй, хэмжээний задаргаатай. */
   roundOrders: (roundId: string) =>
-    request<RoundOrders>(`/admin/rounds/${roundId}/orders`, adminAuth).then((r) => r.data),
+    request<RoundOrders>(`/admin/rounds/${roundId}/orders`, adminAuth).then(
+      (r) => r.data,
+    ),
 
   deleteRound: (roundId: string) =>
     request<{ id: string }>(`/admin/rounds/${roundId}`, {
@@ -581,16 +629,25 @@ export const adminApi = {
     }).then((r) => r.data),
 
   categories: () =>
-    request<AdminCategory[]>("/admin/categories", adminAuth).then((r) => r.data),
+    request<AdminCategory[]>("/admin/categories", adminAuth).then(
+      (r) => r.data,
+    ),
 
-  createCategory: (body: { name: string; isActive?: boolean; sortOrder?: number }) =>
+  createCategory: (body: {
+    name: string;
+    isActive?: boolean;
+    sortOrder?: number;
+  }) =>
     request<AdminCategory>("/admin/categories", {
       ...adminAuth,
       method: "POST",
       body,
     }).then((r) => r.data),
 
-  updateCategory: (id: string, body: Partial<{ name: string; isActive: boolean; sortOrder: number }>) =>
+  updateCategory: (
+    id: string,
+    body: Partial<{ name: string; isActive: boolean; sortOrder: number }>,
+  ) =>
     request<AdminCategory>(`/admin/categories/${id}`, {
       ...adminAuth,
       method: "PATCH",
@@ -660,10 +717,16 @@ export const adminApi = {
 
   /** Шүүлт/сонголтын дагуу дэлгэрэнгүй захиалга (Excel, хэвлэх). */
   exportOrders: (query?: Query) =>
-    request<AdminOrderDetail[]>("/admin/orders/export", { ...adminAuth, query }),
+    request<AdminOrderDetail[]>("/admin/orders/export", {
+      ...adminAuth,
+      query,
+    }),
 
   ordersByProduct: (query?: Query) =>
-    request<OrdersByProductRow[]>("/admin/orders/by-product", { ...adminAuth, query }),
+    request<OrdersByProductRow[]>("/admin/orders/by-product", {
+      ...adminAuth,
+      query,
+    }),
 
   ordersByProductDates: (closed?: "all" | "open" | "closed") =>
     request<OrdersByProductDate[]>("/admin/orders/by-product/dates", {
@@ -672,7 +735,9 @@ export const adminApi = {
     }).then((r) => r.data),
 
   order: (id: string) =>
-    request<AdminOrderDetail>(`/admin/orders/${id}`, adminAuth).then((r) => r.data),
+    request<AdminOrderDetail>(`/admin/orders/${id}`, adminAuth).then(
+      (r) => r.data,
+    ),
 
   createOrder: (body: {
     customerId?: string;
@@ -696,7 +761,12 @@ export const adminApi = {
       body,
     }).then((r) => r.data),
 
-  setOrderStatus: (id: string, status: string, reason?: string, force?: boolean) =>
+  setOrderStatus: (
+    id: string,
+    status: string,
+    reason?: string,
+    force?: boolean,
+  ) =>
     request<AdminOrderDetail>(`/admin/orders/${id}/status`, {
       ...adminAuth,
       method: "PATCH",
@@ -733,7 +803,12 @@ export const adminApi = {
 
   recordPayment: (
     orderId: string,
-    body: { amount: number; method?: PaymentMethod; reference?: string; note?: string },
+    body: {
+      amount: number;
+      method?: PaymentMethod;
+      reference?: string;
+      note?: string;
+    },
   ) =>
     request<{ payment: Payment; totals: OrderTotals }>(
       `/admin/orders/${orderId}/payments`,
@@ -742,7 +817,12 @@ export const adminApi = {
 
   recordRefund: (
     orderId: string,
-    body: { amount: number; method?: PaymentMethod; reference?: string; note?: string },
+    body: {
+      amount: number;
+      method?: PaymentMethod;
+      reference?: string;
+      note?: string;
+    },
   ) =>
     request<{ payment: Payment; totals: OrderTotals }>(
       `/admin/orders/${orderId}/payments/refunds`,
@@ -763,7 +843,9 @@ export const adminApi = {
     request<AdminBatch[]>("/admin/batches", { ...adminAuth, query }),
 
   batch: (id: string) =>
-    request<AdminBatchDetail>(`/admin/batches/${id}`, adminAuth).then((r) => r.data),
+    request<AdminBatchDetail>(`/admin/batches/${id}`, adminAuth).then(
+      (r) => r.data,
+    ),
 
   createBatch: (body: {
     name: string;
@@ -773,9 +855,11 @@ export const adminApi = {
     etaFrom?: string;
     etaTo?: string;
   }) =>
-    request<AdminBatch>("/admin/batches", { ...adminAuth, method: "POST", body }).then(
-      (r) => r.data,
-    ),
+    request<AdminBatch>("/admin/batches", {
+      ...adminAuth,
+      method: "POST",
+      body,
+    }).then((r) => r.data),
 
   updateBatch: (
     id: string,
@@ -794,15 +878,22 @@ export const adminApi = {
     }).then((r) => r.data),
 
   advanceBatch: (id: string) =>
-    request<AdminBatch & { ordersMoved: number }>(`/admin/batches/${id}/advance`, {
-      ...adminAuth,
-      method: "POST",
-    }).then((r) => r.data),
+    request<AdminBatch & { ordersMoved: number }>(
+      `/admin/batches/${id}/advance`,
+      {
+        ...adminAuth,
+        method: "POST",
+      },
+    ).then((r) => r.data),
 
   /** Сонголт бүрийн ирсэн нийт тоог тавина (засаж болно). */
   registerBatchArrivals: (
     batchId: string,
-    lines: { roundId: string; selections: Record<string, string>; arrivedQty: number }[],
+    lines: {
+      roundId: string;
+      selections: Record<string, string>;
+      arrivedQty: number;
+    }[],
   ) =>
     request<{
       allocated: number;
@@ -817,12 +908,18 @@ export const adminApi = {
     }).then((r) => r.data),
 
   revertBatchStage: (id: string) =>
-    request<AdminBatch & { ordersMoved: number }>(`/admin/batches/${id}/stage/revert`, {
-      ...adminAuth,
-      method: "POST",
-    }).then((r) => r.data),
+    request<AdminBatch & { ordersMoved: number }>(
+      `/admin/batches/${id}/stage/revert`,
+      {
+        ...adminAuth,
+        method: "POST",
+      },
+    ).then((r) => r.data),
 
-  updateBatchOrders: (id: string, body: { add?: string[]; remove?: string[] }) =>
+  updateBatchOrders: (
+    id: string,
+    body: { add?: string[]; remove?: string[] },
+  ) =>
     request<{ added: number; removed: number }>(`/admin/batches/${id}/orders`, {
       ...adminAuth,
       method: "POST",
@@ -840,16 +937,22 @@ export const adminApi = {
     ).then((r) => r.data),
 
   omitBatchOrder: (batchId: string, orderId: string) =>
-    request<{ omitted: boolean }>(`/admin/batches/${batchId}/orders/${orderId}/omit`, {
-      ...adminAuth,
-      method: "POST",
-    }).then((r) => r.data),
+    request<{ omitted: boolean }>(
+      `/admin/batches/${batchId}/orders/${orderId}/omit`,
+      {
+        ...adminAuth,
+        method: "POST",
+      },
+    ).then((r) => r.data),
 
   reinstateBatchOrder: (batchId: string, orderId: string) =>
-    request<{ reinstated: boolean }>(`/admin/batches/${batchId}/orders/${orderId}/reinstate`, {
-      ...adminAuth,
-      method: "POST",
-    }).then((r) => r.data),
+    request<{ reinstated: boolean }>(
+      `/admin/batches/${batchId}/orders/${orderId}/reinstate`,
+      {
+        ...adminAuth,
+        method: "POST",
+      },
+    ).then((r) => r.data),
 
   /** Багцад нэмэх боломжтой хаагдсан гаргалтын сарууд. */
   batchEligibleMonths: () =>
@@ -870,11 +973,14 @@ export const adminApi = {
     batchId: string,
     body: { roundId?: string; roundIds?: string[] },
   ) =>
-    request<BatchProduct | BatchProduct[]>(`/admin/batches/${batchId}/products`, {
-      ...adminAuth,
-      method: "POST",
-      body,
-    }).then((r) => r.data),
+    request<BatchProduct | BatchProduct[]>(
+      `/admin/batches/${batchId}/products`,
+      {
+        ...adminAuth,
+        method: "POST",
+        body,
+      },
+    ).then((r) => r.data),
 
   /** Багцаас бараа салгах — захиалгатай бол зөвхөн unlink. */
   removeBatchProduct: (batchId: string, roundId: string) =>
@@ -893,7 +999,9 @@ export const adminApi = {
         blockReason: string | null;
         pickableItemIds?: string[];
       }
-    >("/admin/handover/lookup", { ...adminAuth, query: { code } }).then((r) => r.data),
+    >("/admin/handover/lookup", { ...adminAuth, query: { code } }).then(
+      (r) => r.data,
+    ),
 
   handoverCustomer: (q: string) =>
     request<HandoverCustomer[]>("/admin/handover/customer", {
@@ -916,7 +1024,10 @@ export const adminApi = {
       body,
     }).then((r) => r.data),
 
-  handoverComplete: (orderId: string, body?: { collectedAmount?: number; note?: string }) =>
+  handoverComplete: (
+    orderId: string,
+    body?: { collectedAmount?: number; note?: string },
+  ) =>
     request<AdminOrderDetail>(`/admin/handover/${orderId}/complete`, {
       ...adminAuth,
       method: "POST",
@@ -928,7 +1039,10 @@ export const adminApi = {
       (r) => r.data,
     ),
 
-  updateDelivery: (id: string, body: Partial<{ courierName: string | null; status: string }>) =>
+  updateDelivery: (
+    id: string,
+    body: Partial<{ courierName: string | null; status: string }>,
+  ) =>
     request<unknown>(`/admin/deliveries/${id}`, {
       ...adminAuth,
       method: "PATCH",
@@ -1008,24 +1122,28 @@ export const adminApi = {
     }).then((r) => r.data),
 
   archiveDay: (date: string) =>
-    request<ArchiveDay>("/admin/archive/day", { ...adminAuth, query: { date } }).then(
-      (r) => r.data,
-    ),
+    request<ArchiveDay>("/admin/archive/day", {
+      ...adminAuth,
+      query: { date },
+    }).then((r) => r.data),
 
   archiveProduct: (productId: string) =>
-    request<ArchiveProduct>(`/admin/archive/product/${productId}`, adminAuth).then(
-      (r) => r.data,
-    ),
+    request<ArchiveProduct>(
+      `/admin/archive/product/${productId}`,
+      adminAuth,
+    ).then((r) => r.data),
 
   archiveCustomer: (customerId: string) =>
-    request<ArchiveCustomer>(`/admin/archive/customer/${customerId}`, adminAuth).then(
-      (r) => r.data,
-    ),
+    request<ArchiveCustomer>(
+      `/admin/archive/customer/${customerId}`,
+      adminAuth,
+    ).then((r) => r.data),
 
   archiveSearch: (q: string) =>
-    request<ArchiveSearch>("/admin/archive/search", { ...adminAuth, query: { q } }).then(
-      (r) => r.data,
-    ),
+    request<ArchiveSearch>("/admin/archive/search", {
+      ...adminAuth,
+      query: { q },
+    }).then((r) => r.data),
 
   settings: () =>
     request<Settings>("/admin/settings", adminAuth).then((r) => r.data),
