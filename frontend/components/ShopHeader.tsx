@@ -28,10 +28,9 @@ export function ShopHeader() {
       <Link
         href='/'
         aria-label='Итгэл - Үндсэн хуудас'
-        className='group flex shrink-0 items-center gap-3 no-underline lg:gap-3.5'
+        className='group flex shrink-0 items-center gap-1.5 no-underline lg:gap-2'
       >
         <span className='relative flex h-12 w-12 shrink-0 items-center justify-center rounded-[12px] transition-transform duration-300 ease-out group-hover:scale-105 sm:h-14 sm:w-14 lg:h-16 lg:w-16 xl:h-[68px] xl:w-[68px]'>
-          {/* <span className='relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] transition-transform duration-300 ease-out group-hover:scale-105 lg:h-12 lg:w-12 xl:h-14 xl:w-14'> */}
           <Image
             src='/logo.webp'
             alt={store?.storeName ?? "Итгэл"}
@@ -44,11 +43,11 @@ export function ShopHeader() {
 
         <span className='flex flex-col justify-center leading-tight'>
           <span className='text-[20px] font-extrabold tracking-tight text-[#2a2a65] transition-colors duration-300 group-hover:text-primary lg:text-[24px] xl:text-[26px]'>
-            Итгэл шоп
+            Итгэл
           </span>
 
           <span className='flex items-center gap-1 text-[10px] font-medium text-ink-2 sm:gap-1.5 sm:text-[11px] lg:text-[12.5px] xl:text-[13px]'>
-            Үйлдвэрийн үнээр
+            Захиалгын бараа
           </span>
         </span>
       </Link>
