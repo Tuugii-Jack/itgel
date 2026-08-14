@@ -15,6 +15,11 @@ export const metadata: Metadata = {
   title: "itgel — захиалгын дэлгүүр",
   description:
     "Гадаадаас захиалгаар бараа авчирдаг дэлгүүр. Одоо захиалж, ирэхэд мэдэгдэнэ.",
+  icons: {
+    icon: "/logo.png",
+    shortcut: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export const viewport: Viewport = {
@@ -25,7 +30,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="mn" className={inter.variable}>
+    <html lang='mn' className={inter.variable}>
       <body>
         <ToastProvider>{children}</ToastProvider>
       </body>

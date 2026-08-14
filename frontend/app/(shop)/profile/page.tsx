@@ -138,12 +138,6 @@ function Profile() {
           </div>
 
           <div className='hidden lg:block lg:h-px lg:bg-line' />
-          <div className='hidden lg:flex lg:items-baseline lg:justify-between lg:gap-3'>
-            <span className='text-[13px] text-muted'>Нийт төлсөн</span>
-            <span className='tnum text-[17px] font-medium'>
-              {money(totals.totalSpent)}
-            </span>
-          </div>
 
           <div className='lg:hidden'>
             <Button variant='ghost' size='sm' onClick={session.signOut}>
@@ -425,8 +419,6 @@ function PaymentsTab({
             </Field>
           </div>
         </div>
-
-       
 
         <div className='mt-4 flex items-center justify-between gap-3'>
           <span className='text-[12px] text-muted'>
