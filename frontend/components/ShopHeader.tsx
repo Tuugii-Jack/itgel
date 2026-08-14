@@ -41,7 +41,7 @@ export function ShopHeader() {
           />
         </span>
 
-        <span className='flex flex-col justify-center items-center leading-tight'>
+        <span className='flex flex-col justify-center leading-tight'>
           <span className='text-[20px] font-extrabold tracking-tight text-[#2a2a65] transition-colors duration-300 group-hover:text-primary lg:text-[24px] xl:text-[26px]'>
             Итгэл
           </span>
