@@ -16,7 +16,7 @@ export const metadata: Metadata = {
   description:
     "Гадаадаас захиалгаар бараа авчирдаг дэлгүүр. Одоо захиалж, ирэхэд мэдэгдэнэ.",
   icons: {
-    icon: "/logo.png",
+    icon: [{ url: "/logo.png", type: "image/png" }],
     shortcut: "/logo.png",
     apple: "/logo.png",
   },

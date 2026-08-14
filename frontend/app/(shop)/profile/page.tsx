@@ -63,13 +63,10 @@ function SignIn() {
   return (
     <div className='px-4 pt-6 lg:mx-auto lg:max-w-[420px] lg:px-0 lg:pt-10'>
       <Card className='flex flex-col gap-3 p-4 lg:p-6'>
-        <div>
+        {/* <div>
           <div className='text-[15px] font-medium'>Нэвтрэх</div>
-          <p className='mt-1 mb-0 text-[13px] text-ink-2'>
-            И-мэйл, нууц үгээрээ нэвтэрнэ үү. Захиалга, төлбөрийн түүх энд
-            харагдана.
-          </p>
-        </div>
+          
+        </div> */}
         <EmailAuthForm />
       </Card>
     </div>
@@ -660,7 +657,7 @@ function InfoTab() {
               </span>
             </div>
           </Field>
-          <Field label='Утас' hint='Холбоо барих — заавал биш'>
+          <Field label='Утас' hint='Холбоо барих'>
             <Input
               value={phone}
               onChange={(v) => setPhone(v.replace(/\D/g, "").slice(0, 8))}

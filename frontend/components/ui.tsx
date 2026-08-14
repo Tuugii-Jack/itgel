@@ -94,7 +94,10 @@ export function Spinner({ className = "" }: { className?: string }) {
 /** Ачаалж буй агуулгын оронд харагдах саарал хэлбэр — хоосон дэлгэцээс дээр. */
 export function Skeleton({ className = "" }: { className?: string }) {
   return (
-    <div aria-hidden className={`shimmer rounded-[8px] bg-surface-2 ${className}`} />
+    <div
+      aria-hidden
+      className={`shimmer rounded-[8px] bg-surface-2 ${className}`}
+    />
   );
 }
 
@@ -166,11 +169,19 @@ export function Field({
   hint?: string;
   children: ReactNode;
 }) {
+  const normalizedHint = hint?.trim();
+  const visibleHint =
+    normalizedHint && normalizedHint !== "Заавал биш"
+      ? normalizedHint
+      : undefined;
+
   return (
     <label className='flex flex-col gap-1.5'>
       {label && <span className='text-[13px] text-ink-2'>{label}</span>}
       {children}
-      {hint && <span className='text-[12px] text-muted'>{hint}</span>}
+      {visibleHint && (
+        <span className='text-[12px] text-muted'>{visibleHint}</span>
+      )}
     </label>
   );
 }
