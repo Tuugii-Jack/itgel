@@ -9,6 +9,7 @@ import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { createOrder } from '../../services/createOrder.js';
 import { adminPaymentsRouter } from './payments.js';
+import { adminOrderQpayRouter } from './orderQpay.js';
 import {
   computeTotals,
   fullyPaid,
@@ -30,6 +31,8 @@ export const adminOrdersRouter = Router();
 
 // /api/admin/orders/:id/payments — төлбөр, буцаалт, мөр цуцлах
 adminOrdersRouter.use('/:id/payments', adminPaymentsRouter);
+// /api/admin/orders/:id/qpay — QPay шалгах, цуцлах, жагсаах
+adminOrdersRouter.use('/:id/qpay', adminOrderQpayRouter);
 
 const orderStatus = z.enum([
   'NEW',
@@ -647,6 +650,8 @@ export function adminOrderDetail(order: OrderDetail) {
     paymentState: state,
     paymentStateLabel: PAYMENT_STATE_LABEL[state],
     paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
+    qpayInvoiceId: order.qpayInvoiceId,
+    qpayInvoiceAt: order.qpayInvoiceAt?.toISOString() ?? null,
     profit: profitOf(activeItems),
     fulfilment: order.fulfilment,
     note: order.note,

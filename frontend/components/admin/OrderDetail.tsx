@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ORDER_STATUS_LABEL, OrderBadge, PageHead, Select } from "@/components/admin/shared";
+import { OrderQpayCard } from "@/components/admin/OrderQpay";
 import {
   Badge,
   Button,
@@ -21,6 +22,7 @@ import { PAYMENT_TONE } from "@/lib/payment";
 import { useToast } from "@/lib/toast";
 import type {
   AdminOrderDetail,
+  AdminOrderQpay,
   OrderStatus,
   PaymentLedger,
   PaymentMethod,
@@ -75,6 +77,7 @@ export function OrderDetail({
 }) {
   const [order, setOrder] = useState<AdminOrderDetail | null>(null);
   const [ledger, setLedger] = useState<PaymentLedger | null>(null);
+  const [qpay, setQpay] = useState<AdminOrderQpay | null>(null);
   const [loading, setLoading] = useState(true);
   /** Аль үйлдэл явж байгааг заана — зөвхөн тухайн товч spinner-тэй харагдана. */
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -90,12 +93,14 @@ export function OrderDetail({
     setLoading(true);
     setError(null);
     try {
-      const [o, l] = await Promise.all([
+      const [o, l, q] = await Promise.all([
         adminApi.order(orderId),
         adminApi.ledger(orderId),
+        adminApi.orderQpay(orderId).catch(() => null),
       ]);
       setOrder(o);
       setLedger(l);
+      setQpay(q);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
@@ -383,6 +388,14 @@ export function OrderDetail({
               </div>
             )}
           </Card>
+
+          <OrderQpayCard
+            orderId={order.id}
+            qpay={qpay}
+            disabled={busy}
+            busyKey={busyKey}
+            onAction={run}
+          />
         </div>
 
         <div className="flex flex-col gap-4">

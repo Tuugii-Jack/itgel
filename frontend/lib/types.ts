@@ -480,6 +480,38 @@ export interface QpayInvoice {
   createdAt: string | null;
 }
 
+export interface AdminQpayStatus {
+  enabled: boolean;
+  ready: boolean;
+}
+
+export interface AdminOrderQpay extends AdminQpayStatus {
+  invoiceId: string | null;
+  invoiceAt: string | null;
+  dueAmount: number;
+  paidAmount: number;
+  orderCode: string;
+}
+
+export interface QpayPaymentRow {
+  paymentId: string;
+  invoiceId: string | null;
+  status: string | null;
+  amount: number;
+  currency: string | null;
+  wallet: string | null;
+  type: string | null;
+  date: string | null;
+}
+
+export interface QpayCheckResult {
+  paid: boolean;
+  paidAmount: number;
+  paymentIds: string[];
+  invoiceId?: string;
+  recorded?: boolean;
+}
+
 export interface Slot {
   day: string;
   capacity: number;
@@ -553,6 +585,8 @@ export interface AdminOrderDetail extends Omit<AdminOrderRow, "itemCount"> {
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
   updatedAt: string;
+  qpayInvoiceId?: string | null;
+  qpayInvoiceAt?: string | null;
 }
 
 /** Админ хүлээлгэн өгөх — хэрэглэгчийн бүх мөр. */

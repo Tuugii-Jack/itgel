@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { qpayTokenExpiresAtMs } from '../src/services/qpay.js';
+import { qpayTokenExpiresAtMs, toQpayDateTime } from '../src/services/qpay.js';
 
 function fakeJwt(exp: number): string {
   const payload = Buffer.from(JSON.stringify({ exp }), 'utf8').toString('base64url');
@@ -21,5 +21,12 @@ describe('qpayTokenExpiresAtMs', () => {
   it('expires_in байхгүй бол JWT exp уншина', () => {
     const exp = 1_700_000_600;
     expect(qpayTokenExpiresAtMs({ access_token: fakeJwt(exp) }, now)).toBe(exp * 1000);
+  });
+});
+
+describe('toQpayDateTime', () => {
+  it('огноог QPay формат руу хөрвүүлнэ', () => {
+    expect(toQpayDateTime('2026-08-01')).toBe('2026-08-01 00:00:00');
+    expect(toQpayDateTime('2026-08-01 12:30:00')).toBe('2026-08-01 12:30:00');
   });
 });

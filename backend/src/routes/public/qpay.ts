@@ -5,8 +5,8 @@ import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
-import { recordPayment } from '../../services/payments.js';
 import {
+  applyQpayPayment,
   cancelQpayInvoice,
   checkQpayInvoice,
   createQpayInvoice,
@@ -102,7 +102,7 @@ publicQpayRouter.post(
     }
 
     if (order.qpayInvoiceId) {
-      await cancelQpayInvoice(order.qpayInvoiceId);
+      await cancelQpayInvoice(order.qpayInvoiceId, { silent: true });
     }
 
     const invoice = await createQpayInvoice({
@@ -286,46 +286,4 @@ async function qpayCallbackHandler(req: {
   }
 
   req.res.status(200).send('SUCCESS');
-}
-
-/** QPay төлбөрийг дэвтэрт бүртгэнэ — давхар webhook/poll-д аюулгүй. */
-async function applyQpayPayment(
-  orderId: string,
-  invoiceId: string,
-  amount: number,
-  paymentRef?: string,
-): Promise<void> {
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { dueAmount: true, id: true },
-  });
-  if (!order || order.dueAmount <= 0) return;
-
-  const payAmount = Math.min(amount, order.dueAmount);
-  if (payAmount <= 0) return;
-
-  // Ижил reference давхар бүртгэхгүй.
-  const reference = paymentRef ?? `qpay:${invoiceId}`;
-  const existing = await prisma.payment.findFirst({
-    where: { orderId, reference, kind: 'PAYMENT' },
-  });
-  if (existing) return;
-
-  await recordPayment({
-    orderId,
-    kind: 'PAYMENT',
-    amount: payAmount,
-    method: 'QPAY',
-    reference,
-    note: 'QPay автомат бүртгэл',
-    actor: 'system:qpay',
-  });
-
-  await audit({
-    actor: 'system:qpay',
-    action: 'QPAY_PAID',
-    entity: 'Order',
-    entityId: orderId,
-    after: { invoiceId, amount: payAmount, reference },
-  });
 }

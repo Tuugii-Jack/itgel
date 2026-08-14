@@ -13,6 +13,7 @@ import { adminProductsRouter } from './products.js';
 import { adminReportsRouter } from './reports.js';
 import { adminRoundsRouter } from './rounds.js';
 import { adminSettingsRouter } from './settings.js';
+import { adminQpayRouter } from './qpay.js';
 
 export const adminRouter = Router();
 
@@ -32,3 +33,4 @@ adminRouter.use('/deliveries', adminDeliveriesRouter);
 adminRouter.use('/customers', adminCustomersRouter);
 adminRouter.use('/reports', adminReportsRouter);
 adminRouter.use('/settings', adminSettingsRouter);
+adminRouter.use('/qpay', adminQpayRouter);

@@ -6,12 +6,18 @@
  *   DELETE /v2/invoice/{invoice_id}
  *   GET /v2/payment/{payment_id}
  *   POST /v2/payment/check
+ *   POST /v2/payment/list
+ *   DELETE /v2/payment/cancel/{payment_id}
+ *   DELETE /v2/payment/refund/{payment_id}
  *
  * Токеныг хугацаа дуусахаас өмнө дахин дахин авахгүй (refresh ашиглана).
- * sender_invoice_no давтахгүй. payment/check-ийг callback-ийн дараа л дуудна.
+ * sender_invoice_no давтахгүй. payment/check-ийг callback/гараар шалгахад л дуудна.
  */
 import { env } from '../env.js';
-import { conflict } from '../lib/errors.js';
+import { audit } from '../lib/audit.js';
+import { AppError, conflict, notFound } from '../lib/errors.js';
+import { prisma } from '../prisma.js';
+import { recordPayment } from './payments.js';
 
 export interface QpayBankLink {
   name: string;
@@ -275,13 +281,28 @@ export async function createQpayInvoice(input: {
 }
 
 /** DELETE /v2/invoice/{invoice_id} */
-export async function cancelQpayInvoice(invoiceId: string): Promise<void> {
+export async function cancelQpayInvoice(
+  invoiceId: string,
+  opts?: { silent?: boolean },
+): Promise<void> {
   if (!invoiceId) return;
   try {
     await qpayFetch(`/invoice/${encodeURIComponent(invoiceId)}`, { method: 'DELETE' });
-  } catch {
-    /* цуцлагдсан / олдоогүй */
+  } catch (e) {
+    if (opts?.silent) return;
+    throw e;
   }
+}
+
+/** QPay-ийн start_date / end_date — `yyyy-MM-dd HH:mm:ss`. */
+export function toQpayDateTime(value: string): string {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return `${trimmed} 00:00:00`;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) return trimmed;
+  const d = new Date(trimmed);
+  if (Number.isNaN(d.getTime())) return trimmed;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 /** POST /v2/payment/check — зөвхөн callback-ийн дараа эсвэл хэрэглэгч гараар шалгахад. */
@@ -311,23 +332,257 @@ export async function checkQpayInvoice(invoiceId: string): Promise<QpayCheckResu
   };
 }
 
-/** GET /v2/payment/{payment_id} — callback зөвхөн payment_id илгээсэн үед. */
-export async function getQpayPayment(paymentId: string): Promise<{
-  invoiceId: string | null;
-  paidAmount: number;
-  paymentId: string;
-}> {
+/** GET /v2/payment/{payment_id} */
+export async function getQpayPayment(paymentId: string): Promise<QpayPaymentDetail> {
   assertReady();
-  const data = await qpayFetch<{
-    payment_id?: string;
-    invoice_id?: string;
-    payment_amount?: string | number;
-    paid_amount?: string | number;
-  }>(`/payment/${encodeURIComponent(paymentId)}`, { method: 'GET' });
+  const data = await qpayFetch<Record<string, unknown>>(
+    `/payment/${encodeURIComponent(paymentId)}`,
+    { method: 'GET' },
+  );
+  return mapPaymentDetail(data, paymentId);
+}
+
+export interface QpayPaymentDetail {
+  paymentId: string;
+  invoiceId: string | null;
+  status: string | null;
+  amount: number;
+  currency: string | null;
+  wallet: string | null;
+  type: string | null;
+  date: string | null;
+}
+
+export interface QpayPaymentList {
+  count: number;
+  rows: QpayPaymentDetail[];
+}
+
+function mapPaymentDetail(data: Record<string, unknown>, fallbackId: string): QpayPaymentDetail {
+  const amount = Number(data.payment_amount ?? data.paid_amount ?? 0);
+  return {
+    paymentId: String(data.payment_id ?? fallbackId),
+    invoiceId: typeof data.invoice_id === 'string' ? data.invoice_id : typeof data.object_id === 'string' ? data.object_id : null,
+    status: typeof data.payment_status === 'string' ? data.payment_status : null,
+    amount: Number.isFinite(amount) ? Math.round(amount) : 0,
+    currency: typeof data.payment_currency === 'string' ? data.payment_currency : null,
+    wallet: typeof data.payment_wallet === 'string' ? data.payment_wallet : null,
+    type: typeof data.payment_type === 'string' ? data.payment_type : null,
+    date: typeof data.payment_date === 'string' ? data.payment_date : typeof data.created_date === 'string' ? data.created_date : null,
+  };
+}
+
+/** POST /v2/payment/list */
+export async function listQpayPayments(input: {
+  objectType?: string;
+  objectId?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  pageLimit?: number;
+}): Promise<QpayPaymentList> {
+  assertReady();
+  const body: Record<string, unknown> = {
+    offset: {
+      page_number: input.page ?? 1,
+      page_limit: Math.min(input.pageLimit ?? 20, 100),
+    },
+  };
+  if (input.objectType) body.object_type = input.objectType;
+  if (input.objectId) {
+    body.object_id = input.objectId;
+    if (!input.objectType) body.object_type = 'INVOICE';
+  }
+  if (input.startDate) body.start_date = toQpayDateTime(input.startDate);
+  if (input.endDate) body.end_date = toQpayDateTime(input.endDate);
+
+  const data = await qpayFetch<{ count?: number; rows?: Record<string, unknown>[] }>(
+    '/payment/list',
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+  const rows = (data.rows ?? []).map((row) => mapPaymentDetail(row, String(row.payment_id ?? '')));
+  return { count: data.count ?? rows.length, rows };
+}
+
+/** DELETE /v2/payment/cancel/{payment_id} */
+export async function cancelQpayPayment(paymentId: string): Promise<void> {
+  assertReady();
+  await qpayFetch(`/payment/cancel/${encodeURIComponent(paymentId)}`, { method: 'DELETE' });
+}
+
+/** DELETE /v2/payment/refund/{payment_id} */
+export async function refundQpayPayment(paymentId: string): Promise<void> {
+  assertReady();
+  await qpayFetch(`/payment/refund/${encodeURIComponent(paymentId)}`, { method: 'DELETE' });
+}
+
+/** QPay төлбөрийг дэвтэрт бүртгэнэ — давхар webhook/check-д аюулгүй. */
+export async function applyQpayPayment(
+  orderId: string,
+  invoiceId: string,
+  amount: number,
+  paymentRef?: string,
+  actor = 'system:qpay',
+): Promise<boolean> {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { dueAmount: true, id: true },
+  });
+  if (!order || order.dueAmount <= 0) return false;
+
+  const payAmount = Math.min(amount, order.dueAmount);
+  if (payAmount <= 0) return false;
+
+  const reference = paymentRef ?? `qpay:${invoiceId}`;
+  const existing = await prisma.payment.findFirst({
+    where: { orderId, reference, kind: 'PAYMENT' },
+  });
+  if (existing) return false;
+
+  await recordPayment({
+    orderId,
+    kind: 'PAYMENT',
+    amount: payAmount,
+    method: 'QPAY',
+    reference,
+    note: 'QPay автомат бүртгэл',
+    actor,
+  });
+
+  await audit({
+    actor,
+    action: 'QPAY_PAID',
+    entity: 'Order',
+    entityId: orderId,
+    after: { invoiceId, amount: payAmount, reference },
+  });
+  return true;
+}
+
+export async function findOrderByQpayInvoice(invoiceId: string) {
+  if (!invoiceId) return null;
+  return prisma.order.findFirst({
+    where: { qpayInvoiceId: invoiceId, deletedAt: null },
+    select: {
+      id: true,
+      code: true,
+      dueAmount: true,
+      paidAmount: true,
+      qpayInvoiceId: true,
+      qpayInvoiceAt: true,
+    },
+  });
+}
+
+/** Нэхэмжлэлийг QPay дээр цуцалж, захиалгаас id-г авна. */
+export async function cancelStoredQpayInvoice(
+  orderId: string,
+  actor: string,
+): Promise<{ invoiceId: string }> {
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, deletedAt: null },
+    select: { id: true, code: true, qpayInvoiceId: true },
+  });
+  if (!order) throw notFound('Захиалга олдсонгүй.');
+  if (!order.qpayInvoiceId) throw conflict('QPay нэхэмжлэл алга.');
+
+  await cancelQpayInvoice(order.qpayInvoiceId);
+
+  await prisma.order.update({
+    where: { id: order.id },
+    data: { qpayInvoiceId: null, qpayInvoiceAt: null },
+  });
+
+  await audit({
+    actor,
+    action: 'QPAY_INVOICE_CANCELLED',
+    entity: 'Order',
+    entityId: order.id,
+    after: { code: order.code, invoiceId: order.qpayInvoiceId },
+  });
+
+  return { invoiceId: order.qpayInvoiceId };
+}
+
+/**
+ * QPay дээрх төлбөрийг буцаасны дараа дэвтэрт REFUND бичнэ.
+ * QPay амжилттай болсны дараа дуудна — дэвтрийн алдааг 500 болгохгүй.
+ */
+export async function recordQpayRefund(input: {
+  invoiceId: string | null;
+  paymentId: string;
+  amount: number;
+  actor: string;
+  note: string;
+}): Promise<{ orderId: string | null; orderCode: string | null; recorded: boolean; error: string | null }> {
+  if (!input.invoiceId) {
+    return { orderId: null, orderCode: null, recorded: false, error: null };
+  }
+
+  const order = await findOrderByQpayInvoice(input.invoiceId);
+  if (!order) {
+    return { orderId: null, orderCode: null, recorded: false, error: null };
+  }
+
+  const reference = `qpay-refund:${input.paymentId}`;
+  const existing = await prisma.payment.findFirst({
+    where: { orderId: order.id, reference, kind: 'REFUND' },
+  });
+  if (existing) {
+    return { orderId: order.id, orderCode: order.code, recorded: false, error: null };
+  }
+
+  const amount = Math.round(input.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { orderId: order.id, orderCode: order.code, recorded: false, error: null };
+  }
+
+  try {
+    await recordPayment({
+      orderId: order.id,
+      kind: 'REFUND',
+      amount,
+      method: 'QPAY',
+      reference,
+      note: input.note,
+      actor: input.actor,
+    });
+    return { orderId: order.id, orderCode: order.code, recorded: true, error: null };
+  } catch (e) {
+    const message = e instanceof AppError ? e.message : 'Дэвтэрт буцаалт бичиж чадсангүй.';
+    return { orderId: order.id, orderCode: order.code, recorded: false, error: message };
+  }
+}
+
+/** QPay дээр төлбөр цуцлах/буцаах, олдвол дэвтэрт REFUND бичнэ. */
+export async function reverseQpayPayment(input: {
+  paymentId: string;
+  mode: 'cancel' | 'refund';
+  actor: string;
+}): Promise<{
+  payment: QpayPaymentDetail;
+  recorded: boolean;
+  orderId: string | null;
+  orderCode: string | null;
+  ledgerError: string | null;
+}> {
+  const payment = await getQpayPayment(input.paymentId);
+  if (input.mode === 'cancel') await cancelQpayPayment(input.paymentId);
+  else await refundQpayPayment(input.paymentId);
+
+  const ledger = await recordQpayRefund({
+    invoiceId: payment.invoiceId,
+    paymentId: input.paymentId,
+    amount: payment.amount,
+    actor: input.actor,
+    note: input.mode === 'cancel' ? 'QPay төлбөр цуцалсан' : 'QPay буцаалт',
+  });
 
   return {
-    invoiceId: data.invoice_id ?? null,
-    paidAmount: Math.round(Number(data.payment_amount ?? data.paid_amount ?? 0)),
-    paymentId: data.payment_id ?? paymentId,
+    payment,
+    recorded: ledger.recorded,
+    orderId: ledger.orderId,
+    orderCode: ledger.orderCode,
+    ledgerError: ledger.error,
   };
 }
