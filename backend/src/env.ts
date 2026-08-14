@@ -20,7 +20,7 @@ const schema = z.object({
   SMS_API_KEY: z.preprocess(emptyToUndef, z.string().optional()),
   SMS_SENDER: z.string().default('itgel'),
 
-  /** Gmail SMTP — и-мэйл баталгаажуулалт / нууц үг сэргээх. */
+  /** Gmail SMTP — нууц үг сэргээх / и-мэйл солих. */
   SMTP_HOST: z.preprocess(emptyToUndef, z.string().optional()),
   SMTP_PORT: z.coerce.number().int().positive().default(465),
   SMTP_USER: z.preprocess(emptyToUndef, z.string().optional()),

@@ -214,6 +214,21 @@ select:focus {
   animation: toast-in 0.2s ease-out;
 }
 
+@keyframes cart-bump {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.cart-bump {
+  animation: cart-bump 0.42s ease-out;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

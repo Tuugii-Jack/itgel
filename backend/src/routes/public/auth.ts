@@ -124,7 +124,7 @@ const phoneRequired = z
   .transform(normalizePhone)
   .refine((v) => PHONE_RE.test(v), 'Утасны дугаар буруу байна (8 орон).');
 
-/** POST /api/auth/register */
+/** POST /api/auth/register — шууд нэвтэрнэ. И-мэйл код илгээхгүй. */
 publicAuthRouter.post(
   '/register',
   validate({
@@ -150,20 +150,24 @@ publicAuthRouter.post(
     if (phoneTaken) throw conflict('Энэ утасны дугаар өөр бүртгэлтэй холбогдсон.');
 
     const passwordHash = await bcrypt.hash(body.password, BCRYPT_ROUNDS);
-    await prisma.customer.create({
+    const customer = await prisma.customer.create({
       data: {
         email: body.email,
         passwordHash,
         name: body.name ?? null,
         phone: body.phone,
+        emailVerifiedAt: new Date(),
       },
     });
 
-    const otp = await issueEmailOtp(body.email, 'VERIFY');
     res.status(201).json({
       data: {
-        ...otp,
-        message: 'Баталгаажуулах код и-мэйл рүү илгээлээ.',
+        token: signCustomerToken({
+          sub: customer.id,
+          email: customer.email,
+          phone: customer.phone,
+        }),
+        customer: publicCustomer(customer),
       },
     });
   }),
@@ -277,9 +281,6 @@ publicAuthRouter.post(
 
     const ok = await bcrypt.compare(body.password, customer.passwordHash);
     if (!ok) throw unauthorized('Нэвтрэх мэдээлэл эсвэл нууц үг буруу.');
-    if (!customer.emailVerifiedAt) {
-      throw unauthorized('И-мэйлээ баталгаажуулна уу.');
-    }
 
     res.json({
       data: {

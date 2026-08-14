@@ -53,7 +53,6 @@ publicOrdersRouter.post(
 
     const customer = await prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) throw notFound('Хэрэглэгч олдсонгүй.');
-    if (!customer.emailVerifiedAt) throw badRequest('И-мэйлээ баталгаажуулсны дараа захиална уу.');
 
     // `productId` нь дэлгүүрийн зүгээс ТОЙРГИЙН id — /products тэрийг буцаадаг.
     const rounds = await prisma.productRound.findMany({

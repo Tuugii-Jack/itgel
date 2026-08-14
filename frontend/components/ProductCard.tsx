@@ -69,7 +69,7 @@ export function ProductCard({ product }: { product: Product }) {
             </Button>
           ) : needsChoice || isOrder ? (
             <Link href={`/p/${product.id}`} className='no-underline'>
-              <Button full>{isOrder ? "Захиалах" : "Сонгох"}</Button>
+              <Button full>Сонгох</Button>
             </Link>
           ) : (
             <Button

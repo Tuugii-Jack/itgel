@@ -6,7 +6,6 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { ProductCard } from "@/components/ProductCard";
 import { Button, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
-import { useCart } from "@/lib/cart";
 import type { Category, Product } from "@/lib/types";
 
 const GUTTER = "mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8 xl:px-10";
@@ -22,7 +21,6 @@ export default function OrderProductsPage() {
 }
 
 function OrderProductsContent() {
-  const cart = useCart();
   const searchParams = useSearchParams();
   const initialCategory = searchParams.get("category");
   const [categories, setCategories] = useState<Category[]>([]);
@@ -167,24 +165,6 @@ function OrderProductsContent() {
             </div>
           )}
         </>
-      )}
-
-      {cart.count > 0 && (
-        <div
-          className={`fixed inset-x-0 bottom-4 z-20 flex justify-center px-4
-            md:inset-x-auto md:right-6 md:bottom-6 md:justify-end md:px-0`}
-        >
-          <Link href='/cart' className='no-underline'>
-            <Button
-              variant='outline'
-              size='sm'
-              className='bg-bg/90 backdrop-blur-sm opacity-60 transition-opacity duration-200
-                hover:opacity-100 active:opacity-100 focus:opacity-100'
-            >
-              Сагс үзэх · {cart.count} бараа
-            </Button>
-          </Link>
-        </div>
       )}
     </div>
   );

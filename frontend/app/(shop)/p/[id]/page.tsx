@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 import { useCountdown } from "@/components/ProductCard";
 import { ProductGallery } from "@/components/ProductGallery";
 
 import {
-  Badge,
   Button,
   Card,
   ChoiceGroup,
@@ -17,6 +15,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { money } from "@/lib/format";
+import { optionValuePrice, priceForSelections, priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -26,7 +25,6 @@ export default function ProductPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const router = useRouter();
   const cart = useCart();
   const toast = useToast();
 
@@ -90,7 +88,12 @@ export default function ProductPage({
   const blocked = soldOut || closed;
   const options = product.options ?? [];
   const missingOpt = options.find((o) => !selections[o.name]);
-  const total = product.price * qty;
+  const unitPrice = priceForSelections(
+    product.price,
+    product.optionPrices,
+    selections,
+  );
+  const total = unitPrice * qty;
 
   const addToCart = () => {
     if (missingOpt) {
@@ -102,7 +105,7 @@ export default function ProductPage({
     cart.add({
       productId: product.id,
       name: product.name,
-      price: product.price,
+      price: unitPrice,
       image: product.images[0] ?? null,
       type: product.type,
       selections: { ...selections },
@@ -113,8 +116,7 @@ export default function ProductPage({
       arriveTo: product.arriveTo,
       stock: product.stock,
     });
-    toast.success("Сагсанд нэмэгдлээ.");
-    router.push("/cart");
+    toast.success("Сагсанд нэмэгдлээ. Өөр бараа нэмж болно.");
   };
 
   return (
@@ -159,7 +161,9 @@ export default function ProductPage({
                 {product.name}
               </h1>
               <div className='tnum text-[26px] font-medium leading-none lg:text-[28px]'>
-                {money(product.price)}
+                {missingOpt
+                  ? priceLabel(product.price, product.priceMax)
+                  : money(unitPrice)}
               </div>
             </div>
 
@@ -218,7 +222,21 @@ export default function ProductPage({
                           ? 4
                           : Math.max(2, opt.values.length)
                       }
-                      options={opt.values.map((v) => ({ value: v, label: v }))}
+                      options={opt.values.map((v) => {
+                        const priced = optionValuePrice(
+                          product.optionPrices,
+                          opt.name,
+                          v,
+                          product.price,
+                        );
+                        const showPrice =
+                          product.optionPrices?.some((p) => p.kind === opt.name) &&
+                          priced !== product.price;
+                        return {
+                          value: v,
+                          label: showPrice ? `${v} · ${money(priced)}` : v,
+                        };
+                      })}
                       value={selected}
                       onChange={(v) => {
                         setSelections((prev) => ({ ...prev, [opt.name]: v }));
@@ -270,7 +288,7 @@ export default function ProductPage({
                       </div>
                     </div>
                     <Button size='bar' onClick={addToCart} className='px-8'>
-                      {isOrder ? "Захиалах" : "Сагсанд хийх"}
+                      Сагсанд хийх
                     </Button>
                   </div>
                 </>
@@ -343,7 +361,7 @@ export default function ProductPage({
               </div>
             </div>
             <Button size='lg' onClick={addToCart} className='min-w-[160px]'>
-              {isOrder ? "Захиалах" : "Сагсанд хийх"}
+              Сагсанд хийх
             </Button>
           </>
         )}

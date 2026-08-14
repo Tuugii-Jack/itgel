@@ -58,8 +58,8 @@ export async function sendMail(opts: {
 
 export const mailTemplates = {
   verify: (code: string) => ({
-    subject: 'itgel — и-мэйл баталгаажуулах код',
-    text: `Таны баталгаажуулах код: ${code}\n\nКод 10 минутын дотор хүчинтэй.\nХэрэв та бүртгүүлээгүй бол энэ захидлыг үл хэрэгсэнэ үү.`,
+    subject: 'itgel — и-мэйл солих код',
+    text: `И-мэйл солих код: ${code}\n\nКод 10 минутын дотор хүчинтэй.\nХэрэв та хүсээгүй бол энэ захидлыг үл хэрэгсэнэ үү.`,
   }),
   reset: (code: string) => ({
     subject: 'itgel — нууц үг сэргээх код',

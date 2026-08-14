@@ -247,11 +247,15 @@ export const api = {
 
   register: (body: { email: string; password: string; name?: string; phone: string }) =>
     request<{
-      email: string;
-      expiresInSec: number;
-      resendAfterSec: number;
-      message?: string;
-      devCode?: string;
+      token: string;
+      customer: {
+        id: string;
+        email: string;
+        phone: string | null;
+        name: string | null;
+        emailVerified: boolean;
+        hasPassword: boolean;
+      };
     }>("/auth/register", { method: "POST", body }).then((r) => r.data),
 
   login: (login: string, password: string) =>

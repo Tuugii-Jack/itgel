@@ -6,10 +6,11 @@ import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 
-type Mode = "login" | "register" | "verify" | "forgot" | "reset";
+type Mode = "login" | "register" | "forgot" | "reset";
 
 /**
  * И-мэйл + нууц үг нэвтрэлт.
+ * Бүртгэл шууд нэвтэрнэ. Код зөвхөн нууц үг сэргээхэд и-мэйлээр очно.
  * `variant="checkout"` — сагс: анх удаа vs бүртгэлтэй сонголт тод.
  */
 export function EmailAuthForm({
@@ -46,7 +47,7 @@ export function EmailAuthForm({
     setMode(next);
     setError(null);
     setCode("");
-    if (next !== "verify" && next !== "reset") setDevCode(null);
+    if (next !== "reset") setDevCode(null);
   };
 
   const finish = async (token: string, okMessage: string) => {
@@ -65,10 +66,7 @@ export function EmailAuthForm({
         name: name.trim() || undefined,
         phone: phone.trim(),
       });
-      setDevCode(result.devCode ?? null);
-      setCooldown(result.resendAfterSec);
-      setMode("verify");
-      toast.success("Баталгаажуулах код и-мэйл рүү илгээлээ.");
+      await finish(result.token, "Бүртгэл амжилттай.");
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Бүртгэж чадсангүй.";
       setError(message);
@@ -88,43 +86,6 @@ export function EmailAuthForm({
       const message = e instanceof ApiError ? e.message : "Нэвтэрч чадсангүй.";
       setError(message);
       toast.error(message);
-      if (message.includes("баталгаажуул") && loginId.includes("@")) {
-        setEmail(loginId.trim().toLowerCase());
-        setMode("verify");
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const verify = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.verifyEmail(email.trim(), code);
-      await finish(result.token, "И-мэйл баталгаажлаа.");
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Код буруу байна.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const resend = async () => {
-    if (cooldown > 0) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await api.resendEmailCode(email.trim());
-      setDevCode(result.devCode ?? null);
-      setCooldown(result.resendAfterSec);
-      toast.success("Код дахин илгээлээ.");
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Илгээж чадсангүй.";
-      setError(message);
-      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -137,6 +98,8 @@ export function EmailAuthForm({
       const result = await api.forgotPassword(email.trim());
       setDevCode(result.devCode ?? null);
       setCooldown(result.resendAfterSec);
+      setPassword("");
+      setCode("");
       setMode("reset");
       toast.success("Сэргээх код и-мэйл рүү илгээлээ.");
     } catch (e) {
@@ -170,9 +133,7 @@ export function EmailAuthForm({
         ? "Бүртгэлээрээ нэвтрэх"
         : mode === "forgot"
           ? "Нууц үг мартсан"
-          : mode === "reset"
-            ? "Шинэ нууц үг тохируулах"
-            : "И-мэйл баталгаажуулах";
+          : "Шинэ нууц үг тохируулах";
 
   const hint =
     mode === "register"
@@ -181,9 +142,7 @@ export function EmailAuthForm({
         ? "И-мэйл эсвэл утасны дугаар + нууц үгээрээ нэвтэрнэ."
         : mode === "forgot"
           ? "Бүртгэлтэй и-мэйл рүү сэргээх код илгээнэ."
-          : mode === "reset"
-            ? "И-мэйл дээрх кодыг оруулаад шинэ нууц үгээ тохируулна."
-            : `${email} хаяг руу илгээсэн 6 оронтой кодыг оруулна уу.`;
+          : "И-мэйл дээрх 6 оронтой кодыг оруулаад шинэ нууц үгээ тохируулна.";
 
   const showChooser = variant === "checkout" && (mode === "login" || mode === "register");
   const canLogin = Boolean(loginId.trim()) && password.length >= 6;
@@ -254,7 +213,7 @@ export function EmailAuthForm({
         </div>
       )}
 
-      {(mode === "forgot" || mode === "reset" || mode === "verify") && (
+      {(mode === "forgot" || mode === "reset") && (
         <div>
           <div className="text-[15px] font-medium">{title}</div>
           <p className="mt-1 mb-0 text-[13px] text-ink-2">{hint}</p>
@@ -308,8 +267,8 @@ export function EmailAuthForm({
         </>
       )}
 
-      {(mode === "login" || mode === "register" || mode === "reset") && (
-        <Field label={mode === "reset" ? "Шинэ нууц үг" : "Нууц үг"}>
+      {(mode === "login" || mode === "register") && (
+        <Field label="Нууц үг">
           <Input
             value={password}
             onChange={setPassword}
@@ -332,13 +291,11 @@ export function EmailAuthForm({
         </button>
       )}
 
-      {(mode === "verify" || mode === "reset") && (
+      {mode === "reset" && (
         <>
-          {mode === "reset" && (
-            <Field label="И-мэйл">
-              <Input value={email} onChange={setEmail} type="email" />
-            </Field>
-          )}
+          <Field label="И-мэйл">
+            <Input value={email} onChange={setEmail} type="email" />
+          </Field>
           <Field label="И-мэйл дээрх 6 оронтой код">
             <Input
               value={code}
@@ -354,16 +311,22 @@ export function EmailAuthForm({
               Туршилтын код: <span className="tnum">{devCode}</span>
             </p>
           )}
-          {mode === "verify" && (
-            <button
-              type="button"
-              disabled={cooldown > 0 || busy}
-              onClick={() => void resend()}
-              className="cursor-pointer border-0 bg-transparent p-0 text-left text-[13px] text-ink-2 underline disabled:no-underline"
-            >
-              {cooldown > 0 ? `${cooldown} сек дараа дахин` : "Код дахин илгээх"}
-            </button>
-          )}
+          <Field label="Шинэ нууц үг">
+            <Input
+              value={password}
+              onChange={setPassword}
+              type="password"
+              placeholder="Дор хаяж 6 тэмдэгт"
+            />
+          </Field>
+          <button
+            type="button"
+            disabled={cooldown > 0 || busy}
+            onClick={() => void forgot()}
+            className="cursor-pointer border-0 bg-transparent p-0 text-left text-[13px] text-ink-2 underline disabled:no-underline"
+          >
+            {cooldown > 0 ? `${cooldown} сек дараа дахин` : "Код дахин илгээх"}
+          </button>
         </>
       )}
 
@@ -377,11 +340,6 @@ export function EmailAuthForm({
       {mode === "register" && (
         <Button full onClick={register} loading={busy} disabled={!canRegister}>
           Бүртгүүлэх
-        </Button>
-      )}
-      {mode === "verify" && (
-        <Button full onClick={verify} loading={busy} disabled={code.length !== 6}>
-          Баталгаажуулаад үргэлжлүүлэх
         </Button>
       )}
       {mode === "forgot" && (
