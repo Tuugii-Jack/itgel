@@ -37,7 +37,7 @@ export function ProductGallery({
       </div>
 
       {hasThumbs && (
-        <div className='no-scrollbar mt-2.5 flex gap-2 overflow-x-auto pb-0.5'>
+        <div className='mt-2.5 grid w-full grid-cols-4 gap-2'>
           {list.map((src, i) => (
             <button
               key={i}
@@ -45,7 +45,7 @@ export function ProductGallery({
               onClick={() => setActive(i)}
               aria-label={`${alt} — зураг ${i + 1}`}
               aria-current={i === index}
-              className={`h-14 w-14 shrink-0 overflow-hidden rounded-[8px] border transition-colors sm:h-16 sm:w-16
+              className={`aspect-square w-full overflow-hidden rounded-[8px] border transition-colors
                 ${i === index ? "border-primary ring-1 ring-primary/30" : "border-line hover:border-primary-muted"}`}
             >
               <ProductImage
