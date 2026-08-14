@@ -754,6 +754,7 @@ export async function notifyOrderConfirmed(order: Order): Promise<boolean> {
     to: customer.email,
     subject: template.subject,
     text: template.text,
+    html: template.html,
   });
   if (!sent.ok) {
     console.warn(`[mail] ${order.code} баталгаажилт илгээгдсэнгүй: ${sent.error}`);

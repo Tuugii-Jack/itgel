@@ -84,6 +84,7 @@ async function issueEmailOtp(email: string, purpose: 'VERIFY' | 'RESET') {
     to: email,
     subject: template.subject,
     text: template.text,
+    html: template.html,
     codeForDev: code,
   });
   if (!sent.ok) throw badRequest(sent.error ?? 'И-мэйл илгээж чадсангүй.');
