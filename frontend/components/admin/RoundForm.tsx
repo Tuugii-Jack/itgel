@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import { Calendar } from "@/components/shadcn/calendar";
+import { OptionPriceEditor, seedOptionPriceDrafts } from "@/components/admin/OptionPriceEditor";
 import { Badge, Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, datetimeLocalKey, fromDatetimeLocal, money } from "@/lib/format";
+import { pricedOptionName } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminBatch, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -62,6 +64,12 @@ export function RoundForm({
 
   const [costPrice, setCostPrice] = useState(String(base?.costPrice ?? ""));
   const [sellPrice, setSellPrice] = useState(String(base?.sellPrice ?? ""));
+  const [optionRows, setOptionRows] = useState(() =>
+    seedOptionPriceDrafts(product.options, (round ?? product.currentRound)?.optionPrices, {
+      sell: String(base?.sellPrice ?? ""),
+      cost: String(base?.costPrice ?? ""),
+    }),
+  );
   const [stock, setStock] = useState(String(round?.stock ?? 0));
   const [isOrder, setIsOrder] = useState(base ? base.type === "order" : true);
   const [closeAt, setCloseAt] = useState(
@@ -89,6 +97,19 @@ export function RoundForm({
   const sell = Number(sellPrice) || 0;
   const profit = sell - cost;
   const margin = sell > 0 ? Math.round((profit / sell) * 100) : 0;
+  const hasOptions = (product.options?.length ?? 0) > 0;
+  const primaryKind = pricedOptionName(product.options);
+  const primaryRows = optionRows.filter((r) => r.kind === primaryKind);
+  const primaryPriced = !primaryKind || primaryRows.every((r) => Number(r.sell) > 0);
+  const optionPrices = optionRows
+    .filter((r) => Number(r.sell) > 0)
+    .map((r) => ({
+      kind: r.kind,
+      value: r.value,
+      sellPrice: Number(r.sell) || 0,
+      costPrice: Number(r.cost) || 0,
+    }));
+  const canSave = primaryPriced && (sell > 0 || optionPrices.length > 0);
 
   const { date: selectedDay, hour, minute } = useMemo(() => splitCloseAt(closeAt), [closeAt]);
 
@@ -116,15 +137,26 @@ export function RoundForm({
     setBusy(true);
     setError(null);
     try {
+      const derivedSell =
+        sell > 0
+          ? sell
+          : optionPrices.length
+            ? Math.min(...optionPrices.map((p) => p.sellPrice))
+            : 0;
+      const derivedCost =
+        cost > 0
+          ? cost
+          : optionPrices.find((p) => p.sellPrice === derivedSell)?.costPrice ?? 0;
       const body = {
-        costPrice: cost,
-        sellPrice: sell,
+        costPrice: derivedCost,
+        sellPrice: derivedSell,
         stock: isOrder ? 0 : Number(stock) || 0,
         closeAt: isOrder && closeAt ? fromDatetimeLocal(closeAt) : null,
         leadMinDays: Number(leadMin) || 0,
         leadMaxDays: Number(leadMax) || 0,
         status,
         note: note.trim() || null,
+        optionPrices: hasOptions ? optionPrices : [],
         ...(isOrder ? { batchId: batchId.trim() ? batchId : null } : {}),
       };
 
@@ -191,7 +223,7 @@ export function RoundForm({
             <Button variant="ghost" onClick={onClose}>
               Болих
             </Button>
-            <Button onClick={save} loading={busy} disabled={deleting || sell <= 0}>
+            <Button onClick={save} loading={busy} disabled={deleting || !canSave}>
               {round ? "Хадгалах" : "Гаргах"}
             </Button>
           </>
@@ -204,6 +236,11 @@ export function RoundForm({
 
           <Card className="flex flex-col gap-3 p-4">
             <div className="text-[15px] font-medium">Үнэ</div>
+            <p className="m-0 text-[13px] text-ink-2">
+              {hasOptions
+                ? "Доорх хүснэгтэд хэмжээ/сонголт бүрийн үнийг тавина. Дээрх нь үндсэн үнэ."
+                : "Энэ гаргалтын өртөг болон зарах үнэ."}
+            </p>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Анхны үнэ (өртөг)">
                 <Input
@@ -228,6 +265,18 @@ export function RoundForm({
                   {margin}%
                 </Badge>
               </div>
+            )}
+            {hasOptions && (
+              <OptionPriceEditor
+                options={product.options}
+                rows={optionRows}
+                onChange={setOptionRows}
+                onFillAll={() =>
+                  setOptionRows((prev) =>
+                    prev.map((r) => ({ ...r, sell: sellPrice, cost: costPrice })),
+                  )
+                }
+              />
             )}
           </Card>
 

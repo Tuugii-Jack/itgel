@@ -122,15 +122,13 @@ export async function changeOrderStatus(
 
     // Захиалга бүхэлдээ ирсэн/өгсөн гэж тэмдэглэхэд мөрүүдийг нийцүүлнэ.
     if (to === 'ARRIVED') {
-      await tx.orderItem.updateMany({
-        where: { orderId, cancelledAt: null, arrivedAt: null },
-        data: { arrivedAt: now },
-      });
+      await stampItemsFullyArrived(tx, { orderId, cancelledAt: null, arrivedAt: null }, now);
     }
     if (to === 'HANDED_OVER') {
+      await stampItemsFullyArrived(tx, { orderId, cancelledAt: null, handedOverAt: null }, now);
       await tx.orderItem.updateMany({
         where: { orderId, cancelledAt: null, handedOverAt: null },
-        data: { arrivedAt: now, handedOverAt: now },
+        data: { handedOverAt: now },
       });
     }
 
@@ -320,7 +318,7 @@ export async function revertOrderStatus(
       // Аваагүй мөрүүдийн arrivedAt-ийг арилгана (буцааж «хүлээж» болгоно).
       await tx.orderItem.updateMany({
         where: { orderId, cancelledAt: null, handedOverAt: null },
-        data: { arrivedAt: null },
+        data: { arrivedAt: null, arrivedQty: 0 },
       });
       data.arrivalNotifiedAt = null;
     }
@@ -333,7 +331,7 @@ export async function revertOrderStatus(
           handedOverAt: null,
           round: { closeAt: null },
         },
-        data: { arrivedAt: null },
+        data: { arrivedAt: null, arrivedQty: 0 },
       });
       data.arrivalNotifiedAt = null;
       if (order.batchId) data.batch = { disconnect: true };
@@ -463,26 +461,46 @@ async function restoreReadyStock(tx: Prisma.TransactionClient, orderId: string):
   }
 }
 
+/** Мөрүүдийг бүтнээр ирсэн гэж тэмдэглэнэ (arrivedQty = qty). */
+async function stampItemsFullyArrived(
+  tx: Prisma.TransactionClient,
+  where: Prisma.OrderItemWhereInput,
+  now: Date,
+): Promise<number> {
+  const items = await tx.orderItem.findMany({
+    where,
+    select: { id: true, qty: true },
+  });
+  if (items.length === 0) return 0;
+  for (const item of items) {
+    await tx.orderItem.update({
+      where: { id: item.id },
+      data: { arrivedAt: now, arrivedQty: item.qty },
+    });
+  }
+  return items.length;
+}
+
 /** Бэлэн барааны мөрүүдийг ирсэн гэж тэмдэглэнэ (closeAt null). */
 export async function markReadyItemsArrived(
   tx: Prisma.TransactionClient,
   orderId: string,
   now = new Date(),
 ): Promise<number> {
-  const result = await tx.orderItem.updateMany({
-    where: {
+  return stampItemsFullyArrived(
+    tx,
+    {
       orderId,
       cancelledAt: null,
       arrivedAt: null,
       round: { closeAt: null },
     },
-    data: { arrivedAt: now },
-  });
-  return result.count;
+    now,
+  );
 }
 
 /**
- * Багц агуулахад ирэхэд тухайн тойргийн бүх мөрд `arrivedAt` тавина.
+ * Багцын тойргийн бүх мөрийг бүтнээр ирсэн гэж тэмдэглэнэ.
  * Нөлөөлсөн захиалгын id-уудыг буцаана.
  */
 export async function markItemsArrivedForBatch(
@@ -496,14 +514,16 @@ export async function markItemsArrivedForBatch(
       arrivedAt: null,
       round: { batchId },
     },
-    select: { id: true, orderId: true },
+    select: { id: true, orderId: true, qty: true },
   });
   if (items.length === 0) return [];
 
-  await tx.orderItem.updateMany({
-    where: { id: { in: items.map((i) => i.id) } },
-    data: { arrivedAt: now },
-  });
+  for (const item of items) {
+    await tx.orderItem.update({
+      where: { id: item.id },
+      data: { arrivedAt: now, arrivedQty: item.qty },
+    });
+  }
 
   return [...new Set(items.map((i) => i.orderId))];
 }

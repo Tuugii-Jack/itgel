@@ -70,7 +70,7 @@ describe('Багцын шат', () => {
 
   it('шат нь захиалгын төлөвт буулгагдана', () => {
     expect(orderStatusForBatchStage('IN_TRANSIT')).toBe('IN_TRANSIT');
-    expect(orderStatusForBatchStage('AT_WAREHOUSE')).toBe('ARRIVED');
+    expect(orderStatusForBatchStage('AT_WAREHOUSE')).toBeNull();
     expect(orderStatusForBatchStage('DONE')).toBeNull();
     expect(orderStatusForBatchStage('COLLECTING')).toBeNull();
     expect(orderStatusForBatchStage('CLOSED')).toBeNull();

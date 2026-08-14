@@ -52,6 +52,7 @@ const roundInclude = {
       sizeChart: { orderBy: { sortOrder: 'asc' as const } },
     },
   },
+  optionPrices: true,
 };
 
 publicProductsRouter.get(

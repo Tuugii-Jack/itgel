@@ -5,7 +5,8 @@ import { useEffect, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { Badge, Button, Divider } from "@/components/ui";
 import { useCart } from "@/lib/cart";
-import { countdown, money } from "@/lib/format";
+import { countdown } from "@/lib/format";
+import { priceLabel } from "@/lib/options";
 import type { Product } from "@/lib/types";
 
 /** Дэлгүүрийн барааны карт. */
@@ -47,7 +48,7 @@ export function ProductCard({ product }: { product: Product }) {
         </Link>
 
         <div className='tnum text-[18px] font-medium'>
-          {money(product.price)}
+          {priceLabel(product.price, product.priceMax)}
         </div>
 
         {!isOrder && (

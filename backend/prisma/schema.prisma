@@ -147,15 +147,31 @@ model ProductRound {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  batch      Batch?      @relation(fields: [batchId], references: [id])
-  orderItems OrderItem[]
+  product      Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch        Batch?            @relation(fields: [batchId], references: [id])
+  orderItems   OrderItem[]
+  optionPrices RoundOptionPrice[]
 
   @@unique([productId, roundNo])
   @@index([status])
   @@index([closeAt])
   @@index([productId, createdAt])
   @@index([batchId])
+}
+
+/// Гаргалт дээрх сонголтын үнэ — ж: Хэмжээ S = 10,000₮, M = 20,000₮.
+model RoundOptionPrice {
+  id        String @id @default(cuid())
+  roundId   String
+  kind      String
+  value     String
+  sellPrice Int
+  costPrice Int    @default(0)
+
+  round ProductRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, kind, value])
+  @@index([roundId])
 }
 
 model ProductVariant {
@@ -351,8 +367,10 @@ model OrderItem {
   cancelledAt  DateTime?
   cancelReason String?
 
-  /// Агуулахад ирсэн огноо — багц AT_WAREHOUSE эсвэл бэлэн бараа CONFIRMED.
+  /// Агуулахад ирсэн огноо — мөр бүтнээр (arrivedQty >= qty) ирэхэд тавина.
   arrivedAt DateTime?
+  /// Энэ мөрөөс агуулахад ирсэн ширхэг (0..qty). Дутуу ирвэл FIFO-оор нэмэгдэнэ.
+  arrivedQty Int @default(0)
   /// Хэрэглэгчид хүлээлгэн өгсөн огноо (хэсэгчилсэн авах боломжтой).
   handedOverAt DateTime?
 

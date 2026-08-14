@@ -6,6 +6,7 @@ import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
+import { replaceRoundOptionPrices, type OptionPriceRow } from '../../lib/optionPrices.js';
 import { variantRowsFromOptions, type ProductOption } from '../../lib/options.js';
 import { roundStats } from '../../services/roundStats.js';
 import { adminProduct } from '../../services/serialize.js';
@@ -55,6 +56,13 @@ const templateFields = {
 };
 
 /** Тойргийн талбарууд — гаргалт бүрд өөр байж болно. */
+export const optionPriceRow = z.object({
+  kind: z.string().trim().min(1).max(40),
+  value: z.string().trim().min(1).max(40),
+  sellPrice: z.coerce.number().int().min(0).max(100_000_000),
+  costPrice: z.coerce.number().int().min(0).max(100_000_000).default(0),
+});
+
 export const roundFields = {
   costPrice: z.coerce.number().int().min(0),
   sellPrice: z.coerce.number().int().min(0),
@@ -64,6 +72,7 @@ export const roundFields = {
   leadMaxDays: z.coerce.number().int().min(0).max(365).optional(),
   status: productStatus.default('DRAFT'),
   note: z.string().trim().max(300).optional(),
+  optionPrices: z.array(optionPriceRow).max(80).optional(),
 };
 
 /** Бараа үүсгэх — зөвхөн загвар. Үнэ, огноо нь тусад нь «гаргалт»-аар нэмэгдэнэ. */
@@ -89,7 +98,7 @@ const roundInclude = {
   rounds: {
     where: { deletedAt: null },
     orderBy: { roundNo: 'desc' },
-    include: { batch: { select: { id: true, name: true, stage: true } } },
+    include: { batch: { select: { id: true, name: true, stage: true } }, optionPrices: true },
   },
 } satisfies Prisma.ProductInclude;
 
@@ -278,6 +287,7 @@ adminProductsRouter.post(
         note: roundFields.note,
         /** Хоосон үүсгээд дараа нь багцтай холбож болно. */
         batchId: z.string().min(1).nullable().optional(),
+        optionPrices: roundFields.optionPrices,
       })
       .default({}),
   }),
@@ -292,11 +302,19 @@ adminProductsRouter.post(
       status?: z.infer<typeof productStatus>;
       note?: string;
       batchId?: string | null;
+      optionPrices?: OptionPriceRow[];
     };
 
     const product = await prisma.product.findFirst({
       where: { id: req.params.id, deletedAt: null },
-      include: { rounds: { where: { deletedAt: null }, orderBy: { roundNo: 'desc' }, take: 1 } },
+      include: {
+        rounds: {
+          where: { deletedAt: null },
+          orderBy: { roundNo: 'desc' },
+          take: 1,
+          include: { optionPrices: true },
+        },
+      },
     });
     if (!product) throw notFound('Бараа олдсонгүй.');
 
@@ -327,20 +345,25 @@ adminProductsRouter.post(
       _max: { roundNo: true },
     });
 
-    const round = await prisma.productRound.create({
-      data: {
-        productId: product.id,
-        batchId,
-        roundNo: (maxNo._max.roundNo ?? 0) + 1,
-        costPrice,
-        sellPrice,
-        stock: body.stock ?? 0,
-        closeAt: body.closeAt === undefined ? null : body.closeAt,
-        leadMinDays,
-        leadMaxDays,
-        status: body.status ?? 'DRAFT',
-        note: body.note ?? null,
-      },
+    const round = await prisma.$transaction(async (tx) => {
+      const created = await tx.productRound.create({
+        data: {
+          productId: product.id,
+          batchId,
+          roundNo: (maxNo._max.roundNo ?? 0) + 1,
+          costPrice,
+          sellPrice,
+          stock: body.stock ?? 0,
+          closeAt: body.closeAt === undefined ? null : body.closeAt,
+          leadMinDays,
+          leadMaxDays,
+          status: body.status ?? 'DRAFT',
+          note: body.note ?? null,
+        },
+      });
+      const prices = body.optionPrices ?? last?.optionPrices;
+      await replaceRoundOptionPrices(tx, created.id, prices);
+      return created;
     });
 
     await audit({

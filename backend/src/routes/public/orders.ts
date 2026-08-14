@@ -17,11 +17,8 @@ import { getSettings, getSettingsCached } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { claimDeliverySlot } from '../../services/delivery.js';
-import {
-  normalizeSelections,
-  optionsFromVariants,
-  sizeColorFromSelections,
-} from '../../lib/options.js';
+import { resolveOptionPrice } from '../../lib/optionPrices.js';
+import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
 
 export const publicOrdersRouter = Router();
 
@@ -61,7 +58,7 @@ publicOrdersRouter.post(
     // `productId` нь дэлгүүрийн зүгээс ТОЙРГИЙН id — /products тэрийг буцаадаг.
     const rounds = await prisma.productRound.findMany({
       where: { id: { in: body.items.map((i) => i.productId) }, deletedAt: null },
-      include: { product: { include: { variants: true } } },
+      include: { product: { include: { variants: true } }, optionPrices: true },
     });
     const byId = new Map(rounds.map((r) => [r.id, r]));
 
@@ -111,6 +108,7 @@ publicOrdersRouter.post(
         options.map((opt) => [opt.name, raw[opt.name]!]),
       );
       const { size, color } = sizeColorFromSelections(selections);
+      const priced = resolveOptionPrice(round, round.optionPrices, selections);
       return {
         roundId: round.id,
         productId: round.productId,
@@ -119,8 +117,8 @@ publicOrdersRouter.post(
         size,
         color,
         qty: item.qty,
-        unitPrice: round.sellPrice,
-        costPriceSnapshot: round.costPrice,
+        unitPrice: priced.sellPrice,
+        costPriceSnapshot: priced.costPrice,
         arriveFrom: round.closeAt === null ? null : arrival.arriveFrom,
         arriveTo: round.closeAt === null ? null : arrival.arriveTo,
       };

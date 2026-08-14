@@ -365,6 +365,10 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                     <Badge tone="neutral">Авсан</Badge>
                   ) : item.itemStatus === "arrived" ? (
                     <Badge tone="ok">Ирсэн</Badge>
+                  ) : (item.arrivedQty ?? 0) > 0 ? (
+                    <Badge tone="warn">
+                      {item.arrivedQty}/{item.qty} ирсэн
+                    </Badge>
                   ) : (
                     <Badge tone="warn">Хүлээж байна</Badge>
                   )}

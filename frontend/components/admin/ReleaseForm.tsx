@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
+import { OptionPriceEditor, seedOptionPriceDrafts } from "@/components/admin/OptionPriceEditor";
 import { Badge, Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { fromDatetimeLocal, money } from "@/lib/format";
+import { pricedOptionName } from "@/lib/options";
 import type { AdminProduct, ProductStatus } from "@/lib/types";
 
 const STATUSES: { value: ProductStatus; label: string }[] = [
@@ -41,6 +43,9 @@ export function ReleaseForm({
 
   const [costPrice, setCostPrice] = useState("");
   const [sellPrice, setSellPrice] = useState("");
+  const [optionRows, setOptionRows] = useState<
+    ReturnType<typeof seedOptionPriceDrafts>
+  >([]);
   const [stock, setStock] = useState("0");
   const [closeAt, setCloseAt] = useState("");
   const [leadMin, setLeadMin] = useState("7");
@@ -87,6 +92,12 @@ export function ReleaseForm({
       setSellPrice(String(next.sellPrice));
       setLeadMin(String(next.leadMinDays));
       setLeadMax(String(next.leadMaxDays));
+      setOptionRows(
+        seedOptionPriceDrafts(product.options, next.optionPrices, {
+          sell: String(next.sellPrice),
+          cost: String(next.costPrice),
+        }),
+      );
     }
     setSeeded(true);
   }, [product, seeded]);
@@ -95,6 +106,19 @@ export function ReleaseForm({
   const sell = Number(sellPrice) || 0;
   const profit = sell - cost;
   const margin = sell > 0 ? Math.round((profit / sell) * 100) : 0;
+  const hasOptions = (product?.options?.length ?? 0) > 0;
+  const primaryKind = pricedOptionName(product?.options);
+  const optionPrices = optionRows
+    .filter((r) => Number(r.sell) > 0)
+    .map((r) => ({
+      kind: r.kind,
+      value: r.value,
+      sellPrice: Number(r.sell) || 0,
+      costPrice: Number(r.cost) || 0,
+    }));
+  const primaryOk =
+    !primaryKind ||
+    optionRows.filter((r) => r.kind === primaryKind).every((r) => Number(r.sell) > 0);
 
   const title = kind === "preorder" ? "Урьдчилсан захиалга үүсгэх" : "Бэлэн бараа гаргах";
   const hint =
@@ -103,21 +127,32 @@ export function ReleaseForm({
       : "Каталогоос бараа сонгоод үнэ, үлдэгдэл тавина.";
 
   const canSave =
-    Boolean(productId) && sell > 0 && (kind === "ready" || Boolean(closeAt));
+    Boolean(productId) &&
+    primaryOk &&
+    (sell > 0 || optionPrices.length > 0) &&
+    (kind === "ready" || Boolean(closeAt));
 
   const onProductChange = (id: string) => {
     setProductId(id);
-    const next = products.find((p) => p.id === id)?.currentRound;
+    const picked = products.find((p) => p.id === id);
+    const next = picked?.currentRound;
     if (next) {
       setCostPrice(String(next.costPrice));
       setSellPrice(String(next.sellPrice));
       setLeadMin(String(next.leadMinDays));
       setLeadMax(String(next.leadMaxDays));
+      setOptionRows(
+        seedOptionPriceDrafts(picked?.options, next.optionPrices, {
+          sell: String(next.sellPrice),
+          cost: String(next.costPrice),
+        }),
+      );
     } else {
       setCostPrice("");
       setSellPrice("");
       setLeadMin("7");
       setLeadMax("14");
+      setOptionRows(seedOptionPriceDrafts(picked?.options, undefined, { sell: "", cost: "" }));
     }
   };
 
@@ -126,9 +161,19 @@ export function ReleaseForm({
     setBusy(true);
     setError(null);
     try {
+      const derivedSell =
+        sell > 0
+          ? sell
+          : optionPrices.length
+            ? Math.min(...optionPrices.map((p) => p.sellPrice))
+            : 0;
+      const derivedCost =
+        cost > 0
+          ? cost
+          : optionPrices.find((p) => p.sellPrice === derivedSell)?.costPrice ?? 0;
       await adminApi.createRound(productId, {
-        costPrice: cost,
-        sellPrice: sell,
+        costPrice: derivedCost,
+        sellPrice: derivedSell,
         stock: kind === "ready" ? Number(stock) || 0 : 0,
         closeAt:
           kind === "preorder" && closeAt ? fromDatetimeLocal(closeAt) : null,
@@ -136,6 +181,7 @@ export function ReleaseForm({
         leadMaxDays: Number(leadMax) || 0,
         status,
         note: note.trim() || undefined,
+        optionPrices: hasOptions ? optionPrices : [],
       });
       toast.success(kind === "preorder" ? "Урьдчилсан захиалга үүслээ." : "Бэлэн бараа гарлаа.");
       await onSaved();
@@ -203,15 +249,27 @@ export function ReleaseForm({
               />
             </Field>
           </div>
-          {sell > 0 && (
-            <div className="flex items-center gap-2 text-[13px]">
-              <span className="text-ink-2">Ашиг</span>
-              <span className="tnum">{money(profit)}</span>
-              <Badge tone={margin >= 40 ? "ok" : margin >= 0 ? "neutral" : "danger"}>
-                {margin}%
-              </Badge>
-            </div>
-          )}
+            {sell > 0 && (
+              <div className="flex items-center gap-2 text-[13px]">
+                <span className="text-ink-2">Ашиг</span>
+                <span className="tnum">{money(profit)}</span>
+                <Badge tone={margin >= 40 ? "ok" : margin >= 0 ? "neutral" : "danger"}>
+                  {margin}%
+                </Badge>
+              </div>
+            )}
+            {hasOptions && product && (
+              <OptionPriceEditor
+                options={product.options}
+                rows={optionRows}
+                onChange={setOptionRows}
+                onFillAll={() =>
+                  setOptionRows((prev) =>
+                    prev.map((r) => ({ ...r, sell: sellPrice, cost: costPrice })),
+                  )
+                }
+              />
+            )}
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">

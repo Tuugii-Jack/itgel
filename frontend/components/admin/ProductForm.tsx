@@ -219,7 +219,8 @@ export function ProductForm({
             <div>
               <div className="text-[15px] font-medium">Сонголт</div>
               <p className="m-0 text-[13px] text-muted">
-                Бараанд тохирох төрөл нэмнэ үү (хоосон бол сонголтгүй).
+                Бараанд тохирох төрөл нэмнэ үү (хоосон бол сонголтгүй). Үнийг
+                гаргалт нээхэд хэмжээ/утга тус бүрээр тавина.
               </p>
             </div>
             <Button size="sm" variant="outline" onClick={() => addOption()}>

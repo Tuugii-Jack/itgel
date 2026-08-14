@@ -17,6 +17,7 @@ import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { countdown, dayTimeLabel, money } from "@/lib/format";
+import { priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -311,7 +312,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                       </div>
                     </Td>
                     <Td className="tnum whitespace-nowrap">
-                      <div>{money(round.sellPrice)}</div>
+                      <div>{priceLabel(round.price, round.priceMax)}</div>
                       <div className="text-[13px] text-muted">
                         өртөг {money(round.costPrice)}
                       </div>
@@ -407,7 +408,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                       <ProductStatusBadge status={round.status} />
                     </div>
                     <div className="mt-1 tnum text-[13px] text-muted">
-                      #{round.roundNo} · {money(round.sellPrice)}
+                      #{round.roundNo} · {priceLabel(round.price, round.priceMax)}
                       {kind === "order" && round.closeAt
                         ? ` · ${dayTimeLabel(round.closeAt)}`
                         : kind === "ready"

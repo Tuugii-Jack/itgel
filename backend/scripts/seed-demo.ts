@@ -525,6 +525,11 @@ async function main() {
     });
   }
 
+  await prisma.$executeRaw`
+    UPDATE "OrderItem" SET "arrivedQty" = "qty"
+    WHERE "arrivedAt" IS NOT NULL AND "arrivedQty" = 0
+  `;
+
   console.info('');
   console.info('=== Демо өгөгдөл бэлэн ===');
   console.info(`Бараа:      ${products.length}`);

@@ -7,10 +7,16 @@ import type {
   Product,
   ProductRound,
   ProductVariant,
+  RoundOptionPrice,
   SizeChartRow,
 } from '@prisma/client';
 import { computeArrival, toIso } from '../lib/date.js';
 import { marginPercent } from '../lib/money.js';
+import {
+  adminOptionPrices,
+  displayPriceRange,
+  publicOptionPrices,
+} from '../lib/optionPrices.js';
 import {
   optionsFromVariants,
   selectionsOf,
@@ -30,6 +36,7 @@ export type RoundWithProduct = ProductRound & {
   product: ProductWithRelations;
   /** Аль багцад зориулж гаргасан бэ — админ жагсаалтад холбоос болно. */
   batch?: Pick<Batch, 'id' | 'name' | 'stage'> | null;
+  optionPrices?: Pick<RoundOptionPrice, 'kind' | 'value' | 'sellPrice' | 'costPrice'>[];
 };
 
 /**
@@ -42,6 +49,7 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
   const { product } = round;
   const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
   const options = optionsFromVariants(product.variants);
+  const range = displayPriceRange(round.sellPrice, round.optionPrices);
   return {
     id: round.id,
     productId: product.id,
@@ -50,7 +58,9 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     description: product.description,
     categoryId: product.categoryId,
     category: product.category ? { id: product.category.id, name: product.category.name } : undefined,
-    price: round.sellPrice,
+    price: range.price,
+    priceMax: range.priceMax,
+    optionPrices: publicOptionPrices(round.optionPrices),
     stock: round.stock,
     type: round.closeAt === null ? ('ready' as const) : ('order' as const),
     status: round.status,
@@ -90,6 +100,7 @@ export function adminRound(
     costPrice: round.costPrice,
     // `price` нь хэрэглэгчийн нэр — админд `sellPrice` гэж бас өгнө.
     sellPrice: round.sellPrice,
+    optionPrices: adminOptionPrices(round.optionPrices),
     profit: round.sellPrice - round.costPrice,
     marginPercent: marginPercent(round.sellPrice, round.costPrice),
     note: round.note,
@@ -159,7 +170,7 @@ export function publicOrderItem(item: OrderItem) {
     return normalizeLegacy(item.size, item.color);
   })();
   const { size, color } = sizeColorFromSelections(selections);
-  const arrived = item.arrivedAt !== null;
+  const arrived = item.arrivedAt !== null || item.arrivedQty >= item.qty;
   const handedOver = item.handedOverAt !== null;
   const itemStatus = item.cancelledAt
     ? ('cancelled' as const)
@@ -178,6 +189,7 @@ export function publicOrderItem(item: OrderItem) {
     size: size ?? item.size,
     color: color ?? item.color,
     qty: item.qty,
+    arrivedQty: item.arrivedQty,
     unitPrice: item.unitPrice,
     total: item.unitPrice * item.qty,
     /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { OrderDetail } from "@/components/admin/OrderDetail";
+import { ArrivalRegister } from "@/components/admin/ArrivalRegister";
 import {
   BATCH_STAGE_LABEL,
   Metric,
@@ -134,7 +135,7 @@ export default function BatchesPage() {
     <div>
       <PageHead
         title="Ачааны багц"
-        hint="Ирсэн хаагдсан барааг он/сараар сонгож багцад хийгээд Зам дээр → Агуулахад → Дууссан урагшлуулна."
+        hint="Ирсэн хаагдсан барааг он/сараар сонгож багцад хийнэ. Зам дээр байхад өнгө/хэмжээ бүрийн ирсэн тоог оруулна — түрүүлж захиалсан хүмүүст эхлээд хуваарилагдана."
         actions={
           <Button onClick={() => setCreating((v) => !v)}>
             {creating ? "Болих" : "Багц үүсгэх"}
@@ -336,7 +337,11 @@ function BatchDetail({
       await adminApi.advanceBatch(batch.id);
       await load(true);
       onListChanged();
-      toast.success(`Багц «${BATCH_STAGE_LABEL[batch.nextStage]}» шатанд орлоо.`);
+      toast.success(
+        batch.nextStage === "AT_WAREHOUSE"
+          ? "Багц агуулахад орлоо. Ирсэн тоо цаашид засагдахгүй."
+          : `Багц «${BATCH_STAGE_LABEL[batch.nextStage]}» шатанд орлоо.`,
+      );
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Шат ахиулж чадсангүй.");
     } finally {
@@ -665,6 +670,10 @@ function BatchDetail({
           </tbody>
         </Table>
       )}
+
+      <div className="mt-4">
+        <ArrivalRegister batch={batch} onSaved={() => load(true)} />
+      </div>
 
       {batch.products.length > 0 && (
         <Card className="mt-4 p-4">

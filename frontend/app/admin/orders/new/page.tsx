@@ -7,6 +7,7 @@ import { PageHead } from "@/components/admin/shared";
 import { Button, Card, ErrorNote, Field, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { money, phoneLabel } from "@/lib/format";
+import { optionValuePrice, priceForSelections, priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminCustomer, AdminProduct, AdminRound, ProductOption } from "@/lib/types";
 
@@ -145,7 +146,11 @@ export default function AdminCreateOrderPage() {
           key: `${row.round.id}-${Date.now()}-${added.length}`,
           roundId: row.round.id,
           name: `${row.product.name}${row.round.roundNo ? ` #${row.round.roundNo}` : ""}`,
-          price: row.round.sellPrice,
+          price: priceForSelections(
+            row.round.sellPrice,
+            row.round.optionPrices,
+            selections,
+          ),
           qty: 1,
           options: row.product.options,
           selections,
@@ -305,7 +310,10 @@ export default function AdminCreateOrderPage() {
                     Хасах
                   </button>
                 </div>
-                {line.options.map((opt) => (
+                {line.options.map((opt) => {
+                  const row = allRounds.find((r) => r.round.id === line.roundId);
+                  const priced = (row?.round.optionPrices ?? []).some((p) => p.kind === opt.name);
+                  return (
                   <label key={opt.name} className="mt-2 block text-[13px]">
                     <span className="text-ink-2">{opt.name}</span>
                     <select
@@ -313,25 +321,40 @@ export default function AdminCreateOrderPage() {
                       value={line.selections[opt.name] ?? ""}
                       onChange={(e) =>
                         setLines((prev) =>
-                          prev.map((l) =>
-                            l.key === line.key
-                              ? {
-                                  ...l,
-                                  selections: { ...l.selections, [opt.name]: e.target.value },
-                                }
-                              : l,
-                          ),
+                          prev.map((l) => {
+                            if (l.key !== line.key) return l;
+                            const selections = { ...l.selections, [opt.name]: e.target.value };
+                            const found = allRounds.find((r) => r.round.id === l.roundId);
+                            return {
+                              ...l,
+                              selections,
+                              price: priceForSelections(
+                                found?.round.sellPrice ?? l.price,
+                                found?.round.optionPrices,
+                                selections,
+                              ),
+                            };
+                          }),
                         )
                       }
                     >
-                      {opt.values.map((v) => (
-                        <option key={v} value={v}>
-                          {v}
-                        </option>
-                      ))}
+                      {opt.values.map((v) => {
+                        const p = optionValuePrice(
+                          row?.round.optionPrices,
+                          opt.name,
+                          v,
+                          line.price,
+                        );
+                        return (
+                          <option key={v} value={v}>
+                            {priced ? `${v} · ${money(p)}` : v}
+                          </option>
+                        );
+                      })}
                     </select>
                   </label>
-                ))}
+                  );
+                })}
                 <label className="mt-2 block text-[13px]">
                   <span className="text-ink-2">Тоо</span>
                   <Input
@@ -463,7 +486,9 @@ export default function AdminCreateOrderPage() {
                           {round.closeAt === null ? " · бэлэн" : ""}
                         </span>
                       </span>
-                      <span className="tnum shrink-0 text-[14px]">{money(round.sellPrice)}</span>
+                      <span className="tnum shrink-0 text-[14px]">
+                        {priceLabel(round.price, round.priceMax)}
+                      </span>
                     </label>
                   );
                 })

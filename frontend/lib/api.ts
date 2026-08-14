@@ -493,6 +493,7 @@ export const adminApi = {
       status?: string;
       note?: string;
       batchId?: string | null;
+      optionPrices?: { kind: string; value: string; sellPrice: number; costPrice?: number }[];
     },
   ) =>
     request<AdminProduct>(`/admin/products/${productId}/rounds`, {
@@ -513,6 +514,7 @@ export const adminApi = {
       status: string;
       note: string | null;
       batchId: string | null;
+      optionPrices: { kind: string; value: string; sellPrice: number; costPrice?: number }[];
     }>,
   ) =>
     request<AdminRound>(`/admin/rounds/${roundId}`, {
@@ -773,6 +775,23 @@ export const adminApi = {
     request<AdminBatch & { ordersMoved: number }>(`/admin/batches/${id}/advance`, {
       ...adminAuth,
       method: "POST",
+    }).then((r) => r.data),
+
+  /** Сонголт бүрийн ирсэн нийт тоог тавина (засаж болно). */
+  registerBatchArrivals: (
+    batchId: string,
+    lines: { roundId: string; selections: Record<string, string>; arrivedQty: number }[],
+  ) =>
+    request<{
+      allocated: number;
+      released: number;
+      unused: number;
+      ordersArrived: number;
+      ordersReverted: number;
+    }>(`/admin/batches/${batchId}/arrivals`, {
+      ...adminAuth,
+      method: "POST",
+      body: { lines },
     }).then((r) => r.data),
 
   revertBatchStage: (id: string) =>

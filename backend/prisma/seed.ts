@@ -410,7 +410,15 @@ async function createOrder(order: SeedOrder) {
       arrivalNotifiedAt: reached('ARRIVED') ? at(10) : null,
       handedOverAt: reached('HANDED_OVER') ? at(12) : null,
       cancelledAt: order.status === 'CANCELLED' ? at(1) : null,
-      items: { create: order.items },
+      items: {
+        create: order.items.map((item) => ({
+          ...item,
+          ...(reached('ARRIVED')
+            ? { arrivedAt: at(10), arrivedQty: item.qty ?? 1 }
+            : {}),
+          ...(reached('HANDED_OVER') ? { handedOverAt: at(12) } : {}),
+        })),
+      },
     },
   });
 

@@ -1,4 +1,4 @@
-import type { Batch, Order, OrderStatus, Prisma, ProductRound } from '@prisma/client';
+import type { Batch, OrderStatus, Prisma, ProductRound } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { computeArrival } from '../lib/date.js';
@@ -12,7 +12,6 @@ import {
   previousBatchStage,
   stepsToStatus,
 } from '../lib/orderStatus.js';
-import { notifyArrival, markItemsArrivedForBatch, promoteOrdersToArrived } from './orders.js';
 import { isProductPaid } from './money.js';
 
 /** Төлөв бүрийн огноог тэмдэглэх талбар. */
@@ -314,17 +313,12 @@ export interface AdvanceResult {
 /**
  * Багцыг дараагийн шат руу ахиулна.
  *
- * Багц ба доторх бүх захиалга НЭГ транзакцад шилжинэ — дунд нь алдвал
- * юу ч өөрчлөгдөхгүй. Өмнө нь захиалга бүрд тусдаа транзакц нээдэг байсан
- * тул хагас шилжсэн байдал үүсэх боломжтой байв.
- *
- * Дахин дуудахад аюулгүй: аль хэдийн зорилтод хүрсэн захиалгыг алгасна.
- * SMS нь транзакц амжилттай дууссаны дараа илгээгдэнэ.
+ * Багц ба доторх захиалга НЭГ транзакцад шилжинэ.
+ * Агуулахад ороход захиалга автоматаар ARRIVED болохгүй — ирсэн тоог
+ * сонголт бүрээр бүртгэсний дараа FIFO-оор хуваарилагдана.
  */
 export async function advanceBatch(batchId: string, actor: string): Promise<AdvanceResult> {
-  const arrivedOrderIds: string[] = [];
-
-  const result = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const batch = await tx.batch.findFirst({
       where: { id: batchId, deletedAt: null },
       include: {
@@ -417,28 +411,13 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
           })),
         });
 
-        if (target === 'ARRIVED') arrivedOrderIds.push(...group.map((o) => o.id));
         moved += group.length;
       }
     } else {
       skipped = orders.length;
     }
 
-    // Мөрөөр ирсэн тэмдэг — Order.batchId-аас гадуур тойрог холбогдсон захиалгад ч.
-    if (next === 'AT_WAREHOUSE') {
-      const itemOrderIds = await markItemsArrivedForBatch(tx, batch.id, now);
-      const promoted = await promoteOrdersToArrived(
-        tx,
-        itemOrderIds,
-        actor,
-        `Багц "${batch.name}" → ${BATCH_STAGE_LABEL[next]}`,
-        now,
-      );
-      for (const id of promoted) {
-        if (!arrivedOrderIds.includes(id)) arrivedOrderIds.push(id);
-      }
-      // Багцын захиалгад аль хэдийн ARRIVED болсон ч мөрөнд arrivedAt тавьсан.
-    }
+    // Ирсэн тоог сонголт бүрээр бүртгэх хүртэл захиалга ARRIVED болохгүй.
 
     await audit(
       {
@@ -454,19 +433,6 @@ export async function advanceBatch(batchId: string, actor: string): Promise<Adva
 
     return { batch: updatedBatch, ordersMoved: moved, ordersSkipped: skipped };
   });
-
-  // Мэдэгдэл нь транзакцын гадна — SMS амжилтгүй болсон ч төлөв буцахгүй.
-  // Хүлээхгүй илгээнэ: олон захиалгатай багцад «Шат ахиулах» товч SMS
-  // провайдерээс хамаарч гацахгүй. Илгээгдээгүй нь `arrivalNotifiedAt`-аар
-  // тэмдэглэгдэж, cron барина.
-  if (arrivedOrderIds.length > 0) {
-    void (async () => {
-      const orders = await prisma.order.findMany({ where: { id: { in: arrivedOrderIds } } });
-      for (const order of orders) await notifyArrival(order as Order);
-    })().catch((e) => console.warn('[sms] багцын ирсэн мэдэгдэл алдаа:', e));
-  }
-
-  return result;
 }
 
 /**
@@ -497,8 +463,6 @@ export async function revertBatch(batchId: string, actor: string): Promise<Advan
     });
 
     const fromStage = batch.stage;
-    const currentTarget = orderStatusForBatchStage(fromStage);
-    const prevTarget = orderStatusForBatchStage(prev);
 
     const updatedBatch = await tx.batch.update({
       where: { id: batch.id },
@@ -508,36 +472,16 @@ export async function revertBatch(batchId: string, actor: string): Promise<Advan
     let moved = 0;
     let skipped = 0;
 
-    if (
-      currentTarget &&
-      prevTarget &&
-      currentTarget !== prevTarget
-    ) {
-      const movable = orders.filter((o) => o.status === currentTarget);
+    // Агуулахаас буцах: FIFO-оор ирсэн гэж тэмдэглэсэн захиалгыг зам дээр буцаана.
+    if (fromStage === 'AT_WAREHOUSE') {
+      const movable = orders.filter((o) => o.status === 'ARRIVED');
       skipped = orders.length - movable.length;
 
       if (movable.length > 0) {
-        const clear: Record<string, null> = {};
-        const clearField = STATUS_TIMESTAMP[currentTarget];
-        if (clearField) clear[clearField] = null;
-        if (currentTarget === 'ARRIVED') clear.arrivalNotifiedAt = null;
-
         await tx.order.updateMany({
           where: { id: { in: movable.map((o) => o.id) } },
-          data: { status: prevTarget, ...clear },
+          data: { status: 'IN_TRANSIT', arrivedAt: null, arrivalNotifiedAt: null },
         });
-
-        if (currentTarget === 'ARRIVED') {
-          await tx.orderItem.updateMany({
-            where: {
-              orderId: { in: movable.map((o) => o.id) },
-              cancelledAt: null,
-              handedOverAt: null,
-              round: { batchId: batch.id },
-            },
-            data: { arrivedAt: null },
-          });
-        }
 
         await tx.auditLog.createMany({
           data: movable.map((order) => ({
@@ -545,36 +489,30 @@ export async function revertBatch(batchId: string, actor: string): Promise<Advan
             action: 'STATUS_REVERT',
             entity: 'Order',
             entityId: order.id,
-            before: { status: currentTarget },
+            before: { status: 'ARRIVED' },
             after: {
-              status: prevTarget,
+              status: 'IN_TRANSIT',
               reason: `Багц "${batch.name}" ← ${BATCH_STAGE_LABEL[prev]}`,
             },
           })),
         });
-
         moved = movable.length;
       }
-    } else {
-      skipped = orders.length;
-    }
 
-    // Агуулахаас буцах үед багцын тойрогт холбоотой мөрүүдийн arrivedAt-ийг цэвэрлэнэ
-    // (дээрх захиалгын жагсаалтад ороогүй ч мөр тэмдэглэгдсэн байж болно).
-    if (fromStage === 'AT_WAREHOUSE') {
       await tx.orderItem.updateMany({
         where: {
           cancelledAt: null,
           handedOverAt: null,
-          arrivedAt: { not: null },
           round: { batchId: batch.id },
           order: {
             deletedAt: null,
             status: { notIn: FROZEN_ORDER_STATUSES },
           },
         },
-        data: { arrivedAt: null },
+        data: { arrivedAt: null, arrivedQty: 0 },
       });
+    } else {
+      skipped = orders.length;
     }
 
     await audit(

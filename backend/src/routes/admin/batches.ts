@@ -22,6 +22,7 @@ import {
   resyncArrivalsForBatch,
   revertBatch,
 } from '../../services/batches.js';
+import { registerBatchArrivals, summarizeRoundArrivals } from '../../services/batchArrival.js';
 import { roundStats } from '../../services/roundStats.js';
 import { finalizeRoundClose } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
@@ -206,8 +207,9 @@ adminBatchesRouter.get(
       findOrderIdsForBatch(prisma, batch.id, roundIds, true),
     ]);
     const allIds = [...new Set([...activeIds, ...omittedIds])];
-    const [stats, orderRows] = await Promise.all([
+    const [stats, arrivals, orderRows] = await Promise.all([
       roundStats(roundIds),
+      summarizeRoundArrivals(prisma, roundIds),
       allIds.length === 0
         ? Promise.resolve([])
         : prisma.order.findMany({
@@ -272,6 +274,7 @@ adminBatchesRouter.get(
             closeAt: round.closeAt?.toISOString() ?? null,
             orderedQty: s?.qty ?? 0,
             customerCount: s?.customerCount ?? 0,
+            variants: arrivals.get(round.id) ?? [],
           };
         }),
         totalValue: orders.reduce((sum, o) => sum + o.subtotal, 0),
@@ -634,6 +637,51 @@ adminBatchesRouter.delete(
     });
 
     res.json({ data: { removed: true, unlinked: orderCount > 0 } });
+  }),
+);
+
+/**
+ * POST /batches/:id/arrivals — ирсэн НИЙТ тоог сонголт бүрээр тавина (засаж болно).
+ */
+adminBatchesRouter.post(
+  '/:id/arrivals',
+  validate({
+    params: idParams,
+    body: z.object({
+      lines: z
+        .array(
+          z.object({
+            roundId: z.string().min(1),
+            selections: z.record(z.string(), z.string()).default({}),
+            arrivedQty: z.coerce.number().int().min(0).max(100_000),
+          }),
+        )
+        .min(1)
+        .max(200),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      lines: { roundId: string; selections: Record<string, string>; arrivedQty?: number; qty?: number }[];
+    };
+    const result = await registerBatchArrivals(
+      param(req, 'id'),
+      body.lines.map((l) => ({
+        roundId: l.roundId,
+        selections: l.selections,
+        arrivedQty: l.arrivedQty ?? l.qty ?? 0,
+      })),
+      actorOf(req),
+    );
+    res.json({
+      data: {
+        allocated: result.allocated,
+        released: result.released,
+        unused: result.unused,
+        ordersArrived: result.ordersArrived.length,
+        ordersReverted: result.ordersReverted.length,
+      },
+    });
   }),
 );
 

@@ -17,6 +17,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { money } from "@/lib/format";
+import { optionValuePrice, priceForSelections, priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -90,7 +91,8 @@ export default function ProductPage({
   const blocked = soldOut || closed;
   const options = product.options ?? [];
   const missingOpt = options.find((o) => !selections[o.name]);
-  const total = product.price * qty;
+  const unitPrice = priceForSelections(product.price, product.optionPrices, selections);
+  const total = unitPrice * qty;
 
   const addToCart = () => {
     if (missingOpt) {
@@ -102,7 +104,7 @@ export default function ProductPage({
     cart.add({
       productId: product.id,
       name: product.name,
-      price: product.price,
+      price: unitPrice,
       image: product.images[0] ?? null,
       type: product.type,
       selections: { ...selections },
@@ -191,7 +193,7 @@ export default function ProductPage({
                 {product.name}
               </h1>
               <div className='tnum text-[26px] font-medium leading-none lg:text-[28px]'>
-                {money(product.price)}
+                {missingOpt ? priceLabel(product.price, product.priceMax) : money(unitPrice)}
               </div>
             </div>
 
@@ -219,7 +221,19 @@ export default function ProductPage({
                           ? 4
                           : Math.max(2, opt.values.length)
                       }
-                      options={opt.values.map((v) => ({ value: v, label: v }))}
+                      options={opt.values.map((v) => {
+                        const priced = (product.optionPrices ?? []).some((p) => p.kind === opt.name);
+                        const p = optionValuePrice(
+                          product.optionPrices,
+                          opt.name,
+                          v,
+                          product.price,
+                        );
+                        return {
+                          value: v,
+                          label: priced ? `${v} · ${money(p)}` : v,
+                        };
+                      })}
                       value={selected}
                       onChange={(v) => {
                         setSelections((prev) => ({ ...prev, [opt.name]: v }));

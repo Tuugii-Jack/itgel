@@ -56,6 +56,31 @@ export function selectionsOf(raw: unknown): Record<string, string> {
   return out;
 }
 
+/** Мөрийн сонголт — JSON байхгүй бол хуучин size/color. */
+export function itemSelections(item: {
+  selections?: unknown;
+  size?: string | null;
+  color?: string | null;
+}): Record<string, string> {
+  const fromJson = selectionsOf(item.selections);
+  if (Object.keys(fromJson).length > 0) return fromJson;
+  return normalizeSelections({ size: item.size, color: item.color });
+}
+
+/** Сонголтын тогтвортой түлхүүр — FIFO бүлэглэлтэд. */
+export function variantKey(selections: Record<string, string>): string {
+  const keys = Object.keys(selections).sort((a, b) => a.localeCompare(b, 'mn'));
+  const ordered: Record<string, string> = {};
+  for (const k of keys) ordered[k] = selections[k]!;
+  return JSON.stringify(ordered);
+}
+
+export function formatSelectionsLabel(selections: Record<string, string>): string {
+  const entries = Object.entries(selections);
+  if (entries.length === 0) return '—';
+  return entries.map(([k, v]) => `${k}: ${v}`).join(' · ');
+}
+
 /** Админ хадгалахад — бүлэг бүрийн утгуудыг ProductVariant мөр болгоно. */
 export function variantRowsFromOptions(options: ProductOption[]) {
   const rows: { kind: string; value: string; sortOrder: number }[] = [];

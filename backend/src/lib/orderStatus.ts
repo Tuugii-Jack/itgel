@@ -64,7 +64,8 @@ export function orderStatusForBatchStage(stage: BatchStage): OrderStatus | null 
     case 'IN_TRANSIT':
       return 'IN_TRANSIT';
     case 'AT_WAREHOUSE':
-      return 'ARRIVED';
+      // Ирсэн тоог сонголт бүрээр бүртгэсний дараа захиалга ARRIVED болно.
+      return null;
     default:
       return null;
   }

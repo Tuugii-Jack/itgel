@@ -8,6 +8,7 @@ import {
 } from "@/components/admin/shared";
 import { Badge, Button, Divider } from "@/components/ui";
 import { arrivalLabel, countdown, money } from "@/lib/format";
+import { priceLabel } from "@/lib/options";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
 /** Дэлгүүрт харагдах нэгж — тойрог, эцэг бараагаа дагуулсан. */
@@ -89,7 +90,9 @@ export function StorefrontCard({
         <div className="clamp-2 text-[15px] leading-[1.4] text-ink">{product.name}</div>
 
         <div className="flex items-baseline gap-2">
-          <span className="tnum text-[18px] font-medium">{money(round.sellPrice)}</span>
+          <span className="tnum text-[18px] font-medium">
+            {priceLabel(round.price, round.priceMax)}
+          </span>
           <span className="tnum text-[12px] text-muted">
             өртөг {money(round.costPrice)}
           </span>

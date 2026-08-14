@@ -15,8 +15,9 @@ import {
 } from '../../services/batches.js';
 import { finalizeRoundClose } from '../../services/orders.js';
 import { adminRound } from '../../services/serialize.js';
-import { productStatus, roundFields } from './products.js';
+import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
 import { selectionsOf, sizeColorFromSelections } from '../../lib/options.js';
+import { productStatus, roundFields } from './products.js';
 import { computeArrival } from '../../lib/date.js';
 
 /**
@@ -35,6 +36,7 @@ const roundInclude = {
       sizeChart: { orderBy: { sortOrder: 'asc' as const } },
     },
   },
+  optionPrices: true,
 };
 
 adminRoundsRouter.get(
@@ -179,6 +181,7 @@ const patchBody = z
     note: roundFields.note.nullable(),
     /** null = багцаас салгах; string = IN_TRANSIT багцад холбох. */
     batchId: z.string().min(1).nullable().optional(),
+    optionPrices: roundFields.optionPrices,
   })
   .partial();
 
@@ -243,6 +246,8 @@ adminRoundsRouter.patch(
         include: roundInclude,
       });
 
+      await replaceRoundOptionPrices(tx, updated.id, body.optionPrices);
+
       if (batchId !== undefined) {
         if (batchId) {
           await attachOrdersForRound(tx, updated.id, batchId);
@@ -282,7 +287,10 @@ adminRoundsRouter.patch(
         ]);
       }
 
-      return updated;
+      return tx.productRound.findUniqueOrThrow({
+        where: { id: updated.id },
+        include: roundInclude,
+      });
     });
 
     await audit({

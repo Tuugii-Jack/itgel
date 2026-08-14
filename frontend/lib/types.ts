@@ -95,6 +95,14 @@ export interface ProductOption {
   values: string[];
 }
 
+export interface OptionPrice {
+  kind: string;
+  value: string;
+  price: number;
+  sellPrice?: number;
+  costPrice?: number;
+}
+
 /**
  * Хэрэглэгчийн API — costPrice энд хэзээ ч байхгүй.
  *
@@ -113,6 +121,10 @@ export interface Product {
   categoryId: string;
   category?: { id: string; name: string };
   price: number;
+  /** Сонголтын үнэ ялгаатай бол хамгийн их. `price`-тай тэнцүү бол нэг үнэ. */
+  priceMax?: number;
+  /** Гаргалт дээрх сонголтын үнэ — ж: Хэмжээ S = 10000. */
+  optionPrices?: OptionPrice[];
   stock: number;
   type: "order" | "ready";
   status: ProductStatus;
@@ -236,6 +248,8 @@ export interface OrderItem {
   size: string | null;
   color: string | null;
   qty: number;
+  /** Хэсэгчилсэн ирэлт — 0..qty. Бүтэн ирэхэд itemStatus = arrived. */
+  arrivedQty?: number;
   unitPrice: number;
   total: number;
   /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
@@ -540,6 +554,19 @@ export interface BatchProduct {
   closeAt: string | null;
   orderedQty: number;
   customerCount: number;
+  /** Сонголт (өнгө/хэмжээ) бүрийн захиалсан vs ирсэн. */
+  variants?: BatchArrivalVariant[];
+}
+
+export interface BatchArrivalVariant {
+  key: string;
+  selections: Record<string, string>;
+  label: string;
+  orderedQty: number;
+  arrivedQty: number;
+  remainingQty: number;
+  waitingCustomers: number;
+  handedOverQty?: number;
 }
 
 export interface BatchOrderRow {
