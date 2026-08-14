@@ -399,6 +399,9 @@ export function OrderDetail({
             {totals.deliveryFee > 0 && (
               <SumRow label="Хүргэлт" value={money(totals.deliveryFee)} />
             )}
+            {(totals.cargoFee ?? 0) > 0 && (
+              <SumRow label="Карго" value={money(totals.cargoFee)} />
+            )}
             {(totals.storageFee ?? 0) > 0 && (
               <SumRow label="Агуулахын хураамж" value={money(totals.storageFee)} />
             )}

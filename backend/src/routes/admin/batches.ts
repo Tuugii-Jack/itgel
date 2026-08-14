@@ -26,6 +26,7 @@ import { roundStats } from '../../services/roundStats.js';
 import { finalizeRoundClose } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, PAYMENT_STATE_LABEL } from '../../services/money.js';
+import { syncCargoFeesForRounds } from '../../services/cargoFee.js';
 
 export const adminBatchesRouter = Router();
 
@@ -159,6 +160,8 @@ adminBatchesRouter.get(
           name: r.product.name,
           image: r.product.images[0] ?? null,
           sellPrice: r.sellPrice,
+          costPrice: r.costPrice,
+          cargoFee: r.cargoFee,
           status: r.status,
           closeAt: r.closeAt?.toISOString() ?? null,
           orderedQty: s?.qty ?? 0,
@@ -229,6 +232,7 @@ adminBatchesRouter.get(
         statusLabel: orderStatusLabel(order.status),
         subtotal: order.subtotal,
         dueAmount: order.dueAmount,
+        cargoFee: order.cargoFee,
         paidAmount: order.paidAmount,
         paymentState: state,
         paymentStateLabel: PAYMENT_STATE_LABEL[state],
@@ -262,6 +266,8 @@ adminBatchesRouter.get(
             image: round.product.images[0] ?? null,
             sellPrice: round.sellPrice,
             costPrice: round.costPrice,
+            cargoFee: round.cargoFee,
+            cargoTotal: (s?.qty ?? 0) * round.cargoFee,
             status: round.status,
             closeAt: round.closeAt?.toISOString() ?? null,
             orderedQty: s?.qty ?? 0,
@@ -269,6 +275,7 @@ adminBatchesRouter.get(
           };
         }),
         totalValue: orders.reduce((sum, o) => sum + o.subtotal, 0),
+        totalCargo: orders.reduce((sum, o) => sum + o.cargoFee, 0),
         totalDue: orders.reduce((sum, o) => sum + Math.max(0, o.dueAmount), 0),
         createdAt: batch.createdAt.toISOString(),
       },
@@ -403,6 +410,66 @@ adminBatchesRouter.patch(
 );
 
 /**
+ * POST /batches/:id/cargo-fees — бараа бүрийн нэгж карго үнийг хадгалж,
+ * холбоотой захиалгын `cargoFee` / `dueAmount`-г шинэчилнэ.
+ */
+adminBatchesRouter.post(
+  '/:id/cargo-fees',
+  validate({
+    params: idParams,
+    body: z.object({
+      items: z
+        .array(
+          z.object({
+            roundId: z.string().min(1),
+            cargoFee: z.coerce.number().int().min(0).max(10_000_000),
+          }),
+        )
+        .min(1)
+        .max(200),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { items } = req.body as { items: { roundId: string; cargoFee: number }[] };
+    const batch = await prisma.batch.findFirst({
+      where: { id: req.params.id, deletedAt: null },
+    });
+    if (!batch) throw notFound('Багц олдсонгүй.');
+    if (!canEditBatchComposition(batch.stage)) {
+      throw conflict('Агуулахад ирсэн багцын карго үнийг өөрчлөх боломжгүй.');
+    }
+
+    const roundIds = items.map((i) => i.roundId);
+    const uniqueIds = [...new Set(roundIds)];
+    const rounds = await prisma.productRound.findMany({
+      where: { id: { in: uniqueIds }, batchId: batch.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (rounds.length !== uniqueIds.length) {
+      throw badRequest('Зарим бараа энэ багцад хамаарахгүй.');
+    }
+
+    const feeByRound = new Map(items.map((i) => [i.roundId, i.cargoFee]));
+    const updatedCount = await prisma.$transaction(async (tx) => {
+      for (const [roundId, cargoFee] of feeByRound) {
+        await tx.productRound.update({ where: { id: roundId }, data: { cargoFee } });
+      }
+      return syncCargoFeesForRounds(tx, [...feeByRound.keys()]);
+    });
+
+    await audit({
+      actor: actorOf(req),
+      action: 'UPDATE_CARGO_FEES',
+      entity: 'Batch',
+      entityId: batch.id,
+      after: { items, ordersUpdated: updatedCount },
+    });
+
+    res.json({ data: { saved: feeByRound.size, ordersUpdated: updatedCount } });
+  }),
+);
+
+/**
  * POST /batches/:id/products — хаагдсан гаргалтыг багцад холбоно.
  * `roundId` эсвэл `roundIds` — шинэ гаргалт үүсгэхгүй.
  */
@@ -500,6 +567,7 @@ adminBatchesRouter.post(
           image: r.product.images[0] ?? null,
           sellPrice: r.sellPrice,
           costPrice: r.costPrice,
+          cargoFee: r.cargoFee,
           status: r.status,
           closeAt: r.closeAt?.toISOString() ?? null,
           orderedQty: s?.qty ?? 0,

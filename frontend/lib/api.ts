@@ -356,6 +356,7 @@ export const api = {
     code: string,
     body: {
       type: "PICKUP" | "DELIVERY";
+      payMethod?: "CASH" | "QPAY";
       district?: string;
       khoroo?: string;
       address?: string;
@@ -365,6 +366,7 @@ export const api = {
     request<{
       code: string;
       fulfilment: "PICKUP" | "DELIVERY";
+      cargoPayMethod?: "CASH" | "QPAY" | null;
       deliveryFee: number;
       dueAmount: number;
       delivery: PublicOrder["delivery"];
@@ -785,6 +787,16 @@ export const adminApi = {
       method: "POST",
       body,
     }).then((r) => r.data),
+
+  /** Багцын барааны нэгж карго үнийг хадгална. */
+  saveBatchCargoFees: (
+    batchId: string,
+    items: { roundId: string; cargoFee: number }[],
+  ) =>
+    request<{ saved: number; ordersUpdated: number }>(
+      `/admin/batches/${batchId}/cargo-fees`,
+      { ...adminAuth, method: "POST", body: { items } },
+    ).then((r) => r.data),
 
   omitBatchOrder: (batchId: string, orderId: string) =>
     request<{ omitted: boolean }>(`/admin/batches/${batchId}/orders/${orderId}/omit`, {

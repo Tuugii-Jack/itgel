@@ -69,11 +69,20 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
     };
   }, [session.me]);
 
-  const unpaid =
-    !!order &&
-    order.status !== "CANCELLED" &&
-    awaitingPayment(order.paymentState) &&
-    order.dueAmount > 0;
+  const unpaid = Boolean(
+    order &&
+      store &&
+      order.status !== "CANCELLED" &&
+      awaitingPayment(order.paymentState) &&
+      order.dueAmount > 0 &&
+      order.cargoPayMethod !== "CASH" &&
+      !(
+        order.paidAmount - order.refundedAmount >= order.subtotal &&
+        (order.status === "IN_BATCH" ||
+          order.status === "IN_TRANSIT" ||
+          (order.status === "ARRIVED" && order.fulfilment === null))
+      ),
+  );
 
   // Төлбөр хүлээгдэж байхад төлөвийг автоматаар шинэчилнэ —
   // админ бүртгэмэгц «Төлөгдсөн» гэж харагдана.
@@ -277,7 +286,9 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                 {order.delivery.khoroo && `, ${order.delivery.khoroo}`}
                 {order.delivery.addressText && `, ${order.delivery.addressText}`}
               </div>
-              <div className="tnum">Хүргэлтийн хураамж {money(order.delivery.fee)}</div>
+              <div className="text-[13px] text-muted">
+                Хүргэлтийн төлбөрийг хүргэлтийн компани авна.
+              </div>
             </div>
           </div>
         </div>
@@ -295,6 +306,14 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
             <div className="flex flex-col gap-1.5 border-t border-line bg-surface px-4 py-3.5 text-[14px] text-ink-2">
               <div>{store.address}</div>
               <div>{store.workHours}</div>
+              {(order.cargoFee ?? 0) > 0 && order.cargoPayMethod === "CASH" && order.dueAmount > 0 && (
+                <div className="tnum text-warn">
+                  Карго {money(order.dueAmount)}-г дэлгүүрт бэлнээр төлнө.
+                </div>
+              )}
+              {(order.cargoFee ?? 0) > 0 && order.cargoPayMethod === "QPAY" && order.dueAmount > 0 && (
+                <div className="tnum text-warn">Карго {money(order.dueAmount)} — QPay-ээр төлнө үү.</div>
+              )}
             </div>
           </div>
         </div>
@@ -397,10 +416,10 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
               <span className="tnum">{money(order.storageFee)}</span>
             </div>
           )}
-          {order.deliveryFee > 0 && (
+          {(order.cargoFee ?? 0) > 0 && (
             <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
-              <span>Хүргэлт</span>
-              <span className="tnum">{money(order.deliveryFee)}</span>
+              <span>Карго</span>
+              <span className="tnum">{money(order.cargoFee)}</span>
             </div>
           )}
           <div className="flex items-center justify-between gap-3">

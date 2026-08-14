@@ -492,8 +492,8 @@ async function main() {
       where: { id: arrived.id },
       data: {
         fulfilment: 'DELIVERY',
-        deliveryFee: 6000,
-        dueAmount: arrived.dueAmount + 6000,
+        deliveryFee: 0,
+        dueAmount: arrived.dueAmount,
       },
     });
     await prisma.delivery.create({
@@ -503,7 +503,7 @@ async function main() {
         district: arrived.customer.district ?? 'Баянзүрх',
         khoroo: arrived.customer.khoroo ?? '1-р хороо',
         addressText: arrived.customer.addressText ?? 'Дэлгүүрт ойр',
-        fee: 6000,
+        fee: 0,
         courierName: 'Батжаргалын Тэмүүлэн',
         status: 'ASSIGNED',
       },

@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { Button, ErrorNote, Input, Textarea } from "@/components/ui";
+import { PaymentPanel } from "@/components/PaymentPanel";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { money, weekdayShort } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useToast } from "@/lib/toast";
-import type { PublicOrder, Slot, Store } from "@/lib/types";
+import type { CargoPayMethod, PublicOrder, Slot, Store } from "@/lib/types";
 
 /**
  * 06 Бараа ирсэн — авах арга сонгох.
@@ -27,6 +28,7 @@ export function FulfilmentChooser({
   const session = useSession();
   const toast = useToast();
   const [type, setType] = useState<"PICKUP" | "DELIVERY">("PICKUP");
+  const [payMethod, setPayMethod] = useState<CargoPayMethod | null>(null);
   const [district, setDistrict] = useState<string | null>(null);
   const [khoroo, setKhoroo] = useState("");
   const [address, setAddress] = useState("");
@@ -35,6 +37,16 @@ export function FulfilmentChooser({
   const [slotsError, setSlotsError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [awaitingQpay, setAwaitingQpay] = useState<PublicOrder | null>(null);
+
+  const cargoFee = order.cargoFee ?? 0;
+  const needsCargoPay = type === "PICKUP" && cargoFee > 0;
+  const namedDistricts = store.deliveryDistricts ?? [];
+  const districts =
+    namedDistricts.length > 0
+      ? namedDistricts
+      : store.deliveryFees.map((d) => d.district);
+  const total = order.dueAmount;
 
   const loadSlots = () => {
     api
@@ -61,34 +73,32 @@ export function FulfilmentChooser({
     if (saved.addressText) setAddress(saved.addressText);
   }, [session.me]);
 
-  const minFee = store.deliveryFees.length
-    ? Math.min(...store.deliveryFees.map((d) => d.fee))
-    : 5000;
-  const fee =
-    type === "DELIVERY" && district
-      ? (store.deliveryFees.find((d) => d.district === district)?.fee ?? minFee)
-      : 0;
-  const total = order.dueAmount + fee;
   const liveItems = order.items.filter((i) => !i.cancelled);
 
   const submit = async () => {
     setError(null);
-    if (type === "DELIVERY" && (!district || !day)) {
-      const message = "Дүүрэг болон хүргэлтийн өдрөө сонгоно уу.";
+    if (type === "DELIVERY" && (!district || !khoroo.trim() || !address.trim() || !day)) {
+      const message = "Дүүрэг, хороо, хаяг болон хүргэлтийн өдрөө бөглөнө үү.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    if (needsCargoPay && !payMethod) {
+      const message = "Карго төлбөрийн хэлбэр сонгоно уу.";
       setError(message);
       toast.error(message);
       return;
     }
     setBusy(true);
     try {
-      await api.chooseFulfilment(order.code, {
+      const result = await api.chooseFulfilment(order.code, {
         type,
+        payMethod: needsCargoPay ? (payMethod ?? undefined) : undefined,
         district: district ?? undefined,
         khoroo: khoroo || undefined,
         address: address || undefined,
         day: day ?? undefined,
       });
-      // Дараагийн удаа автоматаар орохын тулд хаягийг хадгална.
       if (type === "DELIVERY" && session.me) {
         await api
           .updateMe({
@@ -98,7 +108,28 @@ export function FulfilmentChooser({
           })
           .catch(() => undefined);
       }
-      toast.success(type === "DELIVERY" ? "Хүргэлт сонгогдлоо." : "Авах арга хадгалагдлаа.");
+
+      if (type === "PICKUP" && payMethod === "QPAY" && result.dueAmount > 0) {
+        setAwaitingQpay({
+          ...order,
+          fulfilment: "PICKUP",
+          cargoPayMethod: "QPAY",
+          dueAmount: result.dueAmount,
+          deliveryFee: result.deliveryFee,
+          paymentState: "PARTIAL",
+        });
+        toast.success("QPay-ээр карго төлөөрэй.");
+        setBusy(false);
+        return;
+      }
+
+      toast.success(
+        type === "DELIVERY"
+          ? "Хүргэлт сонгогдлоо."
+          : payMethod === "CASH"
+            ? "Карго-г дэлгүүрт бэлнээр төлнө."
+            : "Авах арга хадгалагдлаа.",
+      );
       onDone();
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
@@ -107,6 +138,26 @@ export function FulfilmentChooser({
       setBusy(false);
     }
   };
+
+  if (awaitingQpay) {
+    return (
+      <div className="px-4 pb-24 pt-6 lg:px-10 lg:pb-12 lg:pt-8">
+        <div className="tnum text-[13px] text-muted">{order.code}</div>
+        <div className="mt-1 text-[24px] font-medium">Карго төлөх</div>
+        <p className="mt-1 mb-5 text-[14px] text-ink-2">
+          QPay-ээр {money(awaitingQpay.dueAmount)} төлнө үү. Төлсний дараа бараагаа авна.
+        </p>
+        <PaymentPanel
+          order={awaitingQpay}
+          store={store}
+          onClaimed={() => {
+            toast.success("Төлбөр орлоо.");
+            onDone();
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="pb-24 lg:px-10 lg:pb-12 lg:pt-8">
@@ -160,7 +211,15 @@ export function FulfilmentChooser({
           selected={type === "PICKUP"}
           onSelect={() => setType("PICKUP")}
           title="Өөрөө ирж авах"
-          right={<span className="whitespace-nowrap text-[14px] text-ok">Үнэгүй</span>}
+          right={
+            cargoFee > 0 ? (
+              <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
+                Карго {money(cargoFee)}
+              </span>
+            ) : (
+              <span className="whitespace-nowrap text-[14px] text-ok">Үнэгүй</span>
+            )
+          }
         >
           <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">{store.address}</span>
           <span className="mt-0.5 block text-[14px] text-ink-2">{store.workHours}</span>
@@ -170,28 +229,54 @@ export function FulfilmentChooser({
           selected={type === "DELIVERY"}
           onSelect={() => setType("DELIVERY")}
           title="Хүргүүлэх"
-          right={
-            <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
-              {money(minFee)}-с
-            </span>
-          }
+          right={<span className="whitespace-nowrap text-[14px] text-ink-2">Компани хүргэнэ</span>}
         >
-          <span className="mt-1.5 block text-[14px] text-ink-2">Мя, Пү, Бя гаригт</span>
+          <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">
+            Хүргэлтийн төлбөрийг хүргэлтийн компани авна. Мя, Пү, Бя гаригт.
+          </span>
         </OptionCard>
       </div>
+
+      {needsCargoPay && (
+        <div className="flex flex-col gap-3 px-4 pt-6 lg:px-0 lg:pt-4">
+          <div className="text-[15px] font-medium lg:text-[17px]">Карго хэрхэн төлнө вэ</div>
+          <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2">
+            <OptionCard
+              selected={payMethod === "CASH"}
+              onSelect={() => setPayMethod("CASH")}
+              title="Бэлэн"
+              right={<span className="tnum text-[14px]">{money(cargoFee)}</span>}
+            >
+              <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">
+                Дэлгүүрт ирээд бэлнээр төлнө.
+              </span>
+            </OptionCard>
+            <OptionCard
+              selected={payMethod === "QPAY"}
+              onSelect={() => setPayMethod("QPAY")}
+              title="QPay"
+              right={<span className="tnum text-[14px]">{money(order.dueAmount)}</span>}
+            >
+              <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">
+                Одоо QR-аар төлнө.
+              </span>
+            </OptionCard>
+          </div>
+        </div>
+      )}
 
       {type === "DELIVERY" && (
         <div className="flex flex-col gap-6 px-4 pt-6 lg:rounded-[12px] lg:border lg:border-line lg:px-6 lg:py-6 lg:pt-6">
           <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:gap-6">
           <Field label="Дүүрэг">
             <div className="grid grid-cols-2 gap-2">
-              {store.deliveryFees.map((d) => (
+              {districts.map((name) => (
                 <Chip
-                  key={d.district}
-                  active={district === d.district}
-                  onClick={() => setDistrict(d.district)}
+                  key={name}
+                  active={district === name}
+                  onClick={() => setDistrict(name)}
                 >
-                  {d.district}
+                  {name}
                 </Chip>
               ))}
             </div>
@@ -270,21 +355,33 @@ export function FulfilmentChooser({
             <Row label="Одоо авах" value={`${liveItems.length} бараа`} />
             <Row
               label="Барааны төлбөр"
-              value={order.dueAmount > 0 ? money(order.dueAmount) : "Төлөгдсөн"}
-              ok={order.dueAmount === 0}
+              value={order.subtotal <= order.paidAmount - order.refundedAmount ? "Төлөгдсөн" : money(Math.max(0, order.subtotal - (order.paidAmount - order.refundedAmount)))}
+              ok={order.subtotal <= order.paidAmount - order.refundedAmount}
             />
-            <Row label="Хүргэлтийн хураамж" value={fee === 0 ? "Үнэгүй" : money(fee)} />
+            {cargoFee > 0 && <Row label="Карго" value={money(cargoFee)} />}
+            {(order.storageFee ?? 0) > 0 && (
+              <Row label="Агуулахын хураамж" value={money(order.storageFee)} />
+            )}
+            {type === "DELIVERY" && (
+              <div className="text-[13px] leading-[1.45] text-ink-2">
+                Хүргэлтийн төлбөрийг хүргэлтийн компани өөрөө авна.
+              </div>
+            )}
             <div className="h-px bg-line" />
             <div className="flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]">
-              <span>Одоо төлөх</span>
-              <span>{money(total)}</span>
+              <span>{payMethod === "CASH" ? "Дэлгүүрт төлнө" : "Одоо төлөх"}</span>
+              <span>{payMethod === "CASH" ? money(cargoFee) : money(total)}</span>
             </div>
           </div>
 
           {/* Laptop дээр товч хураангуйн дотор */}
           <div className="hidden lg:block">
             <Button full size="bar" onClick={submit} loading={busy}>
-              Баталгаажуулах
+              {type === "PICKUP" && payMethod === "QPAY"
+                ? "QPay-ээр үргэлжлүүлэх"
+                : type === "PICKUP" && payMethod === "CASH"
+                  ? "Бэлнээр төлнө"
+                  : "Баталгаажуулах"}
             </Button>
           </div>
         </div>
@@ -292,7 +389,11 @@ export function FulfilmentChooser({
 
       <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3 lg:hidden">
         <Button full size="bar" onClick={submit} loading={busy}>
-          Баталгаажуулах
+          {type === "PICKUP" && payMethod === "QPAY"
+            ? "QPay-ээр үргэлжлүүлэх"
+            : type === "PICKUP" && payMethod === "CASH"
+              ? "Бэлнээр төлнө"
+              : "Баталгаажуулах"}
         </Button>
       </div>
     </div>

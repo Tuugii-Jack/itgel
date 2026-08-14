@@ -13,6 +13,7 @@ import {
   stepsToStatus,
 } from '../lib/orderStatus.js';
 import { notifyArrival, markItemsArrivedForBatch, promoteOrdersToArrived } from './orders.js';
+import { isProductPaid } from './money.js';
 
 /** Төлөв бүрийн огноог тэмдэглэх талбар. */
 const STATUS_TIMESTAMP: Partial<Record<OrderStatus, string>> = {
@@ -59,9 +60,9 @@ export async function findOrderIdsForBatch(
         ? { batchOmittedAt: { not: null } }
         : { batchOmittedAt: null };
 
-  // Идэвхтэй жагсаалтад зөвхөн төлбөр бүрэн (эсвэл илүү) орсон захиалга.
-  // Төлөгдөөгүй нь хаагдах үед цуцлагдсан байх ёстой; хамгаалалт болгон шүүнэ.
-  const paidFilter = omitted === true ? {} : { dueAmount: { lte: 0 } };
+  // Идэвхтэй жагсаалтад барааны үнэ төлөгдсөн захиалга орно.
+  // Карго/агуулахын үлдэгдэл (`dueAmount > 0`) багцаас хасах ёсгүй.
+  const paidSelect = { id: true, subtotal: true, paidAmount: true, refundedAmount: true } as const;
 
   const byBatch = await tx.order.findMany({
     where: {
@@ -69,9 +70,8 @@ export async function findOrderIdsForBatch(
       deletedAt: null,
       status: { not: 'CANCELLED' },
       ...omitFilter,
-      ...paidFilter,
     },
-    select: { id: true },
+    select: paidSelect,
   });
 
   const byRound =
@@ -82,18 +82,26 @@ export async function findOrderIdsForBatch(
             deletedAt: null,
             status: { not: 'CANCELLED' },
             ...omitFilter,
-            ...paidFilter,
             items: { some: { roundId: { in: rounds }, cancelledAt: null } },
           },
-          select: { id: true },
+          select: paidSelect,
         });
 
-  return [...new Set([...byBatch, ...byRound].map((o) => o.id))];
+  const merged = [...byBatch, ...byRound];
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const order of merged) {
+    if (seen.has(order.id)) continue;
+    seen.add(order.id);
+    if (omitted !== true && !isProductPaid(order)) continue;
+    ids.push(order.id);
+  }
+  return ids;
 }
 
 /**
- * Тойрогт захиалсан, төлбөр бүрэн орсон захиалгуудыг багцад хавсаргана.
- * Төлөгдөөгүй (`dueAmount > 0`) захиалга орохгүй — хаагдах үед цуцлагдсан байх ёстой.
+ * Тойрогт захиалсан, барааны үнэ төлөгдсөн захиалгуудыг багцад хавсаргана.
+ * Карго/агуулахын үлдэгдэл хамаарахгүй.
  */
 export async function attachOrdersForRound(
   tx: Tx,
@@ -106,21 +114,31 @@ export async function attachOrdersForRound(
       cancelledAt: null,
       order: {
         deletedAt: null,
-        dueAmount: { lte: 0 },
         status: { notIn: FROZEN_ORDER_STATUSES },
         OR: [{ batchId: null }, { batchId }],
       },
     },
     select: { orderId: true },
   });
-  const orderIds = [...new Set(items.map((i) => i.orderId))];
+  const candidateIds = [...new Set(items.map((i) => i.orderId))];
+  if (candidateIds.length === 0) return 0;
+
+  const paidOrders = await tx.order.findMany({
+    where: {
+      id: { in: candidateIds },
+      deletedAt: null,
+      status: { notIn: FROZEN_ORDER_STATUSES },
+      OR: [{ batchId: null }, { batchId }],
+    },
+    select: { id: true, subtotal: true, paidAmount: true, refundedAmount: true },
+  });
+  const orderIds = paidOrders.filter(isProductPaid).map((o) => o.id);
   if (orderIds.length === 0) return 0;
 
   const result = await tx.order.updateMany({
     where: {
       id: { in: orderIds },
       deletedAt: null,
-      dueAmount: { lte: 0 },
       status: { notIn: FROZEN_ORDER_STATUSES },
       OR: [{ batchId: null }, { batchId }],
     },
@@ -651,9 +669,9 @@ export async function reinstateOrderInBatch(
     });
     if (!order) throw notFound('Хассан захиалга олдсонгүй.');
 
-    if (order.dueAmount > 0) {
+    if (!isProductPaid(order)) {
       throw conflict(
-        `Төлбөр дутуу (${order.dueAmount}₮). Мөнгө бүрэн орсны дараа дахин оруулна.`,
+        `Барааны төлбөр дутуу. Мөнгө бүрэн орсны дараа дахин оруулна.`,
         { dueAmount: order.dueAmount },
       );
     }

@@ -35,6 +35,7 @@ type DueOrderLine = {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee?: number;
   paidAmount: number;
 };
 
@@ -130,6 +131,7 @@ function PaymentDueCard({
   subtotal = 0,
   deliveryFee = 0,
   storageFee = 0,
+  cargoFee = 0,
   paidAmount = 0,
   dueAmount,
   orders,
@@ -140,6 +142,7 @@ function PaymentDueCard({
   subtotal?: number;
   deliveryFee?: number;
   storageFee?: number;
+  cargoFee?: number;
   paidAmount?: number;
   dueAmount: number;
   orders?: DueOrderLine[];
@@ -151,8 +154,9 @@ function PaymentDueCard({
   const goods = fromOrders ? orders.reduce((s, o) => s + o.subtotal, 0) : subtotal;
   const delivery = fromOrders ? orders.reduce((s, o) => s + o.deliveryFee, 0) : deliveryFee;
   const storage = fromOrders ? orders.reduce((s, o) => s + o.storageFee, 0) : storageFee;
+  const cargo = fromOrders ? orders.reduce((s, o) => s + (o.cargoFee ?? 0), 0) : cargoFee;
   const paid = fromOrders ? orders.reduce((s, o) => s + o.paidAmount, 0) : paidAmount;
-  const total = goods + delivery + storage;
+  const total = goods + delivery + storage + cargo;
   const due = dueAmount;
   const collect = selectedDue ?? due;
   const unpaidOrders = (orders ?? []).filter((o) => o.dueAmount > 0);
@@ -182,6 +186,7 @@ function PaymentDueCard({
       <div className="flex flex-col gap-1.5 px-4 py-3">
         <SumLine label="Бараа" value={money(goods)} />
         {delivery > 0 && <SumLine label="Хүргэлт" value={money(delivery)} />}
+        {cargo > 0 && <SumLine label="Карго" value={money(cargo)} />}
         {storage > 0 && <SumLine label="Агуулахын хураамж" value={money(storage)} />}
         <div className="my-1 h-px bg-line" />
         <SumLine label="Нийт" value={money(total)} strong />
@@ -497,6 +502,7 @@ export default function HandoverPage() {
             subtotal: o.subtotal,
             deliveryFee: o.deliveryFee,
             storageFee: o.storageFee,
+            cargoFee: o.cargoFee,
             paidAmount: o.paidAmount,
           }))}
           selectedDue={dueForSelected}
@@ -660,6 +666,7 @@ export default function HandoverPage() {
           subtotal={found.subtotal}
           deliveryFee={found.deliveryFee}
           storageFee={found.storageFee}
+          cargoFee={found.cargoFee}
           paidAmount={found.paidAmount}
           cashTaken={cashTaken}
           onCashTaken={setCashTaken}
@@ -813,6 +820,7 @@ export default function HandoverPage() {
                       ? "Өөрөө авна"
                       : "Сонгоогүй"}
                   {(order.storageFee ?? 0) > 0 ? ` · Агуулах ${money(order.storageFee)}` : ""}
+                  {(order.cargoFee ?? 0) > 0 ? ` · Карго ${money(order.cargoFee)}` : ""}
                 </span>
                 <span
                   className={`tnum font-medium ${order.dueAmount > 0 ? "text-warn" : "text-ok"}`}

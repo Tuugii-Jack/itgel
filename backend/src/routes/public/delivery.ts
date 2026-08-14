@@ -8,7 +8,7 @@ export const publicDeliveryRouter = Router();
 
 const slotsQuery = z.object({ days: z.coerce.number().int().min(1).max(30).default(14) });
 
-/** GET /api/delivery/slots — өдөр тус бүрийн сул хэмжээ, дүүргийн хураамж. */
+/** GET /api/delivery/slots — өдөр тус бүрийн сул хэмжээ, дүүргүүд. */
 publicDeliveryRouter.get(
   '/slots',
   validate({ query: slotsQuery }),

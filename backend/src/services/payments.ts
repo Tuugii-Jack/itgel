@@ -3,6 +3,7 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { assertRefundable, computeTotals, recalcOrderTotals, type OrderTotals } from './money.js';
+import { syncOrderCargoFee } from './cargoFee.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -36,6 +37,7 @@ export async function recordPayment(
         subtotal: true,
         deliveryFee: true,
         storageFee: true,
+        cargoFee: true,
         paidAmount: true,
         refundedAmount: true,
       },
@@ -133,7 +135,7 @@ export async function cancelOrderItem(input: {
     if (input.refund && lineTotal > 0) {
       const before = await tx.order.findUniqueOrThrow({
         where: { id: order.id },
-        select: { subtotal: true, deliveryFee: true, storageFee: true, paidAmount: true, refundedAmount: true },
+        select: { subtotal: true, deliveryFee: true, storageFee: true, cargoFee: true, paidAmount: true, refundedAmount: true },
       });
       // Цэвэр орлогоос хэтрэхгүй хэмжээгээр л буцаана.
       const refundable = Math.min(lineTotal, computeTotals(before).netPaid);
@@ -163,6 +165,8 @@ export async function cancelOrderItem(input: {
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
       orderCancelled = true;
+    } else {
+      await syncOrderCargoFee(tx, order.id);
     }
 
     const totals = await recalcOrderTotals(tx, order.id);

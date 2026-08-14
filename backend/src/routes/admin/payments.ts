@@ -45,6 +45,7 @@ adminPaymentsRouter.get(
           subtotal: totals.subtotal,
           deliveryFee: totals.deliveryFee,
           storageFee: totals.storageFee,
+          cargoFee: totals.cargoFee,
           total: totals.total,
           paidAmount: totals.paidAmount,
           refundedAmount: totals.refundedAmount,

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../middleware/validate.js';
 import { qpayPublicStatus } from '../../services/qpay.js';
-import { districtList, getSettingsCached } from '../../services/settings.js';
+import { districtList, districtNames, getSettingsCached } from '../../services/settings.js';
 
 export const publicStoreRouter = Router();
 
@@ -19,6 +19,7 @@ publicStoreRouter.get(
         address: settings.address,
         workHours: settings.workHours,
         facebookUrl: settings.facebookUrl,
+        deliveryDistricts: districtNames(settings),
         deliveryFees: districtList(settings),
         // Данс тохируулаагүй бол null — frontend төлбөрийн самбарыг нуух ёстой.
         bank: settings.bankAccountNumber

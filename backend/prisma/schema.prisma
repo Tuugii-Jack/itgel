@@ -132,6 +132,8 @@ model ProductRound {
 
   costPrice Int // анхны үнэ — хэрэглэгчийн API-д хэзээ ч буцаахгүй
   sellPrice Int
+  /// Нэгж барааны карго үнэ ₮. Багцад нэмсний дараа админ оруулна.
+  cargoFee  Int           @default(0)
   stock     Int           @default(0)
   closeAt   DateTime? // null бол бэлэн бараа
   leadMinDays Int         @default(7)
@@ -243,20 +245,25 @@ model Order {
   /// Эх сурвалж нь Payment дэвтэр. Эдгээр багана нь хайлт, эрэмбэлэлтэд
   /// зориулсан кэш бөгөөд recalcOrderTotals() -ээр л шинэчлэгдэнэ.
   subtotal    Int @default(0) // идэвхтэй мөрүүдийн нийлбэр
+  /// Хүргэлтийн хураамж — дэлгүүр авдаггүй, үргэлж 0. Талбарыг хуучин бичлэгт үлдээнэ.
   deliveryFee Int @default(0)
   /// Агуулахад үнэгүй хоногоос хэтэрсэн хадгалалтын хураамж (кэш — cron/sync-ээр шинэчлэгдэнэ).
   storageFee  Int @default(0)
+  /// Карго хураамж — багцын барааны нэгж үнэ × ширхэг (кэш — syncOrderCargoFee).
+  cargoFee    Int @default(0)
   /// Дэвтрийн PAYMENT мөрүүдийн нийлбэр.
   paidAmount     Int @default(0)
   /// Дэвтрийн REFUND мөрүүдийн нийлбэр.
   refundedAmount Int @default(0)
-  /// subtotal + deliveryFee + storageFee − (paidAmount − refundedAmount). Сөрөг байвал илүү төлсөн.
+  /// subtotal + storageFee + cargoFee − (paidAmount − refundedAmount). Сөрөг байвал илүү төлсөн.
   dueAmount      Int @default(0)
 
   batchId     String?
   /// Багцаас түр хассан (ихэвчлэн төлбөр дутуу). batchId хэвээр — дахин оруулж болно.
   batchOmittedAt DateTime?
   fulfilment  Fulfilment? // бараа ирсний дараа хэрэглэгч сонгоно
+  /// Очиж авах үеийн карго төлбөр: CASH | QPAY. Хүргэлт/хоосон бол null.
+  cargoPayMethod String?
   note        String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -426,7 +433,8 @@ model Setting {
   defaultLeadMaxDays  Int      @default(14)
   smsOnArrival        Boolean  @default(true)
   autoCloseOnDeadline Boolean  @default(true)
-  deliveryFees        Json     @default("{}") // { "Баянзүрх": 6000, ... }
+  /// Хүргэлтийн дүүргүүд — түлхүүр нь нэр. Утга ашиглагдахгүй (хуучин хураамжийн хүснэгт).
+  deliveryFees        Json     @default("{}")
   deliveryDailyLimit  Int      @default(20)
 
   /// --- Төлбөр хүлээн авах данс ---

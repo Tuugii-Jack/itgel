@@ -5,6 +5,7 @@ import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { endOfUbDay, parseUbDay, startOfUbDay } from '../../lib/date.js';
 import { notFound } from '../../lib/errors.js';
+import { selectionsOf } from '../../lib/options.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { changeOrderStatus } from '../../services/orders.js';
@@ -17,7 +18,7 @@ const listQuery = z.object({
   status: z.enum(['PENDING', 'ASSIGNED', 'DELIVERED']).optional(),
   district: z.string().trim().min(1).max(60).optional(),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(200).default(100),
+  pageSize: z.coerce.number().int().min(1).max(500).default(200),
 });
 
 adminDeliveriesRouter.get(
@@ -39,12 +40,11 @@ adminDeliveriesRouter.get(
       ...(q.district ? { district: q.district } : {}),
     };
 
-    // Хуудаслалт — шүүлтгүй үед бүх түүхийг нэг дор татахаас сэргийлнэ.
     const [total, deliveries] = await Promise.all([
       prisma.delivery.count({ where }),
       prisma.delivery.findMany({
         where,
-        orderBy: [{ scheduledDay: 'asc' }, { district: 'asc' }],
+        orderBy: [{ scheduledDay: 'asc' }, { district: 'asc' }, { khoroo: 'asc' }],
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
         include: {
@@ -54,7 +54,19 @@ adminDeliveriesRouter.get(
               code: true,
               status: true,
               dueAmount: true,
+              cargoFee: true,
+              note: true,
               customer: { select: { name: true, phone: true } },
+              items: {
+                where: { cancelledAt: null },
+                select: {
+                  nameSnapshot: true,
+                  qty: true,
+                  selections: true,
+                  size: true,
+                  color: true,
+                },
+              },
             },
           },
         },
@@ -68,7 +80,6 @@ adminDeliveriesRouter.get(
         district: d.district,
         khoroo: d.khoroo,
         addressText: d.addressText,
-        fee: d.fee,
         courierName: d.courierName,
         status: d.status,
         order: {
@@ -76,7 +87,16 @@ adminDeliveriesRouter.get(
           code: d.order.code,
           status: d.order.status,
           dueAmount: d.order.dueAmount,
+          cargoFee: d.order.cargoFee,
+          note: d.order.note,
           customer: { name: d.order.customer.name, phone: d.order.customer.phone },
+          items: d.order.items.map((item) => ({
+            name: item.nameSnapshot,
+            qty: item.qty,
+            selections: selectionsOf(item.selections),
+            size: item.size,
+            color: item.color,
+          })),
         },
       })),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
@@ -94,9 +114,8 @@ adminDeliveriesRouter.patch(
       status: z.enum(['PENDING', 'ASSIGNED', 'DELIVERED']).optional(),
       scheduledDay: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       district: z.string().trim().min(1).max(60).optional(),
-      khoroo: z.string().trim().max(30).nullable().optional(),
+      khoroo: z.string().trim().max(60).nullable().optional(),
       addressText: z.string().trim().max(300).nullable().optional(),
-      fee: z.coerce.number().int().min(0).max(1_000_000).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -116,7 +135,6 @@ adminDeliveriesRouter.patch(
         district: body.district as string | undefined,
         khoroo: body.khoroo as string | null | undefined,
         addressText: body.addressText as string | null | undefined,
-        fee: body.fee as number | undefined,
         ...(body.scheduledDay
           ? { scheduledDay: startOfUbDay(parseUbDay(body.scheduledDay as string)) }
           : {}),
@@ -130,7 +148,7 @@ adminDeliveriesRouter.patch(
         actor,
         reason: 'Хүргэлтээр хүлээлгэн өгсөн',
       });
-      // Жолооч гар дээрээс авсан үлдэгдлийг дэвтэрт бүртгэнэ.
+      // Үлдсэн карго/агуулахын төлбөрийг бэлнээр авсанд тооцно.
       if (before.order.dueAmount > 0) {
         await recordPayment({
           orderId: before.orderId,

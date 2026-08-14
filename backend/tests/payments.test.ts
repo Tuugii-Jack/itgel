@@ -18,16 +18,26 @@ const totals = (input: Partial<Parameters<typeof computeTotals>[0]>): OrderTotal
   });
 
 describe('Захиалгын дүн', () => {
-  it('нийт дүн = бараа + хүргэлт', () => {
+  it('хүргэлтийн хураамж нийт дүнд ордоггүй', () => {
     const t = totals({ subtotal: 199_000, deliveryFee: 6_000 });
-    expect(t.total).toBe(205_000);
+    expect(t.total).toBe(199_000);
+    expect(t.deliveryFee).toBe(0);
   });
 
-  it('нийт дүн = бараа + хүргэлт + агуулах', () => {
-    const t = totals({ subtotal: 100_000, deliveryFee: 5_000, storageFee: 3_000 });
-    expect(t.total).toBe(108_000);
-    expect(t.dueAmount).toBe(108_000);
-    expect(t.storageFee).toBe(3_000);
+  it('нийт дүн = бараа + агуулах + карго', () => {
+    const t = totals({ subtotal: 100_000, deliveryFee: 5_000, storageFee: 3_000, cargoFee: 12_000 });
+    expect(t.total).toBe(115_000);
+    expect(t.dueAmount).toBe(115_000);
+    expect(t.cargoFee).toBe(12_000);
+    expect(t.deliveryFee).toBe(0);
+  });
+
+  it('карго нэмэгдэхэд үлдэгдэл өснө', () => {
+    const before = totals({ subtotal: 199_000, paidAmount: 199_000 });
+    expect(before.dueAmount).toBe(0);
+    const after = totals({ subtotal: 199_000, cargoFee: 8_000, paidAmount: 199_000 });
+    expect(after.dueAmount).toBe(8_000);
+    expect(fullyPaid(after)).toBe(true);
   });
 
   it('цэвэр орлого = төлсөн − буцаасан', () => {
@@ -47,12 +57,12 @@ describe('Захиалгын дүн', () => {
     expect(t.dueAmount).toBe(-10_000);
   });
 
-  it('хүргэлт нэмэгдэхэд үлдэгдэл өснө', () => {
+  it('хүргэлтийн хураамж үлдэгдэлд нэмэгдэхгүй', () => {
     const before = totals({ subtotal: 199_000, paidAmount: 199_000 });
     expect(before.dueAmount).toBe(0);
 
     const after = totals({ subtotal: 199_000, deliveryFee: 6_000, paidAmount: 199_000 });
-    expect(after.dueAmount).toBe(6_000);
+    expect(after.dueAmount).toBe(0);
   });
 
   it('мөр цуцлагдаж subtotal буурахад үлдэгдэл сөрөг болно', () => {
@@ -88,9 +98,8 @@ describe('Төлбөрийн байдал', () => {
   it('баталгаажих болзол — бараа бүрэн төлөгдсөн байх', () => {
     expect(fullyPaid(totals({ subtotal: 100_000, paidAmount: 50_000 }))).toBe(false);
     expect(fullyPaid(totals({ subtotal: 100_000, paidAmount: 100_000 }))).toBe(true);
-    // Хүргэлтийн хураамж баталгаажуулахад саад болохгүй — бараа ирсний дараа нэмэгддэг.
-    const withFee = totals({ subtotal: 100_000, deliveryFee: 6_000, paidAmount: 100_000 });
-    expect(fullyPaid(withFee)).toBe(true);
+    const withCargo = totals({ subtotal: 100_000, cargoFee: 8_000, paidAmount: 100_000 });
+    expect(fullyPaid(withCargo)).toBe(true);
   });
 });
 

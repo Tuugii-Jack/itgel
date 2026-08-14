@@ -13,7 +13,7 @@ import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, recalcOrderTotals } from '../../services/money.js';
-import { deliveryFeeFor, getSettings, getSettingsCached } from '../../services/settings.js';
+import { getSettings, getSettingsCached } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { claimDeliverySlot } from '../../services/delivery.js';
@@ -293,8 +293,12 @@ publicOrdersRouter.get(
         status: order.status,
         statusLabel: orderStatusLabel(order.status),
         subtotal,
-        deliveryFee: order.deliveryFee,
+        deliveryFee: 0,
         storageFee,
+        cargoFee: order.cargoFee,
+        cargoPayMethod: order.cargoPayMethod === 'CASH' || order.cargoPayMethod === 'QPAY'
+          ? order.cargoPayMethod
+          : null,
         storage: {
           freeDays: storage.freeDays,
           feePerDay: storage.feePerDay,
@@ -308,8 +312,8 @@ publicOrdersRouter.get(
         paymentState: paymentState(
           computeTotals({
             subtotal,
-            deliveryFee: order.deliveryFee,
             storageFee,
+            cargoFee: order.cargoFee,
             paidAmount,
             refundedAmount,
           }),
@@ -383,16 +387,17 @@ publicOrdersRouter.post(
 const fulfilmentBody = z
   .object({
     type: z.enum(['PICKUP', 'DELIVERY']),
+    payMethod: z.enum(['CASH', 'QPAY']).optional(),
     district: z.string().trim().min(1).max(60).optional(),
-    khoroo: z.string().trim().max(30).optional(),
-    address: z.string().trim().max(300).optional(),
+    khoroo: z.string().trim().min(1).max(60).optional(),
+    address: z.string().trim().min(5).max(300).optional(),
     day: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, 'Огноо YYYY-MM-DD хэлбэртэй байна.')
       .optional(),
   })
-  .refine((v) => v.type === 'PICKUP' || (v.district && v.day), {
-    message: 'Хүргэлтэд дүүрэг болон өдөр заавал шаардлагатай.',
+  .refine((v) => v.type === 'PICKUP' || (v.district && v.khoroo && v.address && v.day), {
+    message: 'Хүргэлтэд дүүрэг, хороо, хаяг болон өдөр заавал шаардлагатай.',
   });
 
 /** POST /api/orders/:code/fulfilment — бараа ирсний дараа авах хэлбэрээ сонгоно. */
@@ -416,13 +421,21 @@ publicOrdersRouter.post(
       throw conflict('Авах хэлбэр аль хэдийн сонгогдсон байна.');
     }
 
+    if (body.type === 'PICKUP' && order.cargoFee > 0 && !body.payMethod) {
+      throw badRequest('Очиж авахад карго төлбөрийн хэлбэр сонгоно уу (бэлэн эсвэл QPay).');
+    }
+
     const settings = await getSettings();
 
     const updated = await prisma.$transaction(async (tx) => {
       if (body.type === 'PICKUP') {
         await tx.order.update({
           where: { id: order.id },
-          data: { fulfilment: 'PICKUP', deliveryFee: 0 },
+          data: {
+            fulfilment: 'PICKUP',
+            deliveryFee: 0,
+            cargoPayMethod: order.cargoFee > 0 ? (body.payMethod ?? null) : null,
+          },
         });
         // Хураамж өөрчлөгдсөн тул дүнг дахин бодуулна.
         await recalcOrderTotals(tx, order.id);
@@ -433,7 +446,6 @@ publicOrdersRouter.post(
       }
 
       const day = startOfUbDay(parseUbDay(body.day!));
-      const fee = deliveryFeeFor(settings, body.district!);
 
       // Сул зайг атомикаар эзэлнэ — хоёр хүн сүүлийн зайг зэрэг авахаас сэргийлнэ.
       await claimDeliverySlot(tx, day, settings.deliveryDailyLimit);
@@ -445,7 +457,7 @@ publicOrdersRouter.post(
           district: body.district!,
           khoroo: body.khoroo ?? null,
           addressText: body.address ?? null,
-          fee,
+          fee: 0,
         },
       });
 
@@ -453,7 +465,7 @@ publicOrdersRouter.post(
         where: { id: order.id },
         data: {
           fulfilment: 'DELIVERY',
-          deliveryFee: fee,
+          deliveryFee: 0,
         },
       });
       await recalcOrderTotals(tx, order.id);
@@ -469,13 +481,14 @@ publicOrdersRouter.post(
       action: 'FULFILMENT',
       entity: 'Order',
       entityId: order.id,
-      after: { fulfilment: body.type, district: body.district, day: body.day },
+      after: { fulfilment: body.type, payMethod: body.payMethod, district: body.district, day: body.day },
     });
 
     res.json({
       data: {
         code: updated.code,
         fulfilment: updated.fulfilment,
+        cargoPayMethod: updated.cargoPayMethod,
         deliveryFee: updated.deliveryFee,
         dueAmount: updated.dueAmount,
         delivery: publicDelivery(updated.delivery),

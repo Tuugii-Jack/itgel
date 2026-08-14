@@ -8,8 +8,11 @@ import { conflict, notFound } from '../lib/errors.js';
  * Дүрэм: `Payment` дэвтэр ба идэвхтэй `OrderItem` мөрүүд нь ҮНЭН.
  * `Order` дээрх subtotal/paidAmount/refundedAmount/dueAmount багана нь
  * зөвхөн хайлт, эрэмбэлэлтэд зориулсан КЭШ бөгөөд энэ функцээр л
- * шинэчлэгдэнэ. Мөр цуцлах, төлбөр бүртгэх, хүргэлт нэмэх — юу ч
+ * шинэчлэгдэнэ. Мөр цуцлах, төлбөр бүртгэх, карго нэмэх — юу ч
  * өөрчлөгдсөн бол энэ функцийг дуудна.
+ *
+ * Хүргэлтийн төлбөрийг дэлгүүр авдаггүй (хүргэлтийн компани өөрөө авна)
+ * тул `deliveryFee` нийт дүнд ордоггүй.
  */
 
 type Tx = Prisma.TransactionClient;
@@ -18,6 +21,7 @@ export interface OrderTotals {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee: number;
   /** Нийт төлөх ёстой дүн. */
   total: number;
   paidAmount: number;
@@ -32,7 +36,7 @@ export interface OrderTotals {
 export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderTotals> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { id: true, deliveryFee: true, storageFee: true },
+    select: { id: true, storageFee: true, cargoFee: true },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
 
@@ -54,8 +58,8 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
 
   const totals = computeTotals({
     subtotal,
-    deliveryFee: order.deliveryFee,
     storageFee: order.storageFee,
+    cargoFee: order.cargoFee,
     paidAmount,
     refundedAmount,
   });
@@ -76,18 +80,22 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
 /** Цэвэр тооцоо — өгөгдлийн сангаас хамааралгүй тул тестлэхэд хялбар. */
 export function computeTotals(input: {
   subtotal: number;
-  deliveryFee: number;
+  /** Хүргэлтийн компани авна — нийт дүнд тооцохгүй. */
+  deliveryFee?: number;
   storageFee?: number;
+  cargoFee?: number;
   paidAmount: number;
   refundedAmount: number;
 }): OrderTotals {
   const storageFee = input.storageFee ?? 0;
-  const total = input.subtotal + input.deliveryFee + storageFee;
+  const cargoFee = input.cargoFee ?? 0;
+  const total = input.subtotal + storageFee + cargoFee;
   const netPaid = input.paidAmount - input.refundedAmount;
   return {
     subtotal: input.subtotal,
-    deliveryFee: input.deliveryFee,
+    deliveryFee: 0,
     storageFee,
+    cargoFee,
     total,
     paidAmount: input.paidAmount,
     refundedAmount: input.refundedAmount,
@@ -109,9 +117,18 @@ export function paymentState(totals: OrderTotals): PaymentState {
   return 'PARTIAL';
 }
 
-/** Захиалга баталгаажих болзол: бараа бүрэн төлөгдсөн байх. */
+/** Захиалга баталгаажих болзол: бараа бүрэн төлөгдсөн байх (карго/агуулах хамаарахгүй). */
 export function fullyPaid(totals: OrderTotals): boolean {
   return totals.netPaid >= totals.subtotal;
+}
+
+/** Барааны үнэ төлөгдсөн эсэх — карго/агуулахын үлдэгдэл энд хамаарахгүй. */
+export function isProductPaid(order: {
+  subtotal: number;
+  paidAmount: number;
+  refundedAmount: number;
+}): boolean {
+  return order.paidAmount - order.refundedAmount >= order.subtotal;
 }
 
 export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
@@ -139,8 +156,8 @@ export async function loadOrderTotals(orderId: string): Promise<OrderTotals> {
     where: { id: orderId },
     select: {
       subtotal: true,
-      deliveryFee: true,
       storageFee: true,
+      cargoFee: true,
       paidAmount: true,
       refundedAmount: true,
     },

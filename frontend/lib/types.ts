@@ -26,6 +26,7 @@ export type BatchStage =
   | "DONE";
 
 export type Fulfilment = "PICKUP" | "DELIVERY";
+export type CargoPayMethod = "CASH" | "QPAY";
 
 /** Мөнгө орсон эсэхээр тодорхойлогдоно — дэвтрээс бодогдоно. */
 export type PaymentState =
@@ -55,6 +56,7 @@ export interface OrderTotals {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee: number;
   total: number;
   paidAmount: number;
   refundedAmount: number;
@@ -299,6 +301,8 @@ export interface PublicOrder {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee: number;
+  cargoPayMethod: CargoPayMethod | null;
   storage?: StorageInfo;
   paidAmount: number;
   refundedAmount: number;
@@ -323,6 +327,8 @@ export interface MyOrder {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee: number;
+  cargoPayMethod: CargoPayMethod | null;
   paidAmount: number;
   refundedAmount: number;
   dueAmount: number;
@@ -367,6 +373,7 @@ export interface Store {
   address: string;
   workHours: string;
   facebookUrl: string;
+  deliveryDistricts?: string[];
   deliveryFees: { district: string; fee: number }[];
   bank: BankAccount | null;
   /** QPay — enabled=flag, ready=credential бэлэн (код ирсний дараа). */
@@ -427,6 +434,8 @@ export interface AdminOrderRow {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee: number;
+  cargoPayMethod?: CargoPayMethod | null;
   paidAmount: number;
   refundedAmount: number;
   dueAmount: number;
@@ -484,6 +493,7 @@ export interface HandoverOrderDue {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee?: number;
   paidAmount: number;
   dueAmount: number;
 }
@@ -523,6 +533,9 @@ export interface BatchProduct {
   image: string | null;
   sellPrice: number;
   costPrice: number;
+  /** Нэгж карго үнэ ₮. */
+  cargoFee: number;
+  cargoTotal?: number;
   status: ProductStatus;
   closeAt: string | null;
   orderedQty: number;
@@ -536,6 +549,7 @@ export interface BatchOrderRow {
   statusLabel: string;
   subtotal: number;
   dueAmount: number;
+  cargoFee?: number;
   paidAmount?: number;
   paymentState: PaymentState;
   paymentStateLabel: string;
@@ -552,8 +566,17 @@ export interface AdminBatchDetail extends BatchSummary {
   omittedOrders: BatchOrderRow[];
   products: BatchProduct[];
   totalValue: number;
+  totalCargo?: number;
   totalDue: number;
   createdAt: string;
+}
+
+export interface AdminDeliveryItem {
+  name: string;
+  qty: number;
+  selections: Record<string, string>;
+  size: string | null;
+  color: string | null;
 }
 
 export interface AdminDelivery {
@@ -562,7 +585,6 @@ export interface AdminDelivery {
   district: string;
   khoroo: string | null;
   addressText: string | null;
-  fee: number;
   courierName: string | null;
   status: DeliveryStatus;
   order: {
@@ -570,7 +592,10 @@ export interface AdminDelivery {
     code: string;
     status: OrderStatus;
     dueAmount: number;
-    customer: { name: string | null; phone: string };
+    cargoFee?: number;
+    note: string | null;
+    customer: { name: string | null; phone: string | null };
+    items: AdminDeliveryItem[];
   };
 }
 

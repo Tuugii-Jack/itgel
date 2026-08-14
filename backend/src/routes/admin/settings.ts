@@ -26,7 +26,7 @@ const patchBody = z.object({
   defaultLeadMaxDays: z.coerce.number().int().min(0).max(365).optional(),
   smsOnArrival: z.boolean().optional(),
   autoCloseOnDeadline: z.boolean().optional(),
-  deliveryFees: z.record(z.string().min(1), z.coerce.number().int().min(0).max(1_000_000)).optional(),
+  deliveryFees: z.record(z.string().min(1).max(60), z.coerce.number().int().min(0).max(1_000_000)).optional(),
   deliveryDailyLimit: z.coerce.number().int().min(1).max(1000).optional(),
   // Төлбөр хүлээн авах данс — хоосон мөр зөвшөөрнө (данс түр хураахад).
   bankName: z.string().trim().max(60).optional(),
@@ -49,7 +49,19 @@ adminSettingsRouter.patch(
     const max = body.defaultLeadMaxDays ?? before.defaultLeadMaxDays;
     if (min > max) throw badRequest('defaultLeadMinDays нь defaultLeadMaxDays-с их байж болохгүй.');
 
-    const after = await prisma.setting.update({ where: { id: 1 }, data: body });
+    // Хүргэлтийн төлбөрийг дэлгүүр авдаггүй — зөвхөн дүүргийн нэрийг хадгална.
+    const data = {
+      ...body,
+      ...(body.deliveryFees
+        ? {
+            deliveryFees: Object.fromEntries(
+              Object.keys(body.deliveryFees).map((district) => [district, 0]),
+            ),
+          }
+        : {}),
+    };
+
+    const after = await prisma.setting.update({ where: { id: 1 }, data });
     invalidateSettingsCache();
 
     await audit({

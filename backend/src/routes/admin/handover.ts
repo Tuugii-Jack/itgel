@@ -139,6 +139,7 @@ adminHandoverRouter.get(
           subtotal: order.subtotal,
           deliveryFee: order.deliveryFee,
           storageFee: order.storageFee,
+          cargoFee: order.cargoFee,
           paidAmount: order.paidAmount,
           dueAmount: order.dueAmount,
         }));

@@ -26,6 +26,7 @@ export type OrderExportLine = {
   subtotal: number;
   deliveryFee: number;
   storageFee: number;
+  cargoFee: number;
   fulfilment: string;
   batchName: string;
   note: string;
@@ -71,6 +72,7 @@ export function flattenOrdersForExport(orders: AdminOrderDetail[]): OrderExportL
       subtotal: order.subtotal,
       deliveryFee: order.deliveryFee,
       storageFee: order.storageFee ?? 0,
+      cargoFee: order.cargoFee ?? 0,
       fulfilment: order.fulfilment ? FULFILMENT_LABEL[order.fulfilment] ?? order.fulfilment : "",
       batchName: order.batch?.name ?? "",
       note: order.note ?? "",
@@ -134,8 +136,8 @@ const CSV_HEADERS: { key: keyof OrderExportLine; label: string }[] = [
   { key: "itemStatus", label: "Мөрийн төлөв" },
   { key: "arriveWindow", label: "Ирэх хугацаа" },
   { key: "subtotal", label: "Нийт бараа" },
-  { key: "deliveryFee", label: "Хүргэлт" },
   { key: "storageFee", label: "Агуулахын хураамж" },
+  { key: "cargoFee", label: "Карго" },
   { key: "paidAmount", label: "Төлсөн" },
   { key: "dueAmount", label: "Үлдэгдэл" },
   { key: "fulfilment", label: "Авах арга" },
@@ -238,8 +240,8 @@ export function printOrders(orders: AdminOrderDetail[]) {
         </table>
         <div class="totals">
           Бараа: ${escHtml(money(order.subtotal))}
-          · Хүргэлт: ${escHtml(money(order.deliveryFee))}
           ${order.storageFee > 0 ? ` · Агуулах: ${escHtml(money(order.storageFee))}` : ""}
+          ${(order.cargoFee ?? 0) > 0 ? ` · Карго: ${escHtml(money(order.cargoFee ?? 0))}` : ""}
           · Төлсөн: ${escHtml(money(order.paidAmount))}
           · Үлдэгдэл: ${escHtml(money(order.dueAmount))}
         </div>

@@ -12,6 +12,7 @@ import { addDays, computeArrival, toIso } from '../lib/date.js';
 import { conflict } from '../lib/errors.js';
 import { canTransition, ORDER_STATUS_LABEL, previousInFlow, stepsToStatus } from '../lib/orderStatus.js';
 import { mailTemplates, sendMail } from './mail.js';
+import { isProductPaid } from './money.js';
 import { getSettings } from './settings.js';
 import { sms, smsTemplates } from './sms.js';
 
@@ -167,24 +168,24 @@ export async function changeOrderStatus(
 }
 
 /**
- * Тойрог хаагдахад төлбөр дутуу (`dueAmount > 0`) захиалгыг цуцална.
- * Багцад орохгүй, жагсаалтад харагдахгүй (soft-delete — 10 хоног хадгална).
+ * Тойрог хаагдахад барааны үнэ төлөгдөөгүй захиалгыг цуцална.
+ * Карго/агуулахын үлдэгдэл энд хамаарахгүй.
  */
 export async function cancelUnpaidOrdersForRound(
   roundId: string,
   actor: string,
   reason = 'Захиалга хаагдсан — төлбөр ороогүй.',
 ): Promise<number> {
-  const unpaid = await prisma.order.findMany({
+  const candidates = await prisma.order.findMany({
     where: {
       deletedAt: null,
-      dueAmount: { gt: 0 },
       status: { notIn: ['CANCELLED', 'HANDED_OVER'] },
       items: { some: { roundId, cancelledAt: null } },
     },
-    select: { id: true, code: true },
+    select: { id: true, code: true, subtotal: true, paidAmount: true, refundedAmount: true },
     take: 500,
   });
+  const unpaid = candidates.filter((o) => !isProductPaid(o));
   if (unpaid.length === 0) return 0;
 
   const now = new Date();
@@ -225,16 +226,23 @@ export async function promotePaidOrdersInTransitForRound(
   actor: string,
   reason = 'Захиалга хаагдсан — замд гарлаа.',
 ): Promise<number> {
-  const paid = await prisma.order.findMany({
+  const candidates = await prisma.order.findMany({
     where: {
       deletedAt: null,
-      dueAmount: { lte: 0 },
       status: { notIn: ['CANCELLED', 'HANDED_OVER', 'IN_TRANSIT', 'ARRIVED'] },
       items: { some: { roundId, cancelledAt: null } },
     },
-    select: { id: true, code: true, status: true },
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      subtotal: true,
+      paidAmount: true,
+      refundedAmount: true,
+    },
     take: 500,
   });
+  const paid = candidates.filter(isProductPaid);
   if (paid.length === 0) return 0;
 
   const now = new Date();

@@ -242,6 +242,10 @@ publicMeRouter.get(
         subtotal: order.subtotal,
         deliveryFee: order.deliveryFee,
         storageFee: order.storageFee,
+        cargoFee: order.cargoFee,
+        cargoPayMethod: order.cargoPayMethod === 'CASH' || order.cargoPayMethod === 'QPAY'
+          ? order.cargoPayMethod
+          : null,
         paidAmount: order.paidAmount,
         refundedAmount: order.refundedAmount,
         dueAmount: order.dueAmount,

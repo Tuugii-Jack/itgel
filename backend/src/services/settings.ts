@@ -1,18 +1,23 @@
 import type { Setting } from '@prisma/client';
 import { prisma } from '../prisma.js';
 
-/** Хүргэлтийн хураамжийн үндсэн хүснэгт — дүүргээр 5,000–8,000₮. */
-export const DEFAULT_DELIVERY_FEES: Record<string, number> = {
-  'Баянгол': 5000,
-  'Сүхбаатар': 5000,
-  'Чингэлтэй': 5000,
-  'Хан-Уул': 6000,
-  'Баянзүрх': 6000,
-  'Сонгинохайрхан': 7000,
-  'Налайх': 8000,
-  'Багануур': 8000,
-  'Багахангай': 8000,
-};
+/** Хүргэлтийн дүүргүүд — төлбөрийг хүргэлтийн компани авна, дэлгүүр авдаггүй. */
+export const DEFAULT_DISTRICTS = [
+  'Баянгол',
+  'Сүхбаатар',
+  'Чингэлтэй',
+  'Хан-Уул',
+  'Баянзүрх',
+  'Сонгинохайрхан',
+  'Налайх',
+  'Багануур',
+  'Багахангай',
+] as const;
+
+/** Хадгалах JSON — түлхүүр нь дүүргийн нэр, утга ашиглагдахгүй. */
+export const DEFAULT_DELIVERY_FEES: Record<string, number> = Object.fromEntries(
+  DEFAULT_DISTRICTS.map((district) => [district, 0]),
+);
 
 /** DB round-trip багасгах — тохиргоо бараг өөрчлөгддөггүй. */
 let settingsCache: { value: Setting; at: number } | null = null;
@@ -42,15 +47,12 @@ export function invalidateSettingsCache(): void {
   settingsCache = null;
 }
 
-export function deliveryFeeFor(settings: Setting, district: string): number {
+export function districtNames(settings: Setting): string[] {
   const table = (settings.deliveryFees ?? {}) as Record<string, unknown>;
-  const value = table[district];
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
-  return DEFAULT_DELIVERY_FEES[district] ?? 8000;
+  const keys = Object.keys(table).filter((k) => k.trim().length > 0);
+  return keys.length > 0 ? keys : [...DEFAULT_DISTRICTS];
 }
 
 export function districtList(settings: Setting): { district: string; fee: number }[] {
-  const table = (settings.deliveryFees ?? {}) as Record<string, unknown>;
-  const keys = Object.keys(table).length > 0 ? Object.keys(table) : Object.keys(DEFAULT_DELIVERY_FEES);
-  return keys.map((district) => ({ district, fee: deliveryFeeFor(settings, district) }));
+  return districtNames(settings).map((district) => ({ district, fee: 0 }));
 }
