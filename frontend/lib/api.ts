@@ -352,10 +352,17 @@ export const api = {
       (r) => r.data,
     ),
 
-  /** QPay төлбөрийн статус шалгах (poll). */
+  /** Манай дэвтэр — QPay-г poll хийхгүй. */
   qpayStatus: (code: string) =>
     request<{ paid: boolean; invoiceId: string | null }>(
       `/orders/${code}/qpay/status`,
+    ).then((r) => r.data),
+
+  /** Callback-ийн дараа нэг удаа payment/check. */
+  qpayVerify: (code: string) =>
+    request<{ paid: boolean; invoiceId: string | null }>(
+      `/orders/${code}/qpay/verify`,
+      { method: "POST" },
     ).then((r) => r.data),
 
   chooseFulfilment: (

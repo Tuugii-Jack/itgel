@@ -442,12 +442,19 @@ export interface Store {
 }
 
 /** QPay нэхэмжлэл — QR + банкны deeplink. */
+export interface QpayBankLink {
+  name: string;
+  description: string;
+  logo: string | null;
+  link: string;
+}
+
 export interface QpayInvoice {
   invoiceId: string;
   qrText: string;
   qrImage: string | null;
   shortUrl: string | null;
-  urls: { name: string; description: string; link: string }[];
+  urls: QpayBankLink[];
   amount: number;
   createdAt: string | null;
 }

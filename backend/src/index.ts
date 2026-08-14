@@ -2,6 +2,7 @@ import app from './app.js';
 import { env } from './env.js';
 import { prisma } from './prisma.js';
 import { startCron, stopCron } from './cron/index.js';
+import { qpayPublicStatus } from './services/qpay.js';
 import { activeStorageProvider } from './services/storage.js';
 import { ensureStorageBucket, supabaseConfigured } from './services/supabase.js';
 
@@ -14,6 +15,8 @@ if (!onVercel) {
     if (env.CRON_ENABLED) startCron();
     const provider = activeStorageProvider();
     console.info(`[storage] provider: ${provider}`);
+    const qpay = qpayPublicStatus();
+    console.info(`[qpay] enabled=${qpay.enabled} ready=${qpay.ready}`);
     if (supabaseConfigured) console.info(`[supabase] ${env.SUPABASE_URL}`);
     if (provider === 'supabase') void ensureStorageBucket();
   });

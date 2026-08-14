@@ -214,6 +214,7 @@ function QpayPay({
   const toast = useToast();
   const [invoice, setInvoice] = useState<QpayInvoice | null>(null);
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadInvoice = async () => {
@@ -240,27 +241,31 @@ function QpayPay({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- order.code / ready only
   }, [ready, order.code]);
 
-  // Төлбөр орсон эсэхийг poll — callback-ийг нөхөж ажиллана.
+  const verifyPaid = async () => {
+    setChecking(true);
+    try {
+      const st = await api.qpayVerify(order.code);
+      if (st.paid) {
+        toast.success("QPay төлбөр амжилттай.");
+        onPaid?.();
+      }
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : "Төлбөр шалгаж чадсангүй.";
+      toast.error(message);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   useEffect(() => {
     if (!ready || !invoice) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const st = await api.qpayStatus(order.code);
-        if (!cancelled && st.paid) {
-          toast.success("QPay төлбөр амжилттай.");
-          onPaid?.();
-        }
-      } catch {
-        // Сүлжээний түр алдаа — дараагийн poll үргэлжилнэ.
-      }
+    const onFocus = () => {
+      void verifyPaid();
     };
-    const id = window.setInterval(() => void tick(), 5_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [ready, invoice, order.code, onPaid, toast]);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- invoice.id / order.code
+  }, [ready, invoice?.invoiceId, order.code]);
 
   if (!ready) {
     return (
@@ -313,16 +318,20 @@ function QpayPay({
           {invoice.urls.length > 0 && (
             <div className="flex flex-col gap-2">
               <div className="text-[13px] text-muted">Эсвэл банкны апп нээх</div>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
                 {invoice.urls.map((u) => (
                   <a
                     key={u.link}
                     href={u.link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="rounded-[6px] border border-line bg-bg px-3 py-1.5 text-[12px] text-ink no-underline"
+                    title={u.description || u.name}
+                    className="flex flex-col items-center gap-1 rounded-[8px] border border-line bg-bg px-1.5 py-2 no-underline transition-colors hover:border-primary hover:bg-primary-soft"
                   >
-                    {u.name || u.description || "Апп"}
+                    <BankLogo name={u.name} logo={u.logo} />
+                    <span className="line-clamp-2 w-full text-center text-[10px] leading-tight text-ink-2">
+                      {u.description || u.name}
+                    </span>
                   </a>
                 ))}
               </div>
@@ -341,7 +350,8 @@ function QpayPay({
           )}
 
           <p className="m-0 text-[12px] text-muted">
-            Төлбөр ормогц энэ хуудас автоматаар шинэчлэгдэнэ.
+            Банкны аппаас буцаж ирээд төлбөр автоматаар бүртгэгдэнэ. Хэрэв шинэчлэгдэхгүй бол
+            доорх товчийг дарна уу.
             {store.unpaidCancelHours > 0 && (
               <>
                 {" "}
@@ -350,6 +360,9 @@ function QpayPay({
               </>
             )}
           </p>
+          <Button variant="outline" size="sm" onClick={() => void verifyPaid()} loading={checking}>
+            Төлбөр шалгах
+          </Button>
         </>
       )}
 
@@ -362,6 +375,29 @@ function QpayPay({
         </div>
       )}
     </div>
+  );
+}
+
+function BankLogo({ name, logo }: { name: string; logo: string | null }) {
+  const [failed, setFailed] = useState(false);
+  if (!logo || failed) {
+    return (
+      <span className="flex h-10 w-10 items-center justify-center rounded-[8px] bg-surface text-center text-[9px] font-medium leading-tight text-ink">
+        {name.slice(0, 8)}
+      </span>
+    );
+  }
+  return (
+    // QPay CDN — next/image domain бүртгэхгүй.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={logo}
+      alt={name}
+      width={40}
+      height={40}
+      onError={() => setFailed(true)}
+      className="h-10 w-10 rounded-[8px] bg-white object-contain"
+    />
   );
 }
 

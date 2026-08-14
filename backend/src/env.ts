@@ -1,5 +1,11 @@
-import 'dotenv/config';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import { z } from 'zod';
+
+dotenv.config({
+  path: path.join(path.dirname(fileURLToPath(import.meta.url)), '../.env'),
+});
 
 /** Хоосон string → undefined (Vercel дээр optional env хоосон байж болно). */
 const emptyToUndef = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);

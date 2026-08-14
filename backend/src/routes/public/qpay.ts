@@ -7,11 +7,13 @@ import { ipRateLimit } from '../../lib/rateLimit.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { recordPayment } from '../../services/payments.js';
 import {
+  cancelQpayInvoice,
   checkQpayInvoice,
   createQpayInvoice,
-  getQpayInvoice,
+  getQpayPayment,
   isQpayReady,
   qpayPublicStatus,
+  type QpayInvoice,
 } from '../../services/qpay.js';
 
 export const publicQpayRouter = Router();
@@ -46,7 +48,7 @@ function serializeInvoice(input: {
   qrText: string;
   qrImage: string | null;
   shortUrl: string | null;
-  urls: { name: string; description: string; link: string }[];
+  urls: QpayInvoice["urls"];
   amount: number;
   createdAt: Date | null;
 }) {
@@ -67,7 +69,7 @@ function serializeInvoice(input: {
  */
 publicQpayRouter.post(
   '/:code/qpay/invoice',
-  ipRateLimit(15, 10 * 60 * 1000),
+  ipRateLimit(40, 10 * 60 * 1000),
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
   asyncHandler(async (req, res) => {
     if (!isQpayReady()) {
@@ -99,23 +101,8 @@ publicQpayRouter.post(
       throw conflict('Энэ захиалгын төлбөр аль хэдийн бүрэн орсон байна.');
     }
 
-    // Аль хэдийн invoice байвал төлөв шалгаад, төлөөгүй бол QR-ийг дахин өгнө.
     if (order.qpayInvoiceId) {
-      const check = await checkQpayInvoice(order.qpayInvoiceId);
-      if (check.paid && check.paidAmount > 0) {
-        await applyQpayPayment(order.id, order.qpayInvoiceId, check.paidAmount, check.paymentIds[0]);
-        throw conflict('Төлбөр аль хэдийн орсон байна. Хуудсыг шинэчилнэ үү.', {
-          code: 'QPAY_ALREADY_PAID',
-        });
-      }
-      const existing = await getQpayInvoice(order.qpayInvoiceId, order.dueAmount);
-      res.json({
-        data: serializeInvoice({
-          ...existing,
-          createdAt: order.qpayInvoiceAt,
-        }),
-      });
-      return;
+      await cancelQpayInvoice(order.qpayInvoiceId);
     }
 
     const invoice = await createQpayInvoice({
@@ -150,11 +137,40 @@ publicQpayRouter.post(
 );
 
 /**
- * GET /api/orders/:code/qpay/status — төлбөр орсон эсэхийг шалгана (polling).
+ * GET /api/orders/:code/qpay/status — зөвхөн манай дэвтэр (QPay-г poll хийхгүй).
  */
 publicQpayRouter.get(
   '/:code/qpay/status',
   ipRateLimit(60, 10 * 60 * 1000),
+  validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
+  asyncHandler(async (req, res) => {
+    const code = param(req, 'code').toUpperCase();
+    const order = await prisma.order.findFirst({
+      where: { code, deletedAt: null },
+      select: {
+        dueAmount: true,
+        qpayInvoiceId: true,
+        paidAmount: true,
+      },
+    });
+    if (!order) throw notFound('Захиалга олдсонгүй.');
+
+    res.json({
+      data: {
+        paid: order.dueAmount <= 0,
+        paidAmount: order.paidAmount,
+        invoiceId: order.qpayInvoiceId,
+      },
+    });
+  }),
+);
+
+/**
+ * POST /api/orders/:code/qpay/verify — callback-ийн дараа гараар нэг удаа payment/check.
+ */
+publicQpayRouter.post(
+  '/:code/qpay/verify',
+  ipRateLimit(12, 10 * 60 * 1000),
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
   asyncHandler(async (req, res) => {
     const code = param(req, 'code').toUpperCase();
@@ -171,23 +187,14 @@ publicQpayRouter.get(
 
     if (order.dueAmount <= 0) {
       res.json({
-        data: {
-          paid: true,
-          paidAmount: order.paidAmount,
-          invoiceId: order.qpayInvoiceId,
-        },
+        data: { paid: true, paidAmount: order.paidAmount, invoiceId: order.qpayInvoiceId },
       });
       return;
     }
 
     if (!order.qpayInvoiceId || !isQpayReady()) {
       res.json({
-        data: {
-          paid: false,
-          paidAmount: 0,
-          invoiceId: order.qpayInvoiceId,
-          ready: isQpayReady(),
-        },
+        data: { paid: false, paidAmount: 0, invoiceId: order.qpayInvoiceId },
       });
       return;
     }
@@ -214,9 +221,12 @@ publicQpayRouter.get(
 
 /**
  * GET|POST /api/orders/qpay/callback — QPay callback.
- * Credential ирэхэд QPAY_CALLBACK_URL-д энэ замыг заана.
- * Биед/query-д invoice_id эсвэл qpay_payment_id ирж болно — payment/check-ээр баталгаажуулна.
+ * Зөвхөн callback ирсний дараа POST /v2/payment/check дуудна.
  */
+function pickId(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 async function qpayCallbackHandler(req: {
   query: Record<string, unknown>;
   body: unknown;
@@ -224,12 +234,27 @@ async function qpayCallbackHandler(req: {
 }): Promise<void> {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const invoiceId =
-    (typeof body.invoice_id === 'string' && body.invoice_id) ||
-    (typeof req.query.invoice_id === 'string' && req.query.invoice_id) ||
+    pickId(body.invoice_id) ||
+    pickId(req.query.invoice_id) ||
+    null;
+  const paymentId =
+    pickId(body.payment_id) ||
+    pickId(body.qpay_payment_id) ||
+    pickId(req.query.payment_id) ||
+    pickId(req.query.qpay_payment_id) ||
     null;
 
-  if (!invoiceId) {
-    // QPay заримдаа зөвхөн payment_id илгээдэг — invoice-гүй бол SUCCESS буцаагаад орхино.
+  let resolvedInvoiceId = invoiceId;
+  if (!resolvedInvoiceId && paymentId && isQpayReady()) {
+    try {
+      const payment = await getQpayPayment(paymentId);
+      resolvedInvoiceId = payment.invoiceId;
+    } catch (e) {
+      console.error('[qpay] callback payment lookup failed', e);
+    }
+  }
+
+  if (!resolvedInvoiceId) {
     req.res.status(200).send('SUCCESS');
     return;
   }
@@ -240,22 +265,26 @@ async function qpayCallbackHandler(req: {
   }
 
   const order = await prisma.order.findFirst({
-    where: { qpayInvoiceId: invoiceId, deletedAt: null },
+    where: { qpayInvoiceId: resolvedInvoiceId, deletedAt: null },
     select: { id: true, dueAmount: true },
   });
 
   if (order && order.dueAmount > 0) {
     try {
-      const check = await checkQpayInvoice(invoiceId);
+      const check = await checkQpayInvoice(resolvedInvoiceId);
       if (check.paid && check.paidAmount > 0) {
-        await applyQpayPayment(order.id, invoiceId, check.paidAmount, check.paymentIds[0]);
+        await applyQpayPayment(
+          order.id,
+          resolvedInvoiceId,
+          check.paidAmount,
+          check.paymentIds[0] ?? paymentId ?? undefined,
+        );
       }
     } catch (e) {
       console.error('[qpay] callback verify failed', e);
     }
   }
 
-  // QPay spec: plain text SUCCESS
   req.res.status(200).send('SUCCESS');
 }
 
