@@ -37,7 +37,10 @@ export function ProductGallery({
       </div>
 
       {hasThumbs && (
-        <div className='mt-2.5 grid w-full grid-cols-4 gap-2'>
+        <div
+          className='mt-2.5 flex w-full max-w-full gap-2 overflow-x-auto pb-0.5 md:grid md:grid-cols-4 md:justify-start md:overflow-visible'
+          style={{ direction: "rtl" }}
+        >
           {list.map((src, i) => (
             <button
               key={i}
@@ -45,8 +48,10 @@ export function ProductGallery({
               onClick={() => setActive(i)}
               aria-label={`${alt} — зураг ${i + 1}`}
               aria-current={i === index}
-              className={`aspect-square w-full overflow-hidden rounded-[8px] border transition-colors
+              className={`aspect-square shrink-0 overflow-hidden rounded-[8px] border transition-colors
+                h-16 w-16 md:h-auto md:w-full
                 ${i === index ? "border-primary ring-1 ring-primary/30" : "border-line hover:border-primary-muted"}`}
+              style={{ direction: "ltr" }}
             >
               <ProductImage
                 src={src}

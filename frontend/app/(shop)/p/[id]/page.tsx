@@ -17,7 +17,6 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { money } from "@/lib/format";
-import { optionValuePrice, priceForSelections, priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -91,8 +90,7 @@ export default function ProductPage({
   const blocked = soldOut || closed;
   const options = product.options ?? [];
   const missingOpt = options.find((o) => !selections[o.name]);
-  const unitPrice = priceForSelections(product.price, product.optionPrices, selections);
-  const total = unitPrice * qty;
+  const total = product.price * qty;
 
   const addToCart = () => {
     if (missingOpt) {
@@ -104,7 +102,7 @@ export default function ProductPage({
     cart.add({
       productId: product.id,
       name: product.name,
-      price: unitPrice,
+      price: product.price,
       image: product.images[0] ?? null,
       type: product.type,
       selections: { ...selections },
@@ -136,7 +134,7 @@ export default function ProductPage({
         </nav>
 
         <div className='grid gap-6 pt-4 lg:grid-cols-[minmax(0,440px)_minmax(0,1fr)] lg:items-start lg:gap-10 lg:pt-6'>
-          <div className="min-w-0">
+          <div className='min-w-0'>
             <ProductGallery
               images={product.images}
               alt={product.name}
@@ -153,9 +151,20 @@ export default function ProductPage({
           </div>
 
           <div className='flex min-w-0 flex-col gap-5 lg:gap-6'>
-            {/* Single source of truth for description: under the gallery, visible on all viewports */}
+            <div className='flex flex-col gap-2'>
+              {/* <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
+                {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
+              </Badge> */}
+              <h1 className='m-0 text-[22px] font-medium leading-[1.3] tracking-[-0.01em] lg:text-[26px]'>
+                {product.name}
+              </h1>
+              <div className='tnum text-[26px] font-medium leading-none lg:text-[28px]'>
+                {money(product.price)}
+              </div>
+            </div>
+
             {product.description && (
-              <div className='mt-4 lg:mt-6 rounded-[12px] border border-line bg-surface p-4 lg:p-5'>
+              <div className='mt-0 rounded-[12px] border border-line bg-surface p-4 lg:mt-6 lg:p-5'>
                 <div className='text-[15px] font-medium lg:text-[17px]'>
                   Тайлбар
                 </div>
@@ -185,18 +194,6 @@ export default function ProductPage({
               </div>
             )}
 
-            <div className='flex flex-col gap-2'>
-              {/* <Badge tone={isOrder ? "neutral" : "ok"} className='self-start'>
-                {isOrder ? "Захиалгын бараа" : "Бэлэн бараа"}
-              </Badge> */}
-              <h1 className='m-0 text-[22px] font-medium leading-[1.3] tracking-[-0.01em] lg:text-[26px]'>
-                {product.name}
-              </h1>
-              <div className='tnum text-[26px] font-medium leading-none lg:text-[28px]'>
-                {missingOpt ? priceLabel(product.price, product.priceMax) : money(unitPrice)}
-              </div>
-            </div>
-
             {/* Product description is shown beneath the gallery to avoid duplicates */}
 
             <KeyFacts
@@ -221,19 +218,7 @@ export default function ProductPage({
                           ? 4
                           : Math.max(2, opt.values.length)
                       }
-                      options={opt.values.map((v) => {
-                        const priced = (product.optionPrices ?? []).some((p) => p.kind === opt.name);
-                        const p = optionValuePrice(
-                          product.optionPrices,
-                          opt.name,
-                          v,
-                          product.price,
-                        );
-                        return {
-                          value: v,
-                          label: priced ? `${v} · ${money(p)}` : v,
-                        };
-                      })}
+                      options={opt.values.map((v) => ({ value: v, label: v }))}
                       value={selected}
                       onChange={(v) => {
                         setSelections((prev) => ({ ...prev, [opt.name]: v }));
@@ -261,13 +246,6 @@ export default function ProductPage({
             )}
 
             {notice && <ErrorNote>{notice}</ErrorNote>}
-
-            {product.description && (
-              <ProductDescription
-                description={product.description}
-                className='lg:hidden'
-              />
-            )}
 
             <div className='hidden lg:flex lg:flex-col lg:gap-2'>
               {blocked ? (
