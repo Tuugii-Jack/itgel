@@ -1,6 +1,7 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import type { Customer } from "@prisma/client";
 import { prisma } from "../../prisma.js";
 import { normalizePhone, PHONE_RE } from "../../lib/code.js";
 import {
@@ -32,25 +33,7 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 const emailChangeLimiter = new RateLimiter(5, 60 * 60 * 1000);
 ipLimiters.push(emailChangeLimiter);
 
-function serializeCustomer(c: {
-  id: string;
-  email: string;
-  phone: string | null;
-  name: string | null;
-  emailVerifiedAt: Date | null;
-  passwordHash: string | null;
-  district: string | null;
-  khoroo: string | null;
-  addressText: string | null;
-  notifyPayment: boolean;
-  notifyArrival: boolean;
-  notifyPromo: boolean;
-  bankName: string;
-  bankAccountNumber: string;
-  bankAccountName: string;
-  defaultPayoutBank: boolean;
-  createdAt: Date;
-}) {
+function serializeCustomer(c: Customer) {
   return {
     id: c.id,
     email: c.email,
@@ -133,7 +116,24 @@ publicMeRouter.patch(
     }
     const customer = await prisma.customer.update({
       where: { id: req.auth!.sub },
-      data: body,
+      data: {
+        name: body.name,
+        phone: body.phone,
+        district: body.district,
+        khoroo: body.khoroo,
+        addressText: body.addressText,
+        notifyPayment: body.notifyPayment,
+        notifyArrival: body.notifyArrival,
+        notifyPromo: body.notifyPromo,
+        ...(body.bankName !== undefined ? { bankName: body.bankName ?? "" } : {}),
+        ...(body.bankAccountNumber !== undefined
+          ? { bankAccountNumber: body.bankAccountNumber ?? "" }
+          : {}),
+        ...(body.bankAccountName !== undefined
+          ? { bankAccountName: body.bankAccountName ?? "" }
+          : {}),
+        defaultPayoutBank: body.defaultPayoutBank,
+      },
     });
     res.json({ data: serializeCustomer(customer) });
   }),

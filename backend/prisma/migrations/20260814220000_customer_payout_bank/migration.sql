@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Customer" ADD COLUMN "bankName" TEXT NOT NULL DEFAULT '',
+ADD COLUMN "bankAccountNumber" TEXT NOT NULL DEFAULT '',
+ADD COLUMN "bankAccountName" TEXT NOT NULL DEFAULT '',
+ADD COLUMN "defaultPayoutBank" BOOLEAN NOT NULL DEFAULT false;
