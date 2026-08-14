@@ -37,7 +37,12 @@ export type PaymentState =
   | "REFUNDED";
 
 export type PaymentKind = "PAYMENT" | "REFUND";
-export type PaymentMethod = "BANK_TRANSFER" | "CASH" | "CARD" | "QPAY" | "OTHER";
+export type PaymentMethod =
+  | "BANK_TRANSFER"
+  | "CASH"
+  | "CARD"
+  | "QPAY"
+  | "OTHER";
 
 export interface Payment {
   id: string;
@@ -152,7 +157,12 @@ export interface AdminRound extends Omit<Product, "price"> {
   note: string | null;
   /** Аль ачааны багцад зориулж гаргасан бэ — null бол багцаас гадуур. */
   batchId: string | null;
-  batch: { id: string; name: string; stage: BatchStage; stageLabel: string } | null;
+  batch: {
+    id: string;
+    name: string;
+    stage: BatchStage;
+    stageLabel: string;
+  } | null;
   /** Энэ гаргалтыг хэдэн өөр хүн авсан бэ. */
   customerCount: number;
   /** Захиалагдсан нийт ширхэг (цуцлагдсаныг оруулаагүй). */
@@ -171,7 +181,12 @@ export interface RoundBuyer {
   dueAmount: number;
   paymentClaimedAt: string | null;
   createdAt: string;
-  customer: { id: string; name: string | null; phone: string | null; email?: string | null };
+  customer: {
+    id: string;
+    name: string | null;
+    phone: string | null;
+    email?: string | null;
+  };
   selections: Record<string, string>;
   size: string | null;
   color: string | null;
@@ -411,6 +426,12 @@ export interface Me {
     addressText: string | null;
   };
   notifications: { payment: boolean; arrival: boolean; promo: boolean };
+  bank: {
+    name: string;
+    accountNumber: string;
+    accountName: string;
+    defaultPayout: boolean;
+  };
   createdAt: string;
 }
 
@@ -484,7 +505,12 @@ export interface AdminOrderRow {
   code: string;
   status: OrderStatus;
   statusLabel: string;
-  customer: { id: string; name: string | null; phone: string | null; email?: string };
+  customer: {
+    id: string;
+    name: string | null;
+    phone: string | null;
+    email?: string;
+  };
   itemCount: number;
   subtotal: number;
   deliveryFee: number;
@@ -907,11 +933,27 @@ export interface ArchiveCustomer {
     firstOrderAt: string | null;
     lastOrderAt: string | null;
   };
-  topProducts: { productId: string; name: string; qty: number; total: number }[];
+  topProducts: {
+    productId: string;
+    name: string;
+    qty: number;
+    total: number;
+  }[];
   orders: ArchiveOrder[];
 }
 
 export interface ArchiveSearch {
-  products: { id: string; name: string; image: string | null; deleted: boolean; roundCount: number }[];
-  customers: { id: string; name: string | null; phone: string; orderCount: number }[];
+  products: {
+    id: string;
+    name: string;
+    image: string | null;
+    deleted: boolean;
+    roundCount: number;
+  }[];
+  customers: {
+    id: string;
+    name: string | null;
+    phone: string;
+    orderCount: number;
+  }[];
 }
