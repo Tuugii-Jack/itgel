@@ -15,7 +15,7 @@ import type { PublicOrder, Store } from "@/lib/types";
 /**
  * 04 Захиалга амжилттай — дизайны хоёр төлөв.
  *
- * Хүлээгдэж буй: данс, гүйлгээний утга, «шилжүүлсэн гэж мэдэгдэх».
+ * Хүлээгдэж буй: QPay QR.
  * Баталгаажсан: ногоон тэмдэг, код, QR, хураангуй.
  */
 export default function SuccessPage({ params }: { params: Promise<{ code: string }> }) {
@@ -107,8 +107,7 @@ function Pending({
           <span className="text-[17px] text-warn lg:text-[20px]">Төлбөр хүлээгдэж байна</span>
         </div>
         <p className="m-0 max-w-[300px] text-center text-[15px] leading-[1.6] text-ink-2 lg:max-w-[560px] lg:text-left">
-          Дансаар шилжүүлэх эсвэл QPay сонгоно уу. Гүйлгээг баталгаажуулсны дараа захиалга
-          баталгаажна.
+          QPay-ээр төлнө үү. Төлбөр орсны дараа захиалга баталгаажна.
         </p>
       </div>
 

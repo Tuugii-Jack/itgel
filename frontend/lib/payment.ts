@@ -31,8 +31,8 @@ export const PAYMENT_TONE: Record<PaymentState, Tone> = {
 
 /** Хэрэглэгчид харуулах тайлбар — юу хийхийг нь хэлнэ. */
 export const PAYMENT_HINT: Record<PaymentState, string> = {
-  UNPAID: "Захиалгын кодоо гүйлгээний утга дээр бичиж, дүнг шилжүүлнэ үү.",
-  PARTIAL: "Үлдэгдлийг шилжүүлмэгц захиалга баталгаажна.",
+  UNPAID: "QPay-ээр төлнө үү.",
+  PARTIAL: "Үлдэгдлийг QPay-ээр төлнө үү.",
   PAID: "Төлбөр бүрэн хүлээн авсан.",
   OVERPAID: "Илүү төлсөн дүнг буцаана. Бид тантай холбогдоно.",
   REFUNDED: "Төлбөрийг буцаасан.",

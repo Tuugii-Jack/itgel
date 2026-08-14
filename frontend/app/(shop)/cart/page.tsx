@@ -259,13 +259,12 @@ export default function CartPage() {
               disabled={!session.me}
               loading={busy && Boolean(session.me)}
             >
-              Дансны мэдээлэл авах
+              Захиалах
             </Button>
           </div>
 
           <p className='mt-4 mb-0 text-[13px] leading-[1.6] text-ink-2 lg:mt-0'>
-            Төлбөрөө дансаар бүтнээр шилжүүлнэ. Админ шалгаж баталгаажуулсны
-            дараа захиалга баталгаажна.
+            Төлбөрийг QPay-ээр төлнө. Төлсний дараа захиалга баталгаажна.
           </p>
         </div>
       </div>
@@ -278,7 +277,7 @@ export default function CartPage() {
           disabled={!session.me}
           loading={busy && Boolean(session.me)}
         >
-          Дансны мэдээлэл авах
+          Захиалах
         </Button>
       </div>
     </div>

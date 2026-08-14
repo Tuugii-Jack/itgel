@@ -251,7 +251,7 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
           </div>
         )}
 
-      {/* Мөнгө хүлээж байгаа бол данс, гүйлгээний утга */}
+      {/* Мөнгө хүлээж байгаа бол QPay */}
       {unpaid && (
         <div className="px-4 pt-6 lg:px-0 lg:pt-0">
           <PaymentPanel order={order} store={store} onClaimed={load} />

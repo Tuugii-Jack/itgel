@@ -5,7 +5,7 @@ import { districtList, districtNames, getSettingsCached } from '../../services/s
 
 export const publicStoreRouter = Router();
 
-/** GET /api/store — хаяг, цаг, утас, Facebook, төлбөр хүлээн авах данс. */
+/** GET /api/store — хаяг, цаг, утас, Facebook. Төлбөр зөвхөн QPay. */
 publicStoreRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
@@ -21,15 +21,8 @@ publicStoreRouter.get(
         facebookUrl: settings.facebookUrl,
         deliveryDistricts: districtNames(settings),
         deliveryFees: districtList(settings),
-        // Данс тохируулаагүй бол null — frontend төлбөрийн самбарыг нуух ёстой.
-        bank: settings.bankAccountNumber
-          ? {
-              name: settings.bankName,
-              accountNumber: settings.bankAccountNumber,
-              accountName: settings.bankAccountName,
-              note: settings.paymentNote,
-            }
-          : null,
+        // Хэрэглэгч зөвхөн QPay-ээр төлнө — дэлгүүрийн данс нийтэд гаргахгүй.
+        bank: null,
         /** QPay сонголт — enabled=flag, ready=credential бэлэн. */
         qpay,
         /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
