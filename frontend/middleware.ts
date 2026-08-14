@@ -2,20 +2,26 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const ADMIN_SESSION_COOKIE = "itgel_admin_session";
 
-const SHOP_HOST = (process.env.NEXT_PUBLIC_SHOP_HOST ?? "").toLowerCase();
-const ADMIN_HOST = (process.env.NEXT_PUBLIC_ADMIN_HOST ?? "").toLowerCase();
+/** Env байхгүй үед ч production хост ажиллана. Локал (`localhost`) таарахгүй. */
+const SHOP_HOST = (
+  process.env.NEXT_PUBLIC_SHOP_HOST || "itgelshop.mn"
+).toLowerCase();
+const ADMIN_HOST = (
+  process.env.NEXT_PUBLIC_ADMIN_HOST || "admin.itgelshop.mn"
+).toLowerCase();
 
 function requestHost(request: NextRequest): string {
-  return (request.headers.get("host") ?? "").split(":")[0].toLowerCase();
+  const forwarded = request.headers.get("x-forwarded-host");
+  const raw = forwarded ?? request.headers.get("host") ?? request.nextUrl.hostname;
+  return raw.split(",")[0].trim().split(":")[0].toLowerCase();
 }
 
 function isShopHost(host: string): boolean {
-  if (!SHOP_HOST) return false;
   return host === SHOP_HOST || host === `www.${SHOP_HOST}`;
 }
 
 function isAdminHost(host: string): boolean {
-  return Boolean(ADMIN_HOST) && host === ADMIN_HOST;
+  return host === ADMIN_HOST;
 }
 
 function shopOrigin(): string {
@@ -26,39 +32,46 @@ function adminOrigin(): string {
   return `https://${ADMIN_HOST}`;
 }
 
+function hasAdminSession(request: NextRequest): boolean {
+  return request.cookies.get(ADMIN_SESSION_COOKIE)?.value === "1";
+}
+
+function redirectOnHost(origin: string, pathname: string, search: string) {
+  return NextResponse.redirect(new URL(`${origin}${pathname}${search}`), 308);
+}
+
 /**
  * Дэлгүүр: itgelshop.mn
- * Админ: admin.itgelshop.mn (/admin).
- * Локал дээр хост env байхгүй тул хуучин /admin зам хэвээр.
+ * Админ: admin.itgelshop.mn — `/` шууд админ (нэвтрээгүй бол login).
+ * Локал дээр хост таарахгүй тул хуучин /admin зам хэвээр.
  */
 export function middleware(request: NextRequest) {
   const host = requestHost(request);
   const { pathname, search } = request.nextUrl;
 
   if (isShopHost(host) && pathname.startsWith("/admin")) {
-    return NextResponse.redirect(new URL(`${adminOrigin()}${pathname}${search}`), 308);
+    return redirectOnHost(adminOrigin(), pathname, search);
   }
 
   if (isAdminHost(host)) {
     if (pathname === "/" || pathname === "") {
+      const dest = hasAdminSession(request) ? "/admin" : "/admin/login";
       const url = request.nextUrl.clone();
-      url.pathname = "/admin";
+      url.pathname = dest;
+      url.search = "";
       return NextResponse.redirect(url);
     }
 
     if (!pathname.startsWith("/admin")) {
-      if (!SHOP_HOST) return NextResponse.next();
-      return NextResponse.redirect(new URL(`${shopOrigin()}${pathname}${search}`), 308);
+      return redirectOnHost(shopOrigin(), pathname, search);
     }
   }
 
   if (!pathname.startsWith("/admin")) return NextResponse.next();
 
-  const isLogin = pathname === "/admin/login";
-  if (isLogin) return NextResponse.next();
+  if (pathname === "/admin/login") return NextResponse.next();
 
-  const hasSession = request.cookies.get(ADMIN_SESSION_COOKIE)?.value === "1";
-  if (!hasSession) {
+  if (!hasAdminSession(request)) {
     const url = request.nextUrl.clone();
     url.pathname = "/admin/login";
     url.search = "";
