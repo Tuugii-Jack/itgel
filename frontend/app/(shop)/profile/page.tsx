@@ -22,7 +22,7 @@ import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { EmailAuthForm } from "@/components/EmailAuthForm";
 import { LocationFields } from "@/components/LocationFields";
-import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { dayLabel, money, phoneLabel, refundPayoutLabel } from "@/lib/format";
 import { UB_DISTRICTS } from "@/lib/locations";
 import { awaitingPayment, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
 import type { MyOrder, OrderStatus, Store } from "@/lib/types";
@@ -293,6 +293,12 @@ function OrdersTab({
                     <span className='tnum text-warn'>
                       {money(order.dueAmount)}
                     </span>
+                  </div>
+                )}
+                {order.refundPayoutOn && (
+                  <div className='flex items-baseline justify-between gap-2 text-[13px]'>
+                    <span className='text-muted'>Буцаалт</span>
+                    <span className='text-right'>{refundPayoutLabel(order.refundPayoutOn)}</span>
                   </div>
                 )}
 

@@ -1,5 +1,9 @@
 import { prisma } from '../prisma.js';
-import { addUbMonths, endOfUbDay, parseUbDay, startOfUbDay, startOfUbMonth, ubDateString } from '../lib/date.js';
+import {
+  payoutDateForReturn,
+  payoutDaysInMonth,
+  payoutWindow,
+} from '../lib/date.js';
 import { itemSelections, variantKey } from '../lib/options.js';
 
 export type ReturnCalendarDay = {
@@ -35,10 +39,7 @@ export type ReturnPayout = {
 };
 
 function rangesForDays(days: string[]): { gte: Date; lte: Date }[] {
-  return [...new Set(days)].sort().map((day) => {
-    const parsed = parseUbDay(day);
-    return { gte: startOfUbDay(parsed), lte: endOfUbDay(parsed) };
-  });
+  return [...new Set(days)].sort().map((day) => payoutWindow(day));
 }
 
 const customerSelect = {
@@ -207,12 +208,14 @@ export async function returnsCalendar(year: number, month: number): Promise<{
   month: number;
   days: ReturnCalendarDay[];
 }> {
-  const from = startOfUbMonth(parseUbDay(`${year}-${String(month).padStart(2, '0')}-01`));
-  const to = addUbMonths(from, 1);
+  const payoutDays = payoutDaysInMonth(year, month);
+  const windows = payoutDays.map((day) => ({ day, ...payoutWindow(day) }));
+  const from = windows[0]!.gte;
+  const to = windows[windows.length - 1]!.lte;
 
   const [refunds, cancelledItems] = await Promise.all([
     prisma.payment.findMany({
-      where: adminRefundWhere({ gte: from, lt: to }),
+      where: adminRefundWhere({ gte: from, lte: to }),
       select: {
         id: true,
         amount: true,
@@ -227,7 +230,7 @@ export async function returnsCalendar(year: number, month: number): Promise<{
       },
     }),
     prisma.orderItem.findMany({
-      where: { cancelledAt: { gte: from, lt: to } },
+      where: { cancelledAt: { gte: from, lte: to } },
       select: {
         ...itemSelect,
         cancelledAt: true,
@@ -240,21 +243,21 @@ export async function returnsCalendar(year: number, month: number): Promise<{
     string,
     { qty: number; itemIds: Set<string>; customers: Set<string>; refundIds: Set<string> }
   >();
-
-  const day = (date: string) => {
-    const entry = byDay.get(date) ?? {
+  for (const date of payoutDays) {
+    byDay.set(date, {
       qty: 0,
       itemIds: new Set<string>(),
       customers: new Set<string>(),
       refundIds: new Set<string>(),
-    };
-    byDay.set(date, entry);
-    return entry;
-  };
+    });
+  }
+
+  const bucket = (at: Date) => byDay.get(payoutDateForReturn(at));
 
   for (const item of cancelledItems) {
     if (!item.cancelledAt) continue;
-    const entry = day(ubDateString(item.cancelledAt));
+    const entry = bucket(item.cancelledAt);
+    if (!entry) continue;
     if (!entry.itemIds.has(item.id)) {
       entry.itemIds.add(item.id);
       entry.qty += item.qty;
@@ -263,7 +266,8 @@ export async function returnsCalendar(year: number, month: number): Promise<{
   }
 
   for (const refund of refunds) {
-    const entry = day(ubDateString(refund.createdAt));
+    const entry = bucket(refund.createdAt);
+    if (!entry) continue;
     entry.refundIds.add(refund.id);
     entry.customers.add(refund.order.customerId);
     for (const item of productsForRefund(refund.note, refund.order.items)) {
@@ -276,14 +280,15 @@ export async function returnsCalendar(year: number, month: number): Promise<{
   return {
     year,
     month,
-    days: [...byDay.entries()]
-      .map(([date, v]) => ({
+    days: payoutDays.map((date) => {
+      const v = byDay.get(date)!;
+      return {
         date,
         qty: v.qty,
         itemCount: v.itemIds.size || v.refundIds.size,
         customerCount: v.customers.size,
-      }))
-      .sort((a, b) => a.date.localeCompare(b.date)),
+      };
+    }),
   };
 }
 

@@ -146,7 +146,7 @@ export default function AdminReturnsPage() {
     <div>
       <PageHead
         title="Буцаалт"
-        hint="Захиалгын дэлгэрэнгүйгээс «Цуцлаад буцаах» эсвэл «Буцаалт хийх» хийсэн төлсөн бараа орно. Сар бүрийн 10, 20, 30-нд шилжүүлнэ."
+        hint="10-оос өмнө буцаасан нь 10-нд, 20-оос өмнө нь 20-нд, 30-аас өмнө нь 30-нд орно. Хэрэглэгчид ч мөн тэр өдрийг харна."
         actions={
           <Button
             size="sm"
@@ -192,7 +192,7 @@ export default function AdminReturnsPage() {
             <div className="text-[13px] text-muted">
               {selected.length > 0
                 ? `${selected.length} өдөр сонгосон`
-                : "Буцаалттай өдрийг дарж сонгоно. Олон өдөр сонгож болно."}
+                : "10, 20, 30-г дарж сонгоно. Олон өдөр сонгож болно."}
             </div>
             {selectable.length > 0 && (
               <button
@@ -202,7 +202,7 @@ export default function AdminReturnsPage() {
                 }
                 className="cursor-pointer border-0 bg-transparent p-0 text-[12px] text-ink-2 underline"
               >
-                {selected.length === selectable.length ? "Арилгах" : "Буцаалттай өдрүүдийг сонгох"}
+                {selected.length === selectable.length ? "Арилгах" : "10, 20, 30-г сонгох"}
               </button>
             )}
           </div>
@@ -218,33 +218,36 @@ export default function AdminReturnsPage() {
               const stats = byDate.get(date);
               const active = selected.includes(date);
               const isToday = date === todayKey;
+              const payout = Boolean(stats);
               return (
                 <button
                   key={date}
                   type="button"
-                  disabled={!stats}
+                  disabled={!payout}
                   onClick={() => toggleDay(date)}
                   className={`min-h-[64px] rounded-[8px] border p-1.5 text-left ${
                     active
                       ? "border-ink bg-ink text-white"
-                      : stats
+                      : payout
                         ? "cursor-pointer border-line bg-bg hover:border-primary-muted"
                         : "cursor-default border-transparent bg-transparent text-muted"
                   } ${isToday && !active ? "ring-1 ring-ink/30" : ""}`}
                 >
                   <div className="text-[13px] font-medium">{day}</div>
-                  {stats && (
+                  {payout && (
                     <div className={`mt-0.5 text-[11px] ${active ? "opacity-80" : "text-muted"}`}>
-                      {stats.qty} ш · {stats.customerCount} хүн
+                      {stats && stats.qty > 0
+                        ? `${stats.qty} ш · ${stats.customerCount} хүн`
+                        : "буцаалт"}
                     </div>
                   )}
                 </button>
               );
             })}
           </div>
-          {selectable.length === 0 && (
-            <div className="mt-3 text-[13px] text-muted">Энэ сард буцаалт алга.</div>
-          )}
+          <div className="mt-3 text-[13px] text-muted">
+            10-оос өмнө буцаасан нь 10-нд, 20-оос өмнө нь 20-нд, 30-аас өмнө нь 30-нд орно.
+          </div>
         </Card>
       )}
 
@@ -282,7 +285,7 @@ export default function AdminReturnsPage() {
       )}
 
       {selected.length === 0 ? (
-        <Empty>Календараас өдөр сонгоод буцаалтын бараа, дансыг харна.</Empty>
+        <Empty>Календараас 10, 20, 30-г сонгоод буцаалтын бараа, дансыг харна.</Empty>
       ) : loadingList ? (
         <div className="flex flex-col gap-3">
           {Array.from({ length: 3 }).map((_, i) => (

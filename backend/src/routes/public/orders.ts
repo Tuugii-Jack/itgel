@@ -11,7 +11,7 @@ import { ipRateLimit } from '../../lib/rateLimit.js';
 import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
-import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel } from '../../services/serialize.js';
+import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutOnFor } from '../../services/serialize.js';
 import { computeTotals, paymentState, recalcOrderTotals } from '../../services/money.js';
 import { getSettings, getSettingsCached, districtNames } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
@@ -251,6 +251,7 @@ publicOrdersRouter.get(
         batch: true,
         delivery: true,
         customer: true,
+        payments: { where: { kind: 'REFUND' }, select: { createdAt: true } },
       },
     });
 
@@ -325,6 +326,7 @@ publicOrdersRouter.get(
           email: order.customer.email,
         },
         items: order.items.map(publicOrderItem),
+        refundPayoutOn: refundPayoutOnFor({ items: order.items, refunds: order.payments }),
         batch: batchSummary(order.batch),
         delivery: publicDelivery(order.delivery),
         timeline: buildTimeline(order),

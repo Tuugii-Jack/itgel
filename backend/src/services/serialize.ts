@@ -10,7 +10,7 @@ import type {
   RoundOptionPrice,
   SizeChartRow,
 } from '@prisma/client';
-import { computeArrival, toIso } from '../lib/date.js';
+import { computeArrival, payoutDateForReturn, toIso } from '../lib/date.js';
 import { marginPercent } from '../lib/money.js';
 import {
   adminOptionPrices,
@@ -196,10 +196,27 @@ export function publicOrderItem(item: OrderItem) {
     arriveFrom: toIso(item.arriveFrom),
     arriveTo: toIso(item.arriveTo),
     arrivedAt: toIso(item.arrivedAt),
+    cancelledAt: toIso(item.cancelledAt),
     handedOverAt: toIso(item.handedOverAt),
     /** waiting | arrived | handed_over | cancelled */
     itemStatus,
+    /** Сар бүрийн 10/20/30 — цуцлагдсан мөрийн буцаалт аль өдөрт орох. */
+    refundPayoutOn: item.cancelledAt ? payoutDateForReturn(item.cancelledAt) : null,
   };
+}
+
+/** Захиалгын хамгийн ойрын буцаалтын 10/20/30. */
+export function refundPayoutOnFor(input: {
+  items: { cancelledAt: Date | null }[];
+  refunds?: { createdAt: Date }[];
+}): string | null {
+  const dates = [
+    ...input.items
+      .filter((item) => item.cancelledAt)
+      .map((item) => payoutDateForReturn(item.cancelledAt!)),
+    ...(input.refunds ?? []).map((row) => payoutDateForReturn(row.createdAt)),
+  ].sort();
+  return dates[0] ?? null;
 }
 
 function normalizeLegacy(size: string | null, color: string | null): Record<string, string> {

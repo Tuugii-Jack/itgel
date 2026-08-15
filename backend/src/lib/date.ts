@@ -98,3 +98,77 @@ export function computeArrival(
 
 export const toIso = (date: Date | null | undefined): string | null =>
   date ? date.toISOString() : null;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+export function ubYmd(date: Date): { year: number; month: number; day: number } {
+  const wall = toUbWallClock(date);
+  return { year: wall.getUTCFullYear(), month: wall.getUTCMonth() + 1, day: wall.getUTCDate() };
+}
+
+/** UB сарын хоногийн тоо. */
+export function ubDaysInMonth(year: number, month: number): number {
+  const start = parseUbDay(`${year}-${pad2(month)}-01`);
+  return diffUbDays(addUbMonths(start, 1), start);
+}
+
+/**
+ * Сар бүрийн буцаалтын өдрүүд — 10, 20, 30 (богино сард сарын сүүл).
+ * 10-оос өмнө буцаасан нь 10-нд, 20-оос өмнө нь 20-нд, 30-аас өмнө нь 30-нд орно.
+ * Тухайн өдөр өөрөө (10/20/30) дараагийн цонх руу орно.
+ */
+export function payoutDaysInMonth(year: number, month: number): string[] {
+  const third = Math.min(30, ubDaysInMonth(year, month));
+  return [
+    `${year}-${pad2(month)}-10`,
+    `${year}-${pad2(month)}-20`,
+    `${year}-${pad2(month)}-${pad2(third)}`,
+  ];
+}
+
+export function isPayoutDay(day: string): boolean {
+  const { year, month } = ubYmd(parseUbDay(day));
+  return payoutDaysInMonth(year, month).includes(day);
+}
+
+/** Буцаалт хийсэн агшныг аль 10/20/30-нд орохыг тооцоолно. */
+export function payoutDateForReturn(at: Date): string {
+  const { year, month, day } = ubYmd(at);
+  if (day < 10) return `${year}-${pad2(month)}-10`;
+  if (day < 20) return `${year}-${pad2(month)}-20`;
+  if (day < 30) return `${year}-${pad2(month)}-${pad2(Math.min(30, ubDaysInMonth(year, month)))}`;
+  if (month === 12) return `${year + 1}-01-10`;
+  return `${year}-${pad2(month + 1)}-10`;
+}
+
+/** Тухайн 10/20/30-нд орох буцаалтын цонх (UB). */
+export function payoutWindow(payoutDay: string): { gte: Date; lte: Date } {
+  const parsed = parseUbDay(payoutDay);
+  const { year, month, day } = ubYmd(parsed);
+  const third = Math.min(30, ubDaysInMonth(year, month));
+  if (day === 10) {
+    const prev = addUbMonths(startOfUbMonth(parsed), -1);
+    const { year: py, month: pm } = ubYmd(prev);
+    const fromDay = Math.min(30, ubDaysInMonth(py, pm));
+    return {
+      gte: parseUbDay(`${py}-${pad2(pm)}-${pad2(fromDay)}`),
+      lte: endOfUbDay(parseUbDay(`${year}-${pad2(month)}-09`)),
+    };
+  }
+  if (day === 20) {
+    return {
+      gte: parseUbDay(`${year}-${pad2(month)}-10`),
+      lte: endOfUbDay(parseUbDay(`${year}-${pad2(month)}-19`)),
+    };
+  }
+  if (day === third) {
+    const endDay = third < 30 ? third : 29;
+    return {
+      gte: parseUbDay(`${year}-${pad2(month)}-20`),
+      lte: endOfUbDay(parseUbDay(`${year}-${pad2(month)}-${pad2(endDay)}`)),
+    };
+  }
+  throw new Error(`Буцаалтын өдөр биш: ${payoutDay} (10, 20, 30)`);
+}

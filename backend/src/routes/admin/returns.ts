@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { isPayoutDay } from '../../lib/date.js';
 import { badRequest } from '../../lib/errors.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { listReturns, returnsCalendar } from '../../services/returns.js';
@@ -32,12 +33,12 @@ adminReturnsRouter.get(
   asyncHandler(async (req, res) => {
     const { days: raw } = query<{ days: string }>(req);
     const days = [...new Set(raw.split(',').map((d) => d.trim()).filter(Boolean))];
-    if (days.length === 0 || days.length > 31) {
-      throw badRequest('1–31 өдөр сонгоно уу.');
+    if (days.length === 0 || days.length > 3) {
+      throw badRequest('1–3 буцаалтын өдөр (10, 20, 30) сонгоно уу.');
     }
     for (const value of days) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-        throw badRequest('Огноо YYYY-MM-DD хэлбэртэй байна.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !isPayoutDay(value)) {
+        throw badRequest('Буцаалтын өдөр 10, 20, 30 байх ёстой.');
       }
     }
     res.json({ data: await listReturns(days) });

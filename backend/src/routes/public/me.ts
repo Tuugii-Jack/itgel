@@ -19,6 +19,7 @@ import {
   orderStatusLabel,
   publicDelivery,
   publicOrderItem,
+  refundPayoutOnFor,
 } from "../../services/serialize.js";
 import { mailTemplates, sendMail } from "../../services/mail.js";
 import { ipLimiters, RateLimiter } from "../../lib/rateLimit.js";
@@ -273,6 +274,7 @@ publicMeRouter.get(
           items: { include: { product: true } },
           batch: true,
           delivery: true,
+          payments: { where: { kind: "REFUND" }, select: { createdAt: true } },
         },
       }),
     ]);
@@ -299,6 +301,7 @@ publicMeRouter.get(
           order.status === "ARRIVED" && order.fulfilment === null,
         itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
         items: order.items.map(publicOrderItem),
+        refundPayoutOn: refundPayoutOnFor({ items: order.items, refunds: order.payments }),
         delivery: publicDelivery(order.delivery),
         timeline: buildTimeline(order),
         createdAt: order.createdAt.toISOString(),

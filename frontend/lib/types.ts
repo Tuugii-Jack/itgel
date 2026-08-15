@@ -311,10 +311,13 @@ export interface OrderItem {
   /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
   arriveFrom: string | null;
   arriveTo: string | null;
-  arrivedAt: string | null;
+  arrivedAt?: string | null;
+  cancelledAt?: string | null;
   handedOverAt: string | null;
   /** waiting | arrived | handed_over | cancelled */
   itemStatus: "waiting" | "arrived" | "handed_over" | "cancelled";
+  /** Сар бүрийн 10/20/30 — YYYY-MM-DD. Цуцлаагүй бол null. */
+  refundPayoutOn?: string | null;
 }
 
 export interface TimelineStep {
@@ -385,6 +388,8 @@ export interface PublicOrder {
   createdAt: string;
   customer: { name: string | null; phone: string | null; email?: string };
   items: OrderItem[];
+  /** Захиалгын хамгийн ойрын буцаалтын 10/20/30. */
+  refundPayoutOn?: string | null;
   batch: BatchSummary | null;
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
@@ -407,6 +412,7 @@ export interface MyOrder {
   canChooseFulfilment: boolean;
   itemCount: number;
   items: OrderItem[];
+  refundPayoutOn?: string | null;
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
   createdAt: string;

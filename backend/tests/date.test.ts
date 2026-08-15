@@ -5,6 +5,8 @@ import {
   diffUbDays,
   endOfUbDay,
   parseUbDay,
+  payoutDateForReturn,
+  payoutWindow,
   startOfUbDay,
   startOfUbMonth,
   ubDateString,
@@ -85,5 +87,51 @@ describe('Гарт очих огноо', () => {
     expect(addDays(new Date('2025-11-10T09:15:00Z'), 3).toISOString()).toBe(
       '2025-11-13T09:15:00.000Z',
     );
+  });
+});
+
+describe('Буцаалтын 10/20/30', () => {
+  it('10-оос өмнө → тухайн сарын 10', () => {
+    expect(payoutDateForReturn(parseUbDay('2026-08-09'))).toBe('2026-08-10');
+    expect(payoutDateForReturn(parseUbDay('2026-08-01'))).toBe('2026-08-10');
+  });
+
+  it('20-оос өмнө (10-оос хойш) → 20', () => {
+    expect(payoutDateForReturn(parseUbDay('2026-08-10'))).toBe('2026-08-20');
+    expect(payoutDateForReturn(parseUbDay('2026-08-19'))).toBe('2026-08-20');
+  });
+
+  it('30-аас өмнө → 30', () => {
+    expect(payoutDateForReturn(parseUbDay('2026-08-20'))).toBe('2026-08-30');
+    expect(payoutDateForReturn(parseUbDay('2026-08-29'))).toBe('2026-08-30');
+  });
+
+  it('30, 31 → дараа сарын 10', () => {
+    expect(payoutDateForReturn(parseUbDay('2026-08-30'))).toBe('2026-09-10');
+    expect(payoutDateForReturn(parseUbDay('2026-08-31'))).toBe('2026-09-10');
+    expect(payoutDateForReturn(parseUbDay('2026-12-30'))).toBe('2027-01-10');
+  });
+
+  it('хоёрдугаар сарын сүүл 30-ны цонх', () => {
+    expect(payoutDateForReturn(parseUbDay('2026-02-20'))).toBe('2026-02-28');
+    expect(payoutDateForReturn(parseUbDay('2026-02-28'))).toBe('2026-02-28');
+  });
+
+  it('10-ны цонх өмнөх сарын 30-аас 9 хүртэл', () => {
+    const w = payoutWindow('2026-08-10');
+    expect(ubDateString(w.gte)).toBe('2026-07-30');
+    expect(ubDateString(w.lte)).toBe('2026-08-09');
+  });
+
+  it('20-ны цонх 10–19', () => {
+    const w = payoutWindow('2026-08-20');
+    expect(ubDateString(w.gte)).toBe('2026-08-10');
+    expect(ubDateString(w.lte)).toBe('2026-08-19');
+  });
+
+  it('30-ны цонх 20–29', () => {
+    const w = payoutWindow('2026-08-30');
+    expect(ubDateString(w.gte)).toBe('2026-08-20');
+    expect(ubDateString(w.lte)).toBe('2026-08-29');
   });
 });

@@ -6,7 +6,7 @@ import { FulfilmentChooser } from "@/components/FulfilmentChooser";
 import { PaymentPanel } from "@/components/PaymentPanel";
 import { Badge, Button, ErrorNote, Skeleton, type Tone } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
-import { dayLabel, money, rangeLabel, relativeDay } from "@/lib/format";
+import { dayLabel, money, rangeLabel, relativeDay, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useSession } from "@/lib/session";
 import { awaitingPayment } from "@/lib/payment";
@@ -374,13 +374,17 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                   )}
                 </div>
                 <span className="tnum hidden text-[13px] text-ink-2 lg:inline">
-                  {item.itemStatus === "handed_over"
-                    ? "Авсан"
-                    : item.itemStatus === "arrived"
-                      ? "Авах боломжтой"
-                      : !item.cancelled && item.arriveFrom && item.arriveTo
-                        ? `${rangeLabel(item.arriveFrom, item.arriveTo)}-нд ирнэ`
-                        : ""}
+                  {item.cancelled || item.itemStatus === "cancelled"
+                    ? item.refundPayoutOn
+                      ? refundPayoutLabel(item.refundPayoutOn)
+                      : ""
+                    : item.itemStatus === "handed_over"
+                      ? "Авсан"
+                      : item.itemStatus === "arrived"
+                        ? "Авах боломжтой"
+                        : !item.cancelled && item.arriveFrom && item.arriveTo
+                          ? `${rangeLabel(item.arriveFrom, item.arriveTo)}-нд ирнэ`
+                          : ""}
                 </span>
                 <div
                   className={`tnum text-[14px] lg:text-right ${
@@ -392,6 +396,11 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                   {money(item.total)}
                 </div>
               </div>
+              {item.cancelled && item.refundPayoutOn && (
+                <div className="text-[13px] text-ink-2 lg:hidden">
+                  {refundPayoutLabel(item.refundPayoutOn)}
+                </div>
+              )}
               {!item.cancelled &&
                 item.itemStatus === "waiting" &&
                 item.arriveFrom &&
@@ -569,7 +578,9 @@ function etaOf(order: PublicOrder): { label: string; value: string; note: string
     return {
       label: "Төлөв",
       value: "Цуцлагдсан",
-      note: "Энэ захиалга цуцлагдсан. Асуулт байвал бидэнтэй холбогдоно уу.",
+      note: order.refundPayoutOn
+        ? refundPayoutLabel(order.refundPayoutOn)
+        : "Энэ захиалга цуцлагдсан. Асуулт байвал бидэнтэй холбогдоно уу.",
     };
   }
   if (order.status === "HANDED_OVER") {
