@@ -270,6 +270,12 @@ export default function AdminOrdersPage() {
             >
               Бараагаар
             </Link>
+            <Link
+              href="/admin/returns"
+              className="inline-flex h-9 items-center rounded-[8px] border border-line bg-bg px-3 text-[13px] text-ink"
+            >
+              Буцаалт
+            </Link>
             {canWrite && !showDeleted && (
               <Link
                 href="/admin/orders/new"

@@ -21,6 +21,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] 
       { href: "/admin/orders/by-product", label: "Бараагаар" },
       { href: "/admin/handover", label: "Хүлээлгэн өгөх" },
       { href: "/admin/deliveries", label: "Хүргэлт" },
+      { href: "/admin/returns", label: "Буцаалт" },
     ],
   },
   {

@@ -38,6 +38,8 @@ import type {
   QpayCheckResult,
   QpayInvoice,
   QpayPaymentRow,
+  ReturnsCalendar,
+  ReturnsList,
   RevenueReport,
   RoundOrders,
   OrdersByProductDate,
@@ -1139,6 +1141,18 @@ export const adminApi = {
       ...adminAuth,
       method: "PATCH",
       body,
+    }).then((r) => r.data),
+
+  returnsCalendar: (year: number, month: number) =>
+    request<ReturnsCalendar>("/admin/returns/calendar", {
+      ...adminAuth,
+      query: { year, month },
+    }).then((r) => r.data),
+
+  returns: (days: string[]) =>
+    request<ReturnsList>("/admin/returns", {
+      ...adminAuth,
+      query: { days: days.join(",") },
     }).then((r) => r.data),
 
   customers: (query?: Query) =>

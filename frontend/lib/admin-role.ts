@@ -16,6 +16,7 @@ export function helperAdminCanAccess(pathname: string): boolean {
     pathname.startsWith("/admin/orders") ||
     pathname.startsWith("/admin/handover") ||
     pathname.startsWith("/admin/deliveries") ||
+    pathname.startsWith("/admin/returns") ||
     pathname.startsWith("/admin/customers")
   );
 }

@@ -911,6 +911,56 @@ export interface ArchiveCalendar {
   total: number;
 }
 
+/** GET /admin/returns/calendar — цуцлагдсан мөртэй өдрүүд. */
+export interface ReturnsCalendar {
+  year: number;
+  month: number;
+  days: {
+    date: string;
+    qty: number;
+    itemCount: number;
+    customerCount: number;
+  }[];
+}
+
+/** GET /admin/returns — сонгосон өдрүүдийн нэгтгэл. */
+export interface ReturnsList {
+  days: string[];
+  products: ReturnProduct[];
+  payouts: ReturnPayout[];
+  summary: {
+    qty: number;
+    amount: number;
+    productCount: number;
+    customerCount: number;
+  };
+}
+
+export interface ReturnProduct {
+  productId: string;
+  name: string;
+  selections: Record<string, string>;
+  size: string | null;
+  color: string | null;
+  qty: number;
+  amount: number;
+  orderCount: number;
+  customerCount: number;
+}
+
+export interface ReturnPayout {
+  customerId: string;
+  name: string | null;
+  phone: string | null;
+  email: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankAccountName: string;
+  amount: number;
+  qty: number;
+  orderCodes: string[];
+}
+
 export interface ArchiveDay {
   date: string;
   summary: {
