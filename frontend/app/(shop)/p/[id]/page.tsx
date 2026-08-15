@@ -15,7 +15,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { money } from "@/lib/format";
-import { optionValuePrice, priceForSelections, priceLabel } from "@/lib/options";
+import { priceForSelections, priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -222,21 +222,10 @@ export default function ProductPage({
                           ? 4
                           : Math.max(2, opt.values.length)
                       }
-                      options={opt.values.map((v) => {
-                        const priced = optionValuePrice(
-                          product.optionPrices,
-                          opt.name,
-                          v,
-                          product.price,
-                        );
-                        const showPrice =
-                          product.optionPrices?.some((p) => p.kind === opt.name) &&
-                          priced !== product.price;
-                        return {
-                          value: v,
-                          label: showPrice ? `${v} · ${money(priced)}` : v,
-                        };
-                      })}
+                      options={opt.values.map((v) => ({
+                        value: v,
+                        label: v,
+                      }))}
                       value={selected}
                       onChange={(v) => {
                         setSelections((prev) => ({ ...prev, [opt.name]: v }));
