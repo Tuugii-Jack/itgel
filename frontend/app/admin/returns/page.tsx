@@ -146,7 +146,7 @@ export default function AdminReturnsPage() {
     <div>
       <PageHead
         title="Буцаалт"
-        hint="Цуцлагдсан барааг өдрөөр сонгож нэгтгэнэ. Сар бүрийн 10, 20, 30-нд шилжүүлнэ."
+        hint="Захиалгын дэлгэрэнгүйгээс «Цуцлаад буцаах» эсвэл «Буцаалт хийх» хийсэн төлсөн бараа орно. Сар бүрийн 10, 20, 30-нд шилжүүлнэ."
         actions={
           <Button
             size="sm"
@@ -243,7 +243,7 @@ export default function AdminReturnsPage() {
             })}
           </div>
           {selectable.length === 0 && (
-            <div className="mt-3 text-[13px] text-muted">Энэ сард цуцлагдсан бараа алга.</div>
+            <div className="mt-3 text-[13px] text-muted">Энэ сард буцаалт алга.</div>
           )}
         </Card>
       )}

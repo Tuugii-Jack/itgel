@@ -41,26 +41,167 @@ function rangesForDays(days: string[]): { gte: Date; lte: Date }[] {
   });
 }
 
-const itemInclude = {
-  order: {
-    select: {
-      id: true,
-      code: true,
-      customer: {
-        select: {
-          id: true,
-          name: true,
-          phone: true,
-          email: true,
-          bankName: true,
-          bankAccountNumber: true,
-          bankAccountName: true,
-        },
-      },
-    },
-  },
+const customerSelect = {
+  id: true,
+  name: true,
+  phone: true,
+  email: true,
+  bankName: true,
+  bankAccountNumber: true,
+  bankAccountName: true,
 } as const;
 
+const itemSelect = {
+  id: true,
+  productId: true,
+  nameSnapshot: true,
+  selections: true,
+  size: true,
+  color: true,
+  qty: true,
+  unitPrice: true,
+  cancelledAt: true,
+} as const;
+
+type ItemRow = {
+  id: string;
+  productId: string;
+  nameSnapshot: string;
+  selections: unknown;
+  size: string | null;
+  color: string | null;
+  qty: number;
+  unitPrice: number;
+  cancelledAt: Date | null;
+};
+
+type CustomerRow = {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  email: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankAccountName: string;
+};
+
+const ITEM_REFUND_NOTE = 'Мөр цуцлагдсан: ';
+
+/** Админ захиалгын дэлгэрэнгүйгээс хийсэн буцаалт — дэвтэрийн REFUND. */
+function adminRefundWhere(createdAt: { gte: Date; lte?: Date; lt?: Date }) {
+  return {
+    kind: 'REFUND' as const,
+    createdAt,
+    actor: { startsWith: 'admin:' },
+  };
+}
+
+function productsForRefund(note: string | null, items: ItemRow[]): ItemRow[] {
+  if (note?.startsWith(ITEM_REFUND_NOTE)) {
+    const name = note.slice(ITEM_REFUND_NOTE.length);
+    const named = items.filter((item) => item.cancelledAt && item.nameSnapshot === name);
+    if (named.length > 0) return named;
+  }
+  const cancelled = items.filter((item) => item.cancelledAt);
+  if (cancelled.length > 0) return cancelled;
+  return items;
+}
+
+type ProductAgg = ReturnProduct & { orders: Set<string>; customers: Set<string> };
+type PayoutAgg = ReturnPayout & { codes: Set<string> };
+
+function addProduct(
+  products: Map<string, ProductAgg>,
+  seenItems: Set<string>,
+  item: ItemRow,
+  orderId: string,
+  customerId: string,
+): void {
+  if (seenItems.has(item.id)) return;
+  seenItems.add(item.id);
+  const selections = itemSelections(item);
+  const key = `${item.productId}:${item.nameSnapshot}:${variantKey(selections)}`;
+  const product = products.get(key) ?? {
+    productId: item.productId,
+    name: item.nameSnapshot,
+    selections,
+    size: item.size,
+    color: item.color,
+    qty: 0,
+    amount: 0,
+    orderCount: 0,
+    customerCount: 0,
+    orders: new Set<string>(),
+    customers: new Set<string>(),
+  };
+  product.qty += item.qty;
+  product.amount += item.unitPrice * item.qty;
+  product.orders.add(orderId);
+  product.customers.add(customerId);
+  products.set(key, product);
+}
+
+function addPayout(
+  payouts: Map<string, PayoutAgg>,
+  customer: CustomerRow,
+  amount: number,
+  qty: number,
+  orderCode: string,
+): void {
+  if (amount <= 0 && qty <= 0) return;
+  const payout = payouts.get(customer.id) ?? {
+    customerId: customer.id,
+    name: customer.name,
+    phone: customer.phone,
+    email: customer.email,
+    bankName: customer.bankName,
+    bankAccountNumber: customer.bankAccountNumber,
+    bankAccountName: customer.bankAccountName,
+    amount: 0,
+    qty: 0,
+    orderCodes: [],
+    codes: new Set<string>(),
+  };
+  payout.amount += amount;
+  payout.qty += qty;
+  payout.codes.add(orderCode);
+  payouts.set(customer.id, payout);
+}
+
+function finalize(products: Map<string, ProductAgg>, payouts: Map<string, PayoutAgg>) {
+  const productRows = [...products.values()]
+    .map(({ orders, customers, ...row }) => ({
+      ...row,
+      orderCount: orders.size,
+      customerCount: customers.size,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'mn') || b.qty - a.qty);
+
+  const payoutRows = [...payouts.values()]
+    .map(({ codes, ...row }) => ({
+      ...row,
+      orderCodes: [...codes].sort(),
+    }))
+    .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email, 'mn'));
+
+  return {
+    products: productRows,
+    payouts: payoutRows,
+    summary: {
+      qty: productRows.reduce((sum, row) => sum + row.qty, 0),
+      amount: payoutRows.reduce((sum, row) => sum + row.amount, 0),
+      productCount: productRows.length,
+      customerCount: payoutRows.length,
+    },
+  };
+}
+
+/**
+ * Буцаалт = захиалгын дэлгэрэнгүйгээс:
+ * - мөр «Цуцлаад буцаах»
+ * - «Буцаалт хийх» / QPay буцаалт (төлсөн мөнгө)
+ * Захиалга бүтнээр цуцлагдсан, төлбөргүй автомат цуцлалт орохгүй.
+ */
 export async function returnsCalendar(year: number, month: number): Promise<{
   year: number;
   month: number;
@@ -69,24 +210,67 @@ export async function returnsCalendar(year: number, month: number): Promise<{
   const from = startOfUbMonth(parseUbDay(`${year}-${String(month).padStart(2, '0')}-01`));
   const to = addUbMonths(from, 1);
 
-  const items = await prisma.orderItem.findMany({
-    where: { cancelledAt: { gte: from, lt: to } },
-    select: {
-      qty: true,
-      cancelledAt: true,
-      order: { select: { customerId: true } },
-    },
-  });
+  const [refunds, cancelledItems] = await Promise.all([
+    prisma.payment.findMany({
+      where: adminRefundWhere({ gte: from, lt: to }),
+      select: {
+        id: true,
+        amount: true,
+        createdAt: true,
+        note: true,
+        order: {
+          select: {
+            customerId: true,
+            items: { select: itemSelect },
+          },
+        },
+      },
+    }),
+    prisma.orderItem.findMany({
+      where: { cancelledAt: { gte: from, lt: to } },
+      select: {
+        ...itemSelect,
+        cancelledAt: true,
+        order: { select: { customerId: true } },
+      },
+    }),
+  ]);
 
-  const byDay = new Map<string, { qty: number; itemCount: number; customers: Set<string> }>();
-  for (const item of items) {
-    if (!item.cancelledAt) continue;
-    const date = ubDateString(item.cancelledAt);
-    const entry = byDay.get(date) ?? { qty: 0, itemCount: 0, customers: new Set<string>() };
-    entry.qty += item.qty;
-    entry.itemCount += 1;
-    entry.customers.add(item.order.customerId);
+  const byDay = new Map<
+    string,
+    { qty: number; itemIds: Set<string>; customers: Set<string>; refundIds: Set<string> }
+  >();
+
+  const day = (date: string) => {
+    const entry = byDay.get(date) ?? {
+      qty: 0,
+      itemIds: new Set<string>(),
+      customers: new Set<string>(),
+      refundIds: new Set<string>(),
+    };
     byDay.set(date, entry);
+    return entry;
+  };
+
+  for (const item of cancelledItems) {
+    if (!item.cancelledAt) continue;
+    const entry = day(ubDateString(item.cancelledAt));
+    if (!entry.itemIds.has(item.id)) {
+      entry.itemIds.add(item.id);
+      entry.qty += item.qty;
+    }
+    entry.customers.add(item.order.customerId);
+  }
+
+  for (const refund of refunds) {
+    const entry = day(ubDateString(refund.createdAt));
+    entry.refundIds.add(refund.id);
+    entry.customers.add(refund.order.customerId);
+    for (const item of productsForRefund(refund.note, refund.order.items)) {
+      if (entry.itemIds.has(item.id)) continue;
+      entry.itemIds.add(item.id);
+      entry.qty += item.qty;
+    }
   }
 
   return {
@@ -96,7 +280,7 @@ export async function returnsCalendar(year: number, month: number): Promise<{
       .map(([date, v]) => ({
         date,
         qty: v.qty,
-        itemCount: v.itemCount,
+        itemCount: v.itemIds.size || v.refundIds.size,
         customerCount: v.customers.size,
       }))
       .sort((a, b) => a.date.localeCompare(b.date)),
@@ -119,90 +303,68 @@ export async function listReturns(days: string[]): Promise<{
     };
   }
 
-  const items = await prisma.orderItem.findMany({
-    where: { OR: rangesForDays(uniqueDays).map((range) => ({ cancelledAt: range })) },
-    include: itemInclude,
-    orderBy: { cancelledAt: 'asc' },
-  });
+  const ranges = rangesForDays(uniqueDays);
 
-  const products = new Map<
-    string,
-    ReturnProduct & { orders: Set<string>; customers: Set<string> }
-  >();
-  const payouts = new Map<
-    string,
-    ReturnPayout & { codes: Set<string> }
-  >();
+  const [refunds, cancelledItems] = await Promise.all([
+    prisma.payment.findMany({
+      where: {
+        kind: 'REFUND',
+        actor: { startsWith: 'admin:' },
+        OR: ranges.map((createdAt) => ({ createdAt })),
+      },
+      select: {
+        amount: true,
+        note: true,
+        order: {
+          select: {
+            id: true,
+            code: true,
+            customer: { select: customerSelect },
+            items: { select: itemSelect },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    }),
+    prisma.orderItem.findMany({
+      where: { OR: ranges.map((cancelledAt) => ({ cancelledAt })) },
+      select: {
+        ...itemSelect,
+        order: {
+          select: {
+            id: true,
+            code: true,
+            customer: { select: customerSelect },
+          },
+        },
+      },
+      orderBy: { cancelledAt: 'asc' },
+    }),
+  ]);
 
-  for (const item of items) {
-    const selections = itemSelections(item);
-    const key = `${item.productId}:${item.nameSnapshot}:${variantKey(selections)}`;
-    const product = products.get(key) ?? {
-      productId: item.productId,
-      name: item.nameSnapshot,
-      selections,
-      size: item.size,
-      color: item.color,
-      qty: 0,
-      amount: 0,
-      orderCount: 0,
-      customerCount: 0,
-      orders: new Set<string>(),
-      customers: new Set<string>(),
-    };
-    product.qty += item.qty;
-    product.amount += item.unitPrice * item.qty;
-    product.orders.add(item.order.id);
-    product.customers.add(item.order.customer.id);
-    products.set(key, product);
+  const products = new Map<string, ProductAgg>();
+  const payouts = new Map<string, PayoutAgg>();
+  const seenItems = new Set<string>();
 
-    const customer = item.order.customer;
-    const payout = payouts.get(customer.id) ?? {
-      customerId: customer.id,
-      name: customer.name,
-      phone: customer.phone,
-      email: customer.email,
-      bankName: customer.bankName,
-      bankAccountNumber: customer.bankAccountNumber,
-      bankAccountName: customer.bankAccountName,
-      amount: 0,
-      qty: 0,
-      orderCodes: [],
-      codes: new Set<string>(),
-    };
-    payout.amount += item.unitPrice * item.qty;
-    payout.qty += item.qty;
-    payout.codes.add(item.order.code);
-    payouts.set(customer.id, payout);
+  for (const item of cancelledItems) {
+    addProduct(products, seenItems, item, item.order.id, item.order.customer.id);
   }
 
-  const productRows = [...products.values()]
-    .map(({ orders, customers, ...row }) => ({
-      ...row,
-      orderCount: orders.size,
-      customerCount: customers.size,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'mn') || b.qty - a.qty);
+  const countedOrders = new Set<string>();
+  for (const refund of refunds) {
+    const linked = productsForRefund(refund.note, refund.order.items);
+    let qty = 0;
+    if (!countedOrders.has(refund.order.id)) {
+      countedOrders.add(refund.order.id);
+      qty = linked.reduce((sum, item) => sum + item.qty, 0);
+    }
+    for (const item of linked) {
+      addProduct(products, seenItems, item, refund.order.id, refund.order.customer.id);
+    }
+    addPayout(payouts, refund.order.customer, refund.amount, qty, refund.order.code);
+  }
 
-  const payoutRows = [...payouts.values()]
-    .map(({ codes, ...row }) => ({
-      ...row,
-      orderCodes: [...codes].sort(),
-    }))
-    .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email, 'mn'));
+  const { products: productRows, payouts: payoutRows, summary } = finalize(products, payouts);
 
-  const qty = productRows.reduce((sum, row) => sum + row.qty, 0);
-  const amount = productRows.reduce((sum, row) => sum + row.amount, 0);
-
-  return {
-    days: uniqueDays,
-    products: productRows,
-    payouts: payoutRows,
-    summary: {
-      qty,
-      amount,
-      productCount: productRows.length,
-      customerCount: payoutRows.length,
-    },
-  };
+  return { days: uniqueDays, products: productRows, payouts: payoutRows, summary };
 }

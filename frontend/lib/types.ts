@@ -911,7 +911,7 @@ export interface ArchiveCalendar {
   total: number;
 }
 
-/** GET /admin/returns/calendar — цуцлагдсан мөртэй өдрүүд. */
+/** GET /admin/returns/calendar — захиалгын мөрөөр буцаасан өдрүүд. */
 export interface ReturnsCalendar {
   year: number;
   month: number;

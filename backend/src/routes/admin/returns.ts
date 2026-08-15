@@ -6,7 +6,7 @@ import { listReturns, returnsCalendar } from '../../services/returns.js';
 
 export const adminReturnsRouter = Router();
 
-/** GET /returns/calendar?year=&month= — цуцлагдсан мөртэй өдрүүд. */
+/** GET /returns/calendar?year=&month= — захиалгаас хийсэн буцаалттай өдрүүд. */
 adminReturnsRouter.get(
   '/calendar',
   validate({
@@ -21,7 +21,7 @@ adminReturnsRouter.get(
   }),
 );
 
-/** GET /returns?days=YYYY-MM-DD,YYYY-MM-DD — бараа + шилжүүлэх данс. */
+/** GET /returns?days=YYYY-MM-DD,YYYY-MM-DD — мөрөөр буцаасан бараа + данс. */
 adminReturnsRouter.get(
   '/',
   validate({
