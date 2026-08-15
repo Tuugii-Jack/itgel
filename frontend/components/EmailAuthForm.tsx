@@ -32,7 +32,6 @@ export function EmailAuthForm({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
-  const [devCode, setDevCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
@@ -47,7 +46,6 @@ export function EmailAuthForm({
     setMode(next);
     setError(null);
     setCode("");
-    if (next !== "reset") setDevCode(null);
   };
 
   const finish = async (token: string, okMessage: string) => {
@@ -96,7 +94,6 @@ export function EmailAuthForm({
     setError(null);
     try {
       const result = await api.forgotPassword(email.trim());
-      setDevCode(result.devCode ?? null);
       setCooldown(result.resendAfterSec);
       setPassword("");
       setCode("");
@@ -306,11 +303,6 @@ export function EmailAuthForm({
               autoFocus
             />
           </Field>
-          {devCode && (
-            <p className="m-0 text-[12px] text-muted">
-              Туршилтын код: <span className="tnum">{devCode}</span>
-            </p>
-          )}
           <Field label="Шинэ нууц үг">
             <Input
               value={password}

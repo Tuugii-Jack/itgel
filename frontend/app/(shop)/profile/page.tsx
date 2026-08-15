@@ -543,7 +543,6 @@ function InfoTab() {
   const [newEmail, setNewEmail] = useState("");
   const [emailPassword, setEmailPassword] = useState("");
   const [emailCode, setEmailCode] = useState("");
-  const [emailDevCode, setEmailDevCode] = useState<string | null>(null);
   const [emailStep, setEmailStep] = useState<"form" | "code">("form");
   const [credBusy, setCredBusy] = useState(false);
 
@@ -590,8 +589,7 @@ function InfoTab() {
   const requestEmailChange = async () => {
     setCredBusy(true);
     try {
-      const result = await api.changeEmail(newEmail.trim(), emailPassword);
-      setEmailDevCode(result.devCode ?? null);
+      await api.changeEmail(newEmail.trim(), emailPassword);
       setEmailStep("code");
       toast.success("Баталгаажуулах код илгээлээ.");
     } catch (e) {
@@ -729,11 +727,6 @@ function InfoTab() {
                 maxLength={6}
               />
             </Field>
-            {emailDevCode && (
-              <p className='m-0 text-[12px] text-muted'>
-                Туршилтын код: <span className='tnum'>{emailDevCode}</span>
-              </p>
-            )}
             <div className='flex gap-2'>
               <Button
                 onClick={confirmEmailChange}

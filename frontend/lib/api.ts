@@ -310,7 +310,6 @@ export const api = {
       email: string;
       expiresInSec: number;
       resendAfterSec: number;
-      devCode?: string;
     }>("/auth/email/resend", { method: "POST", body: { email } }).then(
       (r) => r.data,
     ),
@@ -321,7 +320,6 @@ export const api = {
       expiresInSec: number;
       resendAfterSec: number;
       message?: string;
-      devCode?: string;
     }>("/auth/password/forgot", { method: "POST", body: { email } }).then(
       (r) => r.data,
     ),
@@ -448,7 +446,6 @@ export const api = {
       expiresInSec: number;
       resendAfterSec: number;
       message?: string;
-      devCode?: string;
     }>("/me/email/change", {
       method: "POST",
       body: { email, password },

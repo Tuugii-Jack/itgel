@@ -57,44 +57,56 @@ function publicCustomer(c: {
 async function issueEmailOtp(email: string, purpose: 'VERIFY' | 'RESET') {
   const now = new Date();
   const last = await prisma.emailOtp.findFirst({
-    where: { email, purpose },
+    where: { email, purpose, usedAt: null, expiresAt: { gt: now } },
     orderBy: { createdAt: 'desc' },
   });
-  if (last && now.getTime() - last.createdAt.getTime() < RESEND_COOLDOWN_MS) {
-    const wait = Math.ceil(
-      (RESEND_COOLDOWN_MS - (now.getTime() - last.createdAt.getTime())) / 1000,
-    );
-    throw tooManyRequests(`${wait} секундын дараа дахин илгээнэ үү.`, { retryAfterSec: wait });
+
+  const sendCode = async (code: string) => {
+    const template = purpose === 'VERIFY' ? mailTemplates.verify(code) : mailTemplates.reset(code);
+    const sent = await sendMail({
+      to: email,
+      subject: template.subject,
+      text: template.text,
+      html: template.html,
+    });
+    if (!sent.ok) throw badRequest(sent.error ?? 'И-мэйл илгээж чадсангүй.');
+  };
+
+  const remainingCooldown = last
+    ? Math.ceil((RESEND_COOLDOWN_MS - (now.getTime() - last.createdAt.getTime())) / 1000)
+    : 0;
+
+  const publicOtp = (otp: { expiresAt: Date; createdAt: Date }, resendAfterSec: number) => ({
+    email,
+    expiresInSec: Math.max(1, Math.ceil((otp.expiresAt.getTime() - now.getTime()) / 1000)),
+    resendAfterSec,
+  });
+
+  // Хэт ойрхон дахин дарахад алдаа өгөхгүй, шинэ и-мэйл илгээхгүй.
+  if (last && remainingCooldown > 0) {
+    return publicOtp(last, remainingCooldown);
   }
 
   const hourly = emailLimiter.hit(`${purpose}:${email}`, now.getTime());
   if (!hourly.allowed) {
+    if (last) return publicOtp(last, RESEND_COOLDOWN_MS / 1000);
     throw tooManyRequests('Хэт олон код хүслээ. 1 цагийн дараа оролдоно уу.', {
       retryAfterSec: hourly.retryAfterSec,
     });
   }
 
+  if (last) {
+    await sendCode(last.code);
+    return publicOtp(last, RESEND_COOLDOWN_MS / 1000);
+  }
+
   const code = generateEmailCode();
-  await prisma.emailOtp.create({
+  await sendCode(code);
+  const created = await prisma.emailOtp.create({
     data: { email, code, purpose, expiresAt: new Date(now.getTime() + OTP_TTL_MS) },
   });
 
-  const template = purpose === 'VERIFY' ? mailTemplates.verify(code) : mailTemplates.reset(code);
-  const sent = await sendMail({
-    to: email,
-    subject: template.subject,
-    text: template.text,
-    html: template.html,
-    codeForDev: code,
-  });
-  if (!sent.ok) throw badRequest(sent.error ?? 'И-мэйл илгээж чадсангүй.');
-
-  return {
-    email,
-    expiresInSec: OTP_TTL_MS / 1000,
-    resendAfterSec: RESEND_COOLDOWN_MS / 1000,
-    devCode: sent.devCode,
-  };
+  return publicOtp(created, RESEND_COOLDOWN_MS / 1000);
 }
 
 async function consumeEmailOtp(email: string, purpose: 'VERIFY' | 'RESET', code: string) {

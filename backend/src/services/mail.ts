@@ -54,12 +54,10 @@ export interface MailContent {
 export interface SendMailResult {
   ok: boolean;
   error?: string;
-  /** Dev дээр SMTP байхгүй үед UI тестлэхэд. */
-  devCode?: string;
 }
 
 /**
- * И-мэйл илгээнэ. SMTP тохируулаагүй бол development-д console + devCode,
+ * И-мэйл илгээнэ. SMTP тохируулаагүй бол development-д зөвхөн console.
  * production-д алдаа буцаана.
  */
 export async function sendMail(opts: {
@@ -67,14 +65,12 @@ export async function sendMail(opts: {
   subject: string;
   text: string;
   html?: string;
-  /** Хэрэв илгээлт mock бол энэ кодыг devCode-оор буцаана. */
-  codeForDev?: string;
 }): Promise<SendMailResult> {
   if (!transporter) {
     const msg = `[mail] SMTP тохируулаагүй — ${opts.to}: ${opts.subject}\n${opts.text}`;
     console.info(msg);
     if (isProd) return { ok: false, error: 'И-мэйл илгээх тохиргоо дутуу байна.' };
-    return { ok: true, devCode: opts.codeForDev };
+    return { ok: true };
   }
 
   try {
@@ -103,7 +99,7 @@ export async function sendMail(opts: {
           ]
         : undefined,
     });
-    return { ok: true, ...(isProd ? {} : { devCode: opts.codeForDev }) };
+    return { ok: true };
   } catch (e) {
     const error = e instanceof Error ? e.message : 'И-мэйл илгээж чадсангүй.';
     console.error('[mail]', error);

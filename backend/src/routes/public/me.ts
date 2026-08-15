@@ -228,7 +228,6 @@ publicMeRouter.post(
       subject: template.subject,
       text: template.text,
       html: template.html,
-      codeForDev: code,
     });
     if (!sent.ok) throw badRequest(sent.error ?? "И-мэйл илгээж чадсангүй.");
 
@@ -237,7 +236,6 @@ publicMeRouter.post(
         email,
         expiresInSec: OTP_TTL_MS / 1000,
         resendAfterSec: 60,
-        devCode: sent.devCode,
         message: "Шинэ и-мэйл рүү баталгаажуулах код илгээлээ.",
       },
     });
