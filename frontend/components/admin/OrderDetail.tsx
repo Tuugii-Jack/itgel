@@ -15,6 +15,8 @@ import {
   Spinner,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { isFullAdmin } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { downloadOrdersExcel, printOrders } from "@/lib/orderExport";
@@ -83,6 +85,8 @@ export function OrderDetail({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
+  const { user } = useAdminSession();
+  const canWrite = isFullAdmin(user?.role);
   const busy = busyKey !== null;
   /** Төлбөр дутуу гэж 409 өгсөн үед force-оор давах саналыг харуулна. */
   const [shortfall, setShortfall] = useState<{ status: OrderStatus; missing: number } | null>(
@@ -252,7 +256,8 @@ export function OrderDetail({
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <OrderBadge status={order.status} />
         <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
-        {order.batch && (
+        {order.batch &&
+          (canWrite ? (
           <Link
             href="/admin/batches"
             className="no-underline"
@@ -268,15 +273,19 @@ export function OrderDetail({
           >
             <Badge tone="info">{order.batch.name}</Badge>
           </Link>
-        )}
+          ) : (
+            <Badge tone="info">{order.batch.name}</Badge>
+          ))}
       </div>
 
       {order.paymentClaimedAt && order.dueAmount > 0 && (
         <Card className="mb-4 border-info bg-info-bg p-4">
           <div className="text-[14px] leading-[1.5] text-info">
             Хэрэглэгч <span className="tnum">{dayTimeLabel(order.paymentClaimedAt)}</span>-нд
-            мөнгө шилжүүлсэн гэж мэдэгдсэн. Дансаа шалгаад доор төлбөрийг бүртгэнэ үү —
-            мэдэгдэл нь төлбөр орсны баталгаа биш.
+            мөнгө шилжүүлсэн гэж мэдэгдсэн.
+            {canWrite
+              ? " Дансаа шалгаад доор төлбөрийг бүртгэнэ үү — мэдэгдэл нь төлбөр орсны баталгаа биш."
+              : " Мэдэгдэл нь төлбөр орсны баталгаа биш."}
           </div>
         </Card>
       )}
@@ -287,7 +296,7 @@ export function OrderDetail({
         </div>
       )}
 
-      {shortfall && (
+      {canWrite && shortfall && (
         <Card className="mb-4 border-warn bg-warn-bg p-4">
           <div className="text-[14px] leading-[1.5] text-warn">
             <span className="tnum font-medium">{money(shortfall.missing)}</span> ороогүй
@@ -338,7 +347,7 @@ export function OrderDetail({
                   <span className={`tnum text-[15px] ${item.cancelled ? "text-muted line-through" : ""}`}>
                     {money(item.total)}
                   </span>
-                  {!item.cancelled && order.status !== "HANDED_OVER" && (
+                  {!item.cancelled && canWrite && order.status !== "HANDED_OVER" && (
                     <CancelItem
                       disabled={busy}
                       loading={busyKey === `item:${item.id}`}
@@ -395,10 +404,12 @@ export function OrderDetail({
             disabled={busy}
             busyKey={busyKey}
             onAction={run}
+            readOnly={!canWrite}
           />
         </div>
 
         <div className="flex flex-col gap-4">
+          {canWrite ? (
           <StatusActions
             status={order.status}
             disabled={busy}
@@ -406,6 +417,22 @@ export function OrderDetail({
             onChange={changeStatus}
             onRevert={revertStatus}
           />
+          ) : (
+            <Card className="flex flex-col gap-3 p-4">
+              <div className="text-[15px] font-medium">Төлөв</div>
+              <div className="text-[13px] text-ink-2">
+                Одоо: {ORDER_STATUS_LABEL[order.status]}
+              </div>
+              {order.status === "ARRIVED" && (
+                <Link
+                  href="/admin/handover"
+                  className="inline-flex h-9 items-center justify-center rounded-[8px] bg-ink px-3 text-[13px] text-white no-underline"
+                >
+                  Хүлээлгэн өгөх
+                </Link>
+              )}
+            </Card>
+          )}
 
           <Card className="flex flex-col gap-2 p-4">
             <SumRow label="Барааны дүн" value={money(totals.subtotal)} />
@@ -437,7 +464,7 @@ export function OrderDetail({
             </div>
           </Card>
 
-          {totals.dueAmount > 0 && (
+          {canWrite && totals.dueAmount > 0 && (
             <RecordPayment
               suggested={totals.dueAmount}
               disabled={busy}
@@ -448,7 +475,7 @@ export function OrderDetail({
             />
           )}
 
-          {ledger.maxRefundable > 0 && (
+          {canWrite && ledger.maxRefundable > 0 && (
             <RecordRefund
               max={ledger.maxRefundable}
               disabled={busy}

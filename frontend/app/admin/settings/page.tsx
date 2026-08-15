@@ -14,9 +14,10 @@ import {
   Toggle,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { ROLE_LABEL } from "@/lib/admin-role";
 import { dayTimeLabel } from "@/lib/format";
 import { useToast } from "@/lib/toast";
-import type { AuditLog, Settings } from "@/lib/types";
+import type { AuditLog, AdminStaffUser, Settings } from "@/lib/types";
 
 export default function SettingsPage() {
   const toast = useToast();
@@ -106,6 +107,8 @@ export default function SettingsPage() {
 
       <div className="flex flex-col gap-4">
         <AdminPasswordCard />
+
+        <StaffAccountsCard />
 
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Дэлгүүр</div>
@@ -323,6 +326,193 @@ const ACTION_LABEL: Record<string, string> = {
   STALE_ORDERS_REPORT: "Удаан хүлээсэн захиалгын тайлан",
 };
 
+function StaffAccountsCard() {
+  const toast = useToast();
+  const [rows, setRows] = useState<AdminStaffUser[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [resetId, setResetId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setRows(await adminApi.staffUsers());
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      await adminApi.createStaffUser({
+        email: email.trim(),
+        name: name.trim(),
+        password,
+      });
+      setEmail("");
+      setName("");
+      setPassword("");
+      setCreating(false);
+      toast.success("Туслах админ үүслээ.");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Үүсгэж чадсангүй.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleActive = async (row: AdminStaffUser) => {
+    try {
+      await adminApi.updateStaffUser(row.id, { isActive: !row.isActive });
+      toast.success(row.isActive ? "Идэвхгүй болголоо." : "Идэвхжүүллээ.");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Шинэчилж чадсангүй.");
+    }
+  };
+
+  const saveReset = async (id: string) => {
+    if (resetPassword.length < 6) {
+      toast.error("Нууц үг дор хаяж 6 тэмдэгт.");
+      return;
+    }
+    try {
+      await adminApi.updateStaffUser(id, { password: resetPassword });
+      setResetId(null);
+      setResetPassword("");
+      toast.success("Нууц үг солигдлоо.");
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Солиж чадсангүй.");
+    }
+  };
+
+  return (
+    <Card className="flex flex-col gap-3 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <div className="text-[15px] font-medium">Туслах админ</div>
+          <p className="mt-1 mb-0 text-[13px] text-ink-2">
+            Захиалга харах, хүлээлгэн өгөх, хэрэглэгч харах эрхтэй. Өөрчлөлт хийхгүй.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setCreating((v) => !v)}>
+          {creating ? "Болих" : "Нэмэх"}
+        </Button>
+      </div>
+
+      {creating && (
+        <div className="flex flex-col gap-3 rounded-[8px] border border-line p-3">
+          <Field label="Нэр">
+            <Input value={name} onChange={setName} placeholder="Нэр" />
+          </Field>
+          <Field label="И-мэйл">
+            <Input value={email} onChange={setEmail} type="email" placeholder="help@itgel.mn" />
+          </Field>
+          <Field label="Нууц үг">
+            <Input value={password} onChange={setPassword} type="password" placeholder="••••••" />
+          </Field>
+          <div>
+            <Button
+              size="sm"
+              loading={busy}
+              disabled={!name.trim() || !email.trim() || password.length < 6}
+              onClick={() => void create()}
+            >
+              Үүсгэх
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {error && <ErrorNote>{error}</ErrorNote>}
+
+      {loading ? (
+        <Spinner className="text-muted" />
+      ) : (
+        <div className="flex flex-col gap-2">
+          {rows.map((row) => (
+            <div key={row.id} className="rounded-[8px] border border-line p-3">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <div className="text-[14px] font-medium">
+                    {row.name}
+                    {!row.isActive && (
+                      <span className="ml-2 text-[12px] font-normal text-muted">идэвхгүй</span>
+                    )}
+                  </div>
+                  <div className="text-[13px] text-ink-2">
+                    {row.email} · {ROLE_LABEL[row.role] ?? row.role}
+                  </div>
+                  {row.lastLoginAt && (
+                    <div className="tnum mt-0.5 text-[12px] text-muted">
+                      Сүүлд {dayTimeLabel(row.lastLoginAt)}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {row.role === "STAFF" && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setResetId(resetId === row.id ? null : row.id);
+                          setResetPassword("");
+                        }}
+                      >
+                        Нууц үг
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void toggleActive(row)}
+                      >
+                        {row.isActive ? "Идэвхгүй" : "Идэвхжүүлэх"}
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+              {resetId === row.id && (
+                <div className="mt-3 flex flex-wrap items-end gap-2">
+                  <div className="min-w-[180px] flex-1">
+                    <Field label="Шинэ нууц үг">
+                      <Input
+                        value={resetPassword}
+                        onChange={setResetPassword}
+                        type="password"
+                        placeholder="••••••"
+                      />
+                    </Field>
+                  </div>
+                  <Button size="sm" onClick={() => void saveReset(row.id)}>
+                    Хадгалах
+                  </Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function AdminPasswordCard() {
   const toast = useToast();
   const [currentPassword, setCurrentPassword] = useState("");
@@ -406,6 +596,7 @@ const ENTITY_LABEL: Record<string, string> = {
   Ad: "Сурталчилгаа",
   Delivery: "Хүргэлт",
   Payment: "Төлбөр",
+  AdminUser: "Админ хэрэглэгч",
 };
 
 /** Хэн юу өөрчилснийг хардаг хэсэг — GET /admin/settings/audit. */

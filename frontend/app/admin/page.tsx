@@ -16,6 +16,8 @@ import {
 import { Badge, Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { adminApi, ApiError } from "@/lib/api";
+import { isFullAdmin } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { useToast } from "@/lib/toast";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { downloadOrdersExcel, printOrders } from "@/lib/orderExport";
@@ -36,6 +38,8 @@ const ORDERS_PAGE_SIZE = 100;
 
 export default function AdminOrdersPage() {
   const toast = useToast();
+  const { user } = useAdminSession();
+  const canWrite = isFullAdmin(user?.role);
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [pageMeta, setPageMeta] = useState({ page: 1, pages: 1, total: 0 });
@@ -266,7 +270,7 @@ export default function AdminOrdersPage() {
             >
               Бараагаар
             </Link>
-            {!showDeleted && (
+            {canWrite && !showDeleted && (
               <Link
                 href="/admin/orders/new"
                 className="inline-flex h-9 items-center rounded-[8px] border border-primary bg-primary px-3 text-[13px] text-white"
@@ -348,7 +352,7 @@ export default function AdminOrdersPage() {
         )}
       </div>
 
-      {selected.size > 0 && !showDeleted && (
+      {canWrite && selected.size > 0 && !showDeleted && (
         <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
           <span className="text-[14px]">{selected.size} захиалга сонгосон</span>
           <div className="ml-auto flex flex-wrap gap-2">
@@ -407,6 +411,7 @@ export default function AdminOrdersPage() {
             <Table>
               <thead>
                 <tr>
+                  {canWrite && (
                   <Th className="w-10">
                     <input
                       type="checkbox"
@@ -417,6 +422,7 @@ export default function AdminOrdersPage() {
                       }
                     />
                   </Th>
+                  )}
                   <Th>Код</Th>
                   <Th>Хэрэглэгч</Th>
                   <Th>Бараа</Th>
@@ -430,6 +436,7 @@ export default function AdminOrdersPage() {
               <tbody>
                 {orders.map((order) => (
                   <tr key={order.id} className={selected.has(order.id) ? "bg-surface" : ""}>
+                    {canWrite && (
                     <Td>
                       <input
                         type="checkbox"
@@ -438,6 +445,7 @@ export default function AdminOrdersPage() {
                         onChange={() => toggle(order.id)}
                       />
                     </Td>
+                    )}
                     <Td className="whitespace-nowrap">
                       <button
                         type="button"
@@ -504,7 +512,7 @@ export default function AdminOrdersPage() {
               <Card key={order.id} className="p-4">
                 <div className="flex items-start justify-between gap-2">
                   <label className="flex items-center gap-2">
-                    {!showDeleted && (
+                    {canWrite && !showDeleted && (
                       <input
                         type="checkbox"
                         aria-label={`${order.code} сонгох`}

@@ -859,6 +859,16 @@ export interface AdminSummary {
   activeProducts: number;
 }
 
+export interface AdminStaffUser {
+  id: string;
+  email: string;
+  name: string;
+  role: "ADMIN" | "STAFF";
+  isActive: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+}
+
 // --- Архив: устгасан бичлэгийг ч агуулсан бүрэн түүх ---
 
 export interface ArchiveItem {

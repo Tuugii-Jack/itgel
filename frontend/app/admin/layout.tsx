@@ -2,9 +2,10 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Spinner } from "@/components/ui";
+import { helperAdminCanAccess, isFullAdmin, ROLE_LABEL } from "@/lib/admin-role";
 import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 
 /**
@@ -73,9 +74,17 @@ function groupHasActive(
   return items.some((item) => isActive(pathname, item.href));
 }
 
-function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavLinks({
+  pathname,
+  groups,
+  onNavigate,
+}: {
+  pathname: string;
+  groups: { label: string; items: { href: string; label: string }[] }[];
+  onNavigate?: () => void;
+}) {
   const activeGroup =
-    NAV_GROUPS.find((group) => groupHasActive(pathname, group.items))?.label ?? null;
+    groups.find((group) => groupHasActive(pathname, group.items))?.label ?? null;
   const [open, setOpen] = useState<string | null>(activeGroup);
 
   useEffect(() => {
@@ -84,7 +93,7 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
 
   return (
     <nav className="flex flex-col gap-0.5">
-      {NAV_GROUPS.map((group) => {
+      {groups.map((group) => {
         const expanded = open === group.label;
         const current = groupHasActive(pathname, group.items);
         return (
@@ -141,7 +150,7 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
   );
 }
 
-function Brand({ compact = false }: { compact?: boolean }) {
+function Brand({ compact = false, helper = false }: { compact?: boolean; helper?: boolean }) {
   return (
     <Link
       href="/admin"
@@ -162,7 +171,7 @@ function Brand({ compact = false }: { compact?: boolean }) {
           итгэл
         </span>
         <span className="mt-0.5 text-[11px] font-medium tracking-[0.08em] text-muted uppercase">
-          админ
+          {helper ? "туслах админ" : "админ"}
         </span>
       </span>
     </Link>
@@ -172,8 +181,18 @@ function Brand({ compact = false }: { compact?: boolean }) {
 function Shell({ children }: { children: ReactNode }) {
   const { user, loading, signOut } = useAdminSession();
   const pathname = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const onLoginPage = pathname === "/admin/login";
+  const helper = Boolean(user && !isFullAdmin(user.role));
+  const navGroups = helper
+    ? NAV_GROUPS.filter((g) => g.label === "Захиалга" || g.label === "Харилцагч")
+    : NAV_GROUPS;
+
+  useEffect(() => {
+    if (!user || isFullAdmin(user.role)) return;
+    if (!helperAdminCanAccess(pathname)) router.replace("/admin");
+  }, [user, pathname, router]);
 
   if (loading) {
     return (
@@ -204,6 +223,14 @@ function Shell({ children }: { children: ReactNode }) {
     );
   }
 
+  if (helper && !helperAdminCanAccess(pathname)) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <Spinner className="text-muted" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-dvh bg-surface">
       {/* Гар утасны толгой — цэс нь доошоо дэлгэгдэнэ. */}
@@ -222,7 +249,7 @@ function Shell({ children }: { children: ReactNode }) {
               <span className="block h-[2px] w-4 rounded bg-ink" />
             </span>
           </button>
-          <Brand compact />
+          <Brand compact helper={helper} />
           <div className="ml-auto flex items-center gap-3">
             <button
               type="button"
@@ -235,7 +262,18 @@ function Shell({ children }: { children: ReactNode }) {
         </div>
         {menuOpen && (
           <div className="border-t border-line bg-bg px-3 py-4">
-            <NavLinks pathname={pathname} onNavigate={() => setMenuOpen(false)} />
+            <NavLinks
+              pathname={pathname}
+              groups={navGroups}
+              onNavigate={() => setMenuOpen(false)}
+            />
+            <Link
+              href="/admin/account"
+              onClick={() => setMenuOpen(false)}
+              className="mt-3 block px-3 py-2 text-[13px] text-ink-2 no-underline"
+            >
+              Нууц үг солих
+            </Link>
           </div>
         )}
       </header>
@@ -244,13 +282,20 @@ function Shell({ children }: { children: ReactNode }) {
         {/* Компьютерын хажуугийн цэс. */}
         <aside className="sticky top-0 hidden h-dvh w-[220px] shrink-0 flex-col border-r border-line bg-bg lg:flex">
           <div className="px-4 py-5">
-            <Brand />
+            <Brand helper={helper} />
           </div>
           <div className="no-scrollbar flex-1 overflow-y-auto px-2 pb-4">
-            <NavLinks pathname={pathname} />
+            <NavLinks pathname={pathname} groups={navGroups} />
           </div>
           <div className="border-t border-line px-4 py-3">
-            <div className="mb-2 truncate text-[13px] text-ink-2">{user.name}</div>
+            <div className="mb-0.5 truncate text-[13px] text-ink-2">{user.name}</div>
+            <div className="mb-2 text-[11px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
+            <Link
+              href="/admin/account"
+              className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
+            >
+              Нууц үг солих
+            </Link>
             <button
               type="button"
               onClick={signOut}

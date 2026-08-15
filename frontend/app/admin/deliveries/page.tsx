@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { DELIVERY_STATUS_LABEL, Metric, PageHead, Select } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { isFullAdmin } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { dayKey, dayLabel, money, phoneLabel, relativeDay, weekdayShort } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { groupDeliveriesByDistrict, printDeliveries } from "@/lib/printDeliveries";
@@ -14,6 +16,8 @@ const STATUSES: DeliveryStatus[] = ["PENDING", "ASSIGNED", "DELIVERED"];
 
 export default function DeliveriesPage() {
   const toast = useToast();
+  const { user } = useAdminSession();
+  const canWrite = isFullAdmin(user?.role);
   const [day, setDay] = useState(() => dayKey(new Date()));
   const [status, setStatus] = useState("");
   const [rows, setRows] = useState<AdminDelivery[]>([]);
@@ -195,6 +199,7 @@ export default function DeliveriesPage() {
                     onCourier={(v) => setCouriers((prev) => ({ ...prev, [row.id]: v }))}
                     busy={busy === row.id}
                     onSave={save}
+                    readOnly={!canWrite}
                   />
                 ))}
               </div>
@@ -203,10 +208,12 @@ export default function DeliveriesPage() {
         </div>
       )}
 
+      {canWrite && (
       <p className="mt-4 mb-0 text-[13px] text-muted">
         Хүргэлтийн төлбөрийг хүргэлтийн компани авна. «Хүргэсэн» гэж тэмдэглэхэд захиалга
         «Хүлээлгэн өгсөн» болно.
       </p>
+      )}
     </div>
   );
 }
@@ -217,12 +224,14 @@ function DeliveryCard({
   onCourier,
   busy,
   onSave,
+  readOnly,
 }: {
   row: AdminDelivery;
   courier: string;
   onCourier: (v: string) => void;
   busy: boolean;
   onSave: (id: string, patch: { courierName?: string | null; status?: string }) => void;
+  readOnly?: boolean;
 }) {
   const items = row.order.items ?? [];
 
@@ -285,7 +294,7 @@ function DeliveryCard({
         </div>
       </div>
 
-      {row.status !== "DELIVERED" && (
+      {!readOnly && row.status !== "DELIVERED" && (
         <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
           <div className="min-w-[180px] flex-1">
             <Input value={courier} onChange={onCourier} placeholder="Жолоочийн нэр" />

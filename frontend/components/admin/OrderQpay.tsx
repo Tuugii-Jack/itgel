@@ -12,6 +12,7 @@ export function OrderQpayCard({
   disabled,
   busyKey,
   onAction,
+  readOnly,
 }: {
   orderId: string;
   qpay: AdminOrderQpay | null;
@@ -22,6 +23,7 @@ export function OrderQpayCard({
     action: () => Promise<unknown>,
     okMessage: string,
   ) => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [rows, setRows] = useState<QpayPaymentRow[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -69,6 +71,7 @@ export function OrderQpayCard({
               <span className="text-muted"> · {dayTimeLabel(qpay.invoiceAt)}</span>
             ) : null}
           </div>
+          {!readOnly && (
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
               size="sm"
@@ -111,6 +114,7 @@ export function OrderQpayCard({
               Нэхэмжлэл цуцлах
             </Button>
           </div>
+          )}
 
           {listError && (
             <p className="mt-3 mb-0 text-[13px] text-danger">{listError}</p>
@@ -133,6 +137,7 @@ export function OrderQpayCard({
                   </div>
                   <div className="flex shrink-0 flex-col items-end gap-1">
                     <span className="tnum">{money(row.amount)}</span>
+                    {!readOnly && (
                     <div className="flex gap-1">
                       <Button
                         size="sm"
@@ -175,6 +180,7 @@ export function OrderQpayCard({
                         Буцаах
                       </Button>
                     </div>
+                    )}
                   </div>
                 </div>
               ))}

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireStaff } from '../../middleware/auth.js';
+import { requireAdmin, requireAdminWrites, requireStaff } from '../../middleware/auth.js';
 import { adminAdsRouter } from './ads.js';
 import { adminArchiveRouter } from './archive.js';
 import { adminAuthRouter } from './auth.js';
@@ -14,6 +14,7 @@ import { adminReportsRouter } from './reports.js';
 import { adminRoundsRouter } from './rounds.js';
 import { adminSettingsRouter } from './settings.js';
 import { adminQpayRouter } from './qpay.js';
+import { adminStaffRouter } from './staff.js';
 
 export const adminRouter = Router();
 
@@ -21,16 +22,17 @@ export const adminRouter = Router();
 adminRouter.use('/auth', adminAuthRouter);
 adminRouter.use(requireStaff);
 
-adminRouter.use('/ads', adminAdsRouter);
-adminRouter.use('/archive', adminArchiveRouter);
-adminRouter.use('/products', adminProductsRouter);
-adminRouter.use('/rounds', adminRoundsRouter);
-adminRouter.use('/categories', adminCategoriesRouter);
-adminRouter.use('/orders', adminOrdersRouter);
-adminRouter.use('/batches', adminBatchesRouter);
+adminRouter.use('/ads', requireAdmin, adminAdsRouter);
+adminRouter.use('/archive', requireAdmin, adminArchiveRouter);
+adminRouter.use('/products', requireAdmin, adminProductsRouter);
+adminRouter.use('/rounds', requireAdminWrites, adminRoundsRouter);
+adminRouter.use('/categories', requireAdmin, adminCategoriesRouter);
+adminRouter.use('/orders', requireAdminWrites, adminOrdersRouter);
+adminRouter.use('/batches', requireAdminWrites, adminBatchesRouter);
 adminRouter.use('/handover', adminHandoverRouter);
-adminRouter.use('/deliveries', adminDeliveriesRouter);
-adminRouter.use('/customers', adminCustomersRouter);
-adminRouter.use('/reports', adminReportsRouter);
-adminRouter.use('/settings', adminSettingsRouter);
-adminRouter.use('/qpay', adminQpayRouter);
+adminRouter.use('/deliveries', requireAdminWrites, adminDeliveriesRouter);
+adminRouter.use('/customers', requireAdminWrites, adminCustomersRouter);
+adminRouter.use('/reports', requireAdminWrites, adminReportsRouter);
+adminRouter.use('/settings', requireAdmin, adminSettingsRouter);
+adminRouter.use('/qpay', requireAdmin, adminQpayRouter);
+adminRouter.use('/staff', requireAdmin, adminStaffRouter);

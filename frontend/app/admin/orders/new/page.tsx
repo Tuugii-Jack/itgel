@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
 import { Button, Card, ErrorNote, Field, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { isFullAdmin } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { money, phoneLabel } from "@/lib/format";
 import { optionValuePrice, priceForSelections, priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
@@ -26,6 +28,8 @@ type RoundRow = { product: AdminProduct; round: AdminRound };
 export default function AdminCreateOrderPage() {
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAdminSession();
+  const canWrite = isFullAdmin(user?.role);
 
   const [customerQ, setCustomerQ] = useState("");
   const [customers, setCustomers] = useState<AdminCustomer[]>([]);
@@ -49,6 +53,10 @@ export default function AdminCreateOrderPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!canWrite) {
+      setLoading(false);
+      return;
+    }
     void (async () => {
       try {
         const list = await adminApi.products({ pageSize: 100 });
@@ -59,7 +67,7 @@ export default function AdminCreateOrderPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [canWrite]);
 
   useEffect(() => {
     const q = customerQ.trim();
@@ -204,6 +212,25 @@ export default function AdminCreateOrderPage() {
     return (
       <div className="flex justify-center py-16">
         <Spinner className="text-muted" />
+      </div>
+    );
+  }
+
+  if (!canWrite) {
+    return (
+      <div className="mx-auto max-w-[640px]">
+        <PageHead
+          title="Захиалга оруулах"
+          hint="Туслах админ захиалга үүсгэх эрхгүй."
+          actions={
+            <Link href="/admin" className="text-[13px] text-ink-2 underline">
+              Буцах
+            </Link>
+          }
+        />
+        <p className="m-0 text-[14px] text-ink-2">
+          Та захиалга харах, бараа ирсний дараа хүлээлгэн өгөх боломжтой.
+        </p>
       </div>
     );
   }

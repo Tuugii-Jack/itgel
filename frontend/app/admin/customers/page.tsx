@@ -21,6 +21,8 @@ import {
   Toggle,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
+import { isFullAdmin } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 import type { AdminCustomer, OrderItem } from "@/lib/types";
@@ -50,6 +52,8 @@ type CustomerDetail = AdminCustomer & {
 
 export default function CustomersPage() {
   const toast = useToast();
+  const { user } = useAdminSession();
+  const canWrite = isFullAdmin(user?.role);
   const [rows, setRows] = useState<AdminCustomer[]>([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -131,13 +135,15 @@ export default function CustomersPage() {
         title="Хэрэглэгчид"
         hint="И-мэйлээр нэвтэрнэ. Утас — холбоо барих мэдээлэл."
         actions={
+          canWrite ? (
           <Button onClick={() => setCreating((v) => !v)}>
             {creating ? "Болих" : "Хэрэглэгч нэмэх"}
           </Button>
+          ) : undefined
         }
       />
 
-      {creating && (
+      {canWrite && creating && (
         <CreateCustomerForm
           onCreated={(id) => {
             setCreating(false);
@@ -315,6 +321,8 @@ function CustomerDetailView({
   onOpenOrder: (orderId: string) => void;
 }) {
   const toast = useToast();
+  const { user } = useAdminSession();
+  const canWrite = isFullAdmin(user?.role);
   const [data, setData] = useState<CustomerDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -415,9 +423,11 @@ function CustomerDetailView({
         title={data.name ?? data.email}
         hint={`${data.email} · бүртгэгдсэн ${dayLabel(data.createdAt)}`}
         actions={
+          canWrite ? (
           <Button onClick={save} loading={busy}>
             Хадгалах
           </Button>
+          ) : undefined
         }
       />
 
@@ -429,29 +439,32 @@ function CustomerDetailView({
       </div>
 
       <Card className="mb-5 flex flex-col gap-3 p-4">
-        <div className="text-[15px] font-medium">Мэдээлэл засах</div>
+        <div className="text-[15px] font-medium">{canWrite ? "Мэдээлэл засах" : "Мэдээлэл"}</div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="И-мэйл">
-            <Input value={email} onChange={setEmail} type="email" />
+            <Input value={email} onChange={setEmail} type="email" disabled={!canWrite} />
           </Field>
           <Field label="Нэр">
-            <Input value={name} onChange={setName} />
+            <Input value={name} onChange={setName} disabled={!canWrite} />
           </Field>
           <Field label="Утас">
-            <Input value={phone} onChange={setPhone} inputMode="tel" />
+            <Input value={phone} onChange={setPhone} inputMode="tel" disabled={!canWrite} />
           </Field>
+          {canWrite && (
           <Field label="Шинэ нууц үг" hint="Хоосон бол хэвээр">
             <Input value={password} onChange={setPassword} type="password" placeholder="••••••" />
           </Field>
+          )}
           <Field label="Дүүрэг">
-            <Input value={district} onChange={setDistrict} />
+            <Input value={district} onChange={setDistrict} disabled={!canWrite} />
           </Field>
           <Field label="Хороо">
-            <Input value={khoroo} onChange={setKhoroo} />
+            <Input value={khoroo} onChange={setKhoroo} disabled={!canWrite} />
           </Field>
           <Field label="Хаяг" hint="Дэлгэрэнгүй">
-            <Input value={addressText} onChange={setAddressText} />
+            <Input value={addressText} onChange={setAddressText} disabled={!canWrite} />
           </Field>
+          {canWrite && (
           <div className="flex items-center justify-between rounded-[8px] border border-line px-3 py-2 sm:col-span-2">
             <Toggle
               label="И-мэйл баталгаажсан"
@@ -459,6 +472,7 @@ function CustomerDetailView({
               onChange={setEmailVerified}
             />
           </div>
+          )}
         </div>
       </Card>
 

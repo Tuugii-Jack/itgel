@@ -74,6 +74,19 @@ export const requireStaff = guard((payload) =>
   payload.role === 'ADMIN' || payload.role === 'STAFF' ? null : forbidden('Хандах эрхгүй.'),
 );
 
+/** GET-ийг туслах админд зөвшөөрнө. Бичих үйлдэл зөвхөн админ. */
+export function requireAdminWrites(req: Request, _res: Response, next: NextFunction): void {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+    next();
+    return;
+  }
+  if (req.auth?.role === 'ADMIN') {
+    next();
+    return;
+  }
+  next(forbidden('Туслах админ зөвхөн харах болон хүлээлгэн өгөх эрхтэй.'));
+}
+
 export function actorOf(req: Request): string {
   if (!req.auth) return 'anonymous';
   return req.auth.role === 'CUSTOMER' ? `customer:${req.auth.sub}` : `admin:${req.auth.sub}`;

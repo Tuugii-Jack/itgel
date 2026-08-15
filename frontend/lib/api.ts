@@ -12,6 +12,7 @@ import type {
   AdminProduct,
   AdminQpayStatus,
   AdminRound,
+  AdminStaffUser,
   AdminSummary,
   ArchiveCalendar,
   ArchiveCustomer,
@@ -1251,4 +1252,24 @@ export const adminApi = {
     request<AuditLog[]>("/admin/settings/audit", { ...adminAuth, query }).then(
       (r) => r.data,
     ),
+
+  staffUsers: () =>
+    request<AdminStaffUser[]>("/admin/staff", adminAuth).then((r) => r.data),
+
+  createStaffUser: (body: { email: string; name: string; password: string }) =>
+    request<AdminStaffUser>("/admin/staff", {
+      ...adminAuth,
+      method: "POST",
+      body,
+    }).then((r) => r.data),
+
+  updateStaffUser: (
+    id: string,
+    body: { name?: string; password?: string; isActive?: boolean },
+  ) =>
+    request<AdminStaffUser>(`/admin/staff/${id}`, {
+      ...adminAuth,
+      method: "PATCH",
+      body,
+    }).then((r) => r.data),
 };
