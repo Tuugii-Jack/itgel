@@ -7,6 +7,7 @@ import { ProductImage } from "@/components/ProductImage";
 import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { formatPlaceLine } from "@/lib/locations";
 import { formatSelections } from "@/lib/options";
 import type {
   ArchiveCalendar,
@@ -397,8 +398,8 @@ function ByCustomer() {
             </div>
             <div className="tnum text-[13px] text-muted">
               {phoneLabel(customer.phone)}
-              {customer.district && ` · ${customer.district}`}
-              {customer.khoroo && `, ${customer.khoroo}`}
+              {(customer.district || customer.khoroo) &&
+                ` · ${formatPlaceLine(customer.district, customer.khoroo)}`}
             </div>
           </div>
           <Button variant="ghost" onClick={() => setDetail(null)}>

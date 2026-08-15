@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
+import { LocationFields } from "@/components/LocationFields";
 import {
   Metric,
   OrderBadge,
@@ -24,6 +25,7 @@ import { adminApi, ApiError } from "@/lib/api";
 import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { UB_DISTRICTS } from "@/lib/locations";
 import { useToast } from "@/lib/toast";
 import type { AdminCustomer, OrderItem } from "@/lib/types";
 
@@ -455,15 +457,19 @@ function CustomerDetailView({
             <Input value={password} onChange={setPassword} type="password" placeholder="••••••" />
           </Field>
           )}
-          <Field label="Дүүрэг">
-            <Input value={district} onChange={setDistrict} disabled={!canWrite} />
-          </Field>
-          <Field label="Хороо">
-            <Input value={khoroo} onChange={setKhoroo} disabled={!canWrite} />
-          </Field>
           <Field label="Хаяг" hint="Дэлгэрэнгүй">
             <Input value={addressText} onChange={setAddressText} disabled={!canWrite} />
           </Field>
+          <div className="sm:col-span-2">
+            <LocationFields
+              cityDistricts={UB_DISTRICTS}
+              district={district || null}
+              onDistrictChange={(v) => setDistrict(v ?? "")}
+              khoroo={khoroo}
+              onKhorooChange={setKhoroo}
+              readOnly={!canWrite}
+            />
+          </div>
           {canWrite && (
           <div className="flex items-center justify-between rounded-[8px] border border-line px-3 py-2 sm:col-span-2">
             <Toggle

@@ -13,11 +13,12 @@ import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, recalcOrderTotals } from '../../services/money.js';
-import { getSettings, getSettingsCached } from '../../services/settings.js';
+import { getSettings, getSettingsCached, districtNames } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { claimDeliverySlot } from '../../services/delivery.js';
 import { resolveOptionPrice } from '../../lib/optionPrices.js';
+import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
 
 export const publicOrdersRouter = Router();
@@ -394,7 +395,7 @@ const fulfilmentBody = z
       .optional(),
   })
   .refine((v) => v.type === 'PICKUP' || (v.district && v.khoroo && v.address && v.day), {
-    message: 'Хүргэлтэд дүүрэг, хороо, хаяг болон өдөр заавал шаардлагатай.',
+    message: 'Хүргэлтэд байршил, хороо/сум, хаяг болон өдөр заавал шаардлагатай.',
   });
 
 /** POST /api/orders/:code/fulfilment — бараа ирсний дараа авах хэлбэрээ сонгоно. */
@@ -423,6 +424,13 @@ publicOrdersRouter.post(
     }
 
     const settings = await getSettings();
+    const place =
+      body.type === 'DELIVERY'
+        ? normalizeDeliveryPlace(body.district!, districtNames(settings))
+        : null;
+    if (body.type === 'DELIVERY' && !place) {
+      throw badRequest('Дүүрэг эсвэл аймаг буруу байна.');
+    }
 
     const updated = await prisma.$transaction(async (tx) => {
       if (body.type === 'PICKUP') {
@@ -451,7 +459,7 @@ publicOrdersRouter.post(
         data: {
           orderId: order.id,
           scheduledDay: day,
-          district: body.district!,
+          district: place!,
           khoroo: body.khoroo ?? null,
           addressText: body.address ?? null,
           fee: 0,
@@ -478,7 +486,7 @@ publicOrdersRouter.post(
       action: 'FULFILMENT',
       entity: 'Order',
       entityId: order.id,
-      after: { fulfilment: body.type, payMethod: body.payMethod, district: body.district, day: body.day },
+      after: { fulfilment: body.type, payMethod: body.payMethod, district: place, day: body.day },
     });
 
     res.json({

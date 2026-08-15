@@ -8,7 +8,8 @@ import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { dayKey, dayLabel, money, phoneLabel, relativeDay, weekdayShort } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
-import { groupDeliveriesByDistrict, printDeliveries } from "@/lib/printDeliveries";
+import { groupDeliveriesByDistrict, printDeliveries, splitDeliveryZones } from "@/lib/printDeliveries";
+import { formatPlaceLine, placeZone, zoneLabel } from "@/lib/locations";
 import { useToast } from "@/lib/toast";
 import type { AdminDelivery, DeliveryStatus } from "@/lib/types";
 
@@ -26,6 +27,7 @@ export default function DeliveriesPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [zoneFilter, setZoneFilter] = useState<"" | "city" | "aimag">("");
 
   const load = useCallback(async () => {
     setError(null);
@@ -52,8 +54,16 @@ export default function DeliveriesPage() {
     void load();
   }, [load]);
 
-  const groups = useMemo(() => groupDeliveriesByDistrict(rows), [rows]);
+  const visibleRows = useMemo(
+    () =>
+      zoneFilter ? rows.filter((r) => placeZone(r.district) === zoneFilter) : rows,
+    [rows, zoneFilter],
+  );
+  const groups = useMemo(() => groupDeliveriesByDistrict(visibleRows), [visibleRows]);
+  const zones = useMemo(() => splitDeliveryZones(groups), [groups]);
   const pending = rows.filter((r) => r.status !== "DELIVERED");
+  const cityCount = rows.filter((r) => placeZone(r.district) === "city").length;
+  const aimagCount = rows.filter((r) => placeZone(r.district) === "aimag").length;
 
   const save = async (id: string, patch: { courierName?: string | null; status?: string }) => {
     setBusy(id);
@@ -91,12 +101,12 @@ export default function DeliveriesPage() {
     <div>
       <PageHead
         title="Хүргэлт"
-        hint="Дүүргээр бүлэглэж, хүргэлтийн компанид хэвлэж өгнө"
+        hint="Хот, аймгаар бүлэглэж, хүргэлтийн компанид хэвлэж өгнө"
         actions={
           <Button
             variant="outline"
-            disabled={rows.length === 0}
-            onClick={() => printDeliveries(rows, printOpts)}
+            disabled={visibleRows.length === 0}
+            onClick={() => printDeliveries(visibleRows, printOpts)}
           >
             Бүгдийг хэвлэх
           </Button>
@@ -106,25 +116,28 @@ export default function DeliveriesPage() {
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Нийт хүргэлт" value={rows.length} />
         <Metric label="Хүлээгдэж буй" value={pending.length} tone="warn" />
-        <Metric
-          label="Хүргэсэн"
-          value={rows.filter((r) => r.status === "DELIVERED").length}
-          tone="ok"
-        />
-        <Metric label="Дүүрэг" value={groups.length} />
+        <Metric label="Хот" value={cityCount} />
+        <Metric label="Аймаг" value={aimagCount} />
       </div>
 
-      {groups.length > 0 && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          {groups.map((g) => (
-            <a
-              key={g.district}
-              href={`#district-${encodeURIComponent(g.district)}`}
-              className="inline-flex items-center gap-2 rounded-[8px] border border-line bg-bg px-3 py-2 text-[13px] text-ink no-underline"
-            >
-              <span>{g.district}</span>
-              <span className="tnum text-muted">{g.rows.length} хүргэлт</span>
-            </a>
+      {zones.length > 0 && (
+        <div className="mb-4 flex flex-col gap-3">
+          {zones.map((zone) => (
+            <div key={zone.zone}>
+              <div className="mb-1.5 text-[13px] font-medium text-ink-2">{zone.label}</div>
+              <div className="flex flex-wrap gap-2">
+                {zone.groups.map((g) => (
+                  <a
+                    key={g.district}
+                    href={`#place-${encodeURIComponent(g.district)}`}
+                    className="inline-flex items-center gap-2 rounded-[8px] border border-line bg-bg px-3 py-2 text-[13px] text-ink no-underline"
+                  >
+                    <span>{g.title}</span>
+                    <span className="tnum text-muted">{g.rows.length}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -142,15 +155,25 @@ export default function DeliveriesPage() {
           placeholder="Бүх төлөв"
           options={STATUSES.map((s) => ({ value: s, label: DELIVERY_STATUS_LABEL[s] }))}
         />
+        <Select
+          value={zoneFilter}
+          onChange={(v) => setZoneFilter((v as "" | "city" | "aimag") || "")}
+          placeholder="Хот / аймаг"
+          options={[
+            { value: "city", label: "Хот" },
+            { value: "aimag", label: "Аймаг" },
+          ]}
+        />
         <Button variant="outline" onClick={() => setDay(dayKey(new Date()))}>
           Өнөөдөр
         </Button>
-        {(day || status) && (
+        {(day || status || zoneFilter) && (
           <Button
             variant="ghost"
             onClick={() => {
               setDay("");
               setStatus("");
+              setZoneFilter("");
             }}
           >
             Цэвэрлэх
@@ -174,36 +197,45 @@ export default function DeliveriesPage() {
       ) : rows.length === 0 ? (
         <Empty>Хүргэлт олдсонгүй.</Empty>
       ) : (
-        <div className="flex flex-col gap-8">
-          {groups.map(({ district, rows: list }) => (
-            <section key={district} id={`district-${encodeURIComponent(district)}`}>
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="m-0 text-[17px] font-medium">{district}</h2>
-                  <div className="tnum mt-0.5 text-[13px] text-muted">{list.length} хүргэлт</div>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => printDeliveries(list, { ...printOpts, district })}
-                >
-                  Хэвлэх
-                </Button>
-              </div>
-              <div className="flex flex-col gap-3">
-                {list.map((row) => (
-                  <DeliveryCard
-                    key={row.id}
-                    row={row}
-                    courier={couriers[row.id] ?? ""}
-                    onCourier={(v) => setCouriers((prev) => ({ ...prev, [row.id]: v }))}
-                    busy={busy === row.id}
-                    onSave={save}
-                    readOnly={!canWrite}
-                  />
+        <div className="flex flex-col gap-10">
+          {zones.map((zone) => (
+            <div key={zone.zone}>
+              <h2 className="mb-4 text-[18px] font-medium">{zone.label}</h2>
+              <div className="flex flex-col gap-8">
+                {zone.groups.map(({ district, title, rows: list }) => (
+                  <section key={district} id={`place-${encodeURIComponent(district)}`}>
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="m-0 text-[17px] font-medium">{title}</h3>
+                        <div className="tnum mt-0.5 text-[13px] text-muted">
+                          {list.length} хүргэлт
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => printDeliveries(list, { ...printOpts, district })}
+                      >
+                        Хэвлэх
+                      </Button>
+                    </div>
+                    <div className="flex flex-col gap-3">
+                      {list.map((row) => (
+                        <DeliveryCard
+                          key={row.id}
+                          row={row}
+                          courier={couriers[row.id] ?? ""}
+                          onCourier={(v) => setCouriers((prev) => ({ ...prev, [row.id]: v }))}
+                          busy={busy === row.id}
+                          onSave={save}
+                          readOnly={!canWrite}
+                        />
+                      ))}
+                    </div>
+                  </section>
                 ))}
               </div>
-            </section>
+            </div>
           ))}
         </div>
       )}
@@ -255,9 +287,11 @@ function DeliveryCard({
           <a href={`tel:${row.order.customer.phone ?? ""}`} className="tnum mt-0.5 block text-[15px]">
             {phoneLabel(row.order.customer.phone)}
           </a>
-          <div className="mt-2 text-[14px]">
-            {row.district}
-            {row.khoroo ? `, ${row.khoroo}` : ""}
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[14px]">
+            <Badge tone={placeZone(row.district) === "aimag" ? "info" : "neutral"}>
+              {zoneLabel(placeZone(row.district))}
+            </Badge>
+            <span>{formatPlaceLine(row.district, row.khoroo)}</span>
           </div>
           {row.addressText && (
             <div className="mt-0.5 text-[14px] leading-[1.45] text-ink">{row.addressText}</div>

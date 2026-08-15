@@ -21,7 +21,9 @@ import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import { EmailAuthForm } from "@/components/EmailAuthForm";
+import { LocationFields } from "@/components/LocationFields";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { UB_DISTRICTS } from "@/lib/locations";
 import { awaitingPayment, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
 import type { MyOrder, OrderStatus, Store } from "@/lib/types";
 
@@ -197,7 +199,7 @@ function Profile() {
             store={store}
           />
         ) : (
-          <InfoTab />
+          <InfoTab store={store} />
         )}
       </div>
     </div>
@@ -524,7 +526,7 @@ function PaymentsTab({
   );
 }
 
-function InfoTab() {
+function InfoTab({ store }: { store: Store | null }) {
   const session = useSession();
   const toast = useToast();
   const me = session.me!;
@@ -754,18 +756,17 @@ function InfoTab() {
             Хүргэлт сонгоход автоматаар орно
           </p>
         </div>
-        <div className='flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4'>
-          <Field label='Дүүрэг'>
-            <Input
-              value={district}
-              onChange={setDistrict}
-              placeholder='Дүүрэг'
-            />
-          </Field>
-          <Field label='Хороо'>
-            <Input value={khoroo} onChange={setKhoroo} placeholder='Хороо' />
-          </Field>
-        </div>
+        <LocationFields
+          cityDistricts={
+            store?.deliveryDistricts && store.deliveryDistricts.length > 0
+              ? store.deliveryDistricts
+              : UB_DISTRICTS
+          }
+          district={district || null}
+          onDistrictChange={(v) => setDistrict(v ?? "")}
+          khoroo={khoroo}
+          onKhorooChange={setKhoroo}
+        />
         <Field label='Дэлгэрэнгүй'>
           <Textarea
             value={addressText}

@@ -1,4 +1,5 @@
 import { dayTimeLabel, money, phoneLabel, rangeLabel } from "@/lib/format";
+import { formatPlaceLine } from "@/lib/locations";
 import { formatSelections } from "@/lib/options";
 import { PAYMENT_LABEL } from "@/lib/payment";
 import { printHtml } from "@/lib/printHtml";
@@ -49,7 +50,7 @@ export type OrderExportLine = {
 function deliveryAddress(order: AdminOrderDetail): string {
   const d = order.delivery;
   if (!d) return "";
-  return [d.district, d.khoroo, d.addressText].filter(Boolean).join(", ");
+  return [formatPlaceLine(d.district, d.khoroo), d.addressText].filter(Boolean).join(", ");
 }
 
 function arriveWindow(item: OrderItem): string {

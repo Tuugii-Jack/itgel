@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, ErrorNote, Input, Textarea } from "@/components/ui";
+import { Button, ErrorNote, Textarea } from "@/components/ui";
 import { PaymentPanel } from "@/components/PaymentPanel";
+import { LocationFields } from "@/components/LocationFields";
 import { api, ApiError } from "@/lib/api";
+import { UB_DISTRICTS } from "@/lib/locations";
 import { useSession } from "@/lib/session";
 import { money, weekdayShort } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
@@ -78,7 +80,7 @@ export function FulfilmentChooser({
   const submit = async () => {
     setError(null);
     if (type === "DELIVERY" && (!district || !khoroo.trim() || !address.trim() || !day)) {
-      const message = "Дүүрэг, хороо, хаяг болон хүргэлтийн өдрөө бөглөнө үү.";
+      const message = "Байршил, хороо/сум, хаяг болон хүргэлтийн өдрөө бөглөнө үү.";
       setError(message);
       toast.error(message);
       return;
@@ -267,25 +269,13 @@ export function FulfilmentChooser({
 
       {type === "DELIVERY" && (
         <div className="flex flex-col gap-6 px-4 pt-6 lg:rounded-[12px] lg:border lg:border-line lg:px-6 lg:py-6 lg:pt-6">
-          <div className="flex flex-col gap-6 lg:grid lg:grid-cols-2 lg:gap-6">
-          <Field label="Дүүрэг">
-            <div className="grid grid-cols-2 gap-2">
-              {districts.map((name) => (
-                <Chip
-                  key={name}
-                  active={district === name}
-                  onClick={() => setDistrict(name)}
-                >
-                  {name}
-                </Chip>
-              ))}
-            </div>
-          </Field>
-
-          <Field label="Хороо">
-            <Input value={khoroo} onChange={setKhoroo} placeholder="Жишээ: 15-р хороо" />
-          </Field>
-          </div>
+          <LocationFields
+            cityDistricts={districts.length > 0 ? districts : UB_DISTRICTS}
+            district={district}
+            onDistrictChange={setDistrict}
+            khoroo={khoroo}
+            onKhorooChange={setKhoroo}
+          />
 
           <Field label="Дэлгэрэнгүй хаяг">
             <Textarea
@@ -406,27 +396,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <div className="text-[14px] text-ink-2">{label}</div>
       {children}
     </div>
-  );
-}
-
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`h-11 cursor-pointer rounded-[8px] border px-2 text-[14px]
-        ${active ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"}`}
-    >
-      {children}
-    </button>
   );
 }
 

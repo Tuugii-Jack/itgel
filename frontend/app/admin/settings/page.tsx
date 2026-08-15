@@ -16,6 +16,7 @@ import {
 import { adminApi, ApiError } from "@/lib/api";
 import { ROLE_LABEL } from "@/lib/admin-role";
 import { dayTimeLabel } from "@/lib/format";
+import { AIMAGS } from "@/lib/locations";
 import { useToast } from "@/lib/toast";
 import type { AuditLog, AdminStaffUser, Settings } from "@/lib/types";
 
@@ -251,10 +252,9 @@ export default function SettingsPage() {
         <Card className="flex flex-col gap-3 p-4">
           <div className="flex items-center justify-between gap-2">
             <div>
-              <div className="text-[15px] font-medium">Хүргэлтийн дүүрэг</div>
+              <div className="text-[15px] font-medium">Хүргэлтийн байршил</div>
               <p className="mt-1 mb-0 text-[13px] text-ink-2">
-                Хүргэлтийн төлбөрийг хүргэлтийн компани авна. Энд зөвхөн хэрэглэгчийн
-                сонгох дүүргүүдийг тохируулна.
+                Хот — Улаанбаатарын дүүрэг. Аймаг — тогтмол 21 аймаг.
               </p>
             </div>
             <Button
@@ -276,6 +276,7 @@ export default function SettingsPage() {
             />
           </Field>
 
+          <div className="text-[14px] font-medium">Хот · дүүрэг</div>
           <div className="flex flex-col gap-2">
             {districts.map((district, index) => (
               <div key={index} className="flex gap-2">
@@ -296,6 +297,21 @@ export default function SettingsPage() {
                   Хасах
                 </Button>
               </div>
+            ))}
+          </div>
+
+          <div className="mt-2 text-[14px] font-medium">Аймаг</div>
+          <p className="m-0 text-[13px] text-ink-2">
+            Хэрэглэгч хүргэлтээр авахдаа эндээс сонгоно. Жагсаалт тогтмол.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {AIMAGS.map((name) => (
+              <span
+                key={name}
+                className="rounded-[8px] border border-line bg-surface px-3 py-1.5 text-[13px]"
+              >
+                {name}
+              </span>
             ))}
           </div>
         </Card>

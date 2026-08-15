@@ -1,4 +1,12 @@
 import { dayLabel, dayTimeLabel, phoneLabel, weekdayShort } from "@/lib/format";
+import {
+  formatPlaceLine,
+  placeTitle,
+  placeZone,
+  ZONE_SORT,
+  zoneLabel,
+  type DeliveryZone,
+} from "@/lib/locations";
 import { formatSelections } from "@/lib/options";
 import { printHtml } from "@/lib/printHtml";
 import type { AdminDelivery } from "@/lib/types";
@@ -9,12 +17,17 @@ const STATUS_LABEL: Record<string, string> = {
   DELIVERED: "Хүргэсэн",
 };
 
-export function groupDeliveriesByDistrict(
-  rows: AdminDelivery[],
-): { district: string; rows: AdminDelivery[] }[] {
+export type DeliveryPlaceGroup = {
+  district: string;
+  title: string;
+  zone: DeliveryZone | "other";
+  rows: AdminDelivery[];
+};
+
+export function groupDeliveriesByDistrict(rows: AdminDelivery[]): DeliveryPlaceGroup[] {
   const map = new Map<string, AdminDelivery[]>();
   for (const row of rows) {
-    const key = row.district.trim() || "Дүүрэггүй";
+    const key = row.district.trim() || "";
     const list = map.get(key);
     if (list) list.push(row);
     else map.set(key, [row]);
@@ -27,8 +40,33 @@ export function groupDeliveriesByDistrict(
     });
   }
   return [...map.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0], "mn"))
-    .map(([district, grouped]) => ({ district, rows: grouped }));
+    .sort((a, b) => {
+      const zoneDiff = ZONE_SORT[placeZone(a[0])] - ZONE_SORT[placeZone(b[0])];
+      if (zoneDiff !== 0) return zoneDiff;
+      return placeTitle(a[0]).localeCompare(placeTitle(b[0]), "mn");
+    })
+    .map(([district, grouped]) => ({
+      district,
+      title: placeTitle(district),
+      zone: placeZone(district),
+      rows: grouped,
+    }));
+}
+
+export function splitDeliveryZones(groups: DeliveryPlaceGroup[]): {
+  zone: DeliveryZone | "other";
+  label: string;
+  groups: DeliveryPlaceGroup[];
+}[] {
+  const buckets: Record<DeliveryZone | "other", DeliveryPlaceGroup[]> = {
+    city: [],
+    aimag: [],
+    other: [],
+  };
+  for (const group of groups) buckets[group.zone].push(group);
+  return (["city", "aimag", "other"] as const)
+    .filter((zone) => buckets[zone].length > 0)
+    .map((zone) => ({ zone, label: zoneLabel(zone), groups: buckets[zone] }));
 }
 
 function esc(s: string): string {
@@ -41,7 +79,7 @@ function esc(s: string): string {
 
 function addressLines(row: AdminDelivery): string[] {
   const lines: string[] = [];
-  const head = [row.district, row.khoroo].filter(Boolean).join(", ");
+  const head = formatPlaceLine(row.district, row.khoroo);
   if (head) lines.push(head);
   if (row.addressText?.trim()) lines.push(row.addressText.trim());
   return lines;
@@ -57,29 +95,36 @@ export function printDeliveries(
   opts?: { day?: string; district?: string },
 ): void {
   const groups = groupDeliveriesByDistrict(rows);
+  const zones = splitDeliveryZones(groups);
   const dayTitle = opts?.day ? dayLabel(opts.day) : "Бүх өдөр";
+  const cityN = groups.filter((g) => g.zone !== "aimag").length;
+  const aimagN = groups.filter((g) => g.zone === "aimag").length;
   const subtitle = opts?.district
-    ? `${opts.district} — ${rows.length} хүргэлт`
-    : `${groups.length} дүүрэг · ${rows.length} хүргэлт`;
+    ? `${placeTitle(opts.district)} — ${rows.length} хүргэлт`
+    : [cityN ? `${cityN} дүүрэг` : null, aimagN ? `${aimagN} аймаг` : null, `${rows.length} хүргэлт`]
+        .filter(Boolean)
+        .join(" · ");
 
-  const sections = groups
-    .map(({ district, rows: list }) => {
-      const cards = list
-        .map((row, i) => {
-          const addr = addressLines(row)
-            .map((line) => `<div class="addr">${esc(line)}</div>`)
-            .join("");
-          const items = row.order.items
-            .map((item) => `<li>${esc(itemLine(item))}</li>`)
-            .join("");
-          const note = row.order.note?.trim()
-            ? `<div class="note">Тэмдэглэл: ${esc(row.order.note.trim())}</div>`
-            : "";
-          const courier = row.courierName
-            ? `<div class="meta">Жолооч: ${esc(row.courierName)}</div>`
-            : "";
+  const sections = (opts?.district ? [{ label: null as string | null, groups }] : zones)
+    .map(({ label, groups: list }) => {
+      const inner = list
+        .map(({ title, rows: placeRows }) => {
+          const cards = placeRows
+            .map((row, i) => {
+              const addr = addressLines(row)
+                .map((line) => `<div class="addr">${esc(line)}</div>`)
+                .join("");
+              const items = row.order.items
+                .map((item) => `<li>${esc(itemLine(item))}</li>`)
+                .join("");
+              const note = row.order.note?.trim()
+                ? `<div class="note">Тэмдэглэл: ${esc(row.order.note.trim())}</div>`
+                : "";
+              const courier = row.courierName
+                ? `<div class="meta">Жолооч: ${esc(row.courierName)}</div>`
+                : "";
 
-          return `<article class="card">
+              return `<article class="card">
             <div class="card-head">
               <span class="idx">${i + 1}</span>
               <span class="code">${esc(row.order.code)}</span>
@@ -100,13 +145,18 @@ export function printDeliveries(
             ${courier}
             <div class="tick">☐ Хүргэсэн</div>
           </article>`;
+            })
+            .join("");
+
+          return `<section class="district">
+        <h2>${esc(title)} <span>${placeRows.length} хүргэлт</span></h2>
+        ${cards}
+      </section>`;
         })
         .join("");
 
-      return `<section class="district">
-        <h2>${esc(district)} <span>${list.length} хүргэлт</span></h2>
-        ${cards}
-      </section>`;
+      if (!label) return inner;
+      return `<section class="zone"><div class="zone-title">${esc(label)}</div>${inner}</section>`;
     })
     .join("");
 
@@ -126,6 +176,8 @@ export function printDeliveries(
       line-height: 1.4;
     }
     h1 { font-size: 18px; margin: 0 0 4px; font-weight: 650; }
+    .zone { margin-bottom: 22px; }
+    .zone-title { font-size: 16px; font-weight: 650; margin: 0 0 10px; }
     .sub { color: #57534e; margin-bottom: 14px; }
     .district { break-inside: avoid; margin-bottom: 18px; }
     .district h2 {
