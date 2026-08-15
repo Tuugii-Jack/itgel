@@ -39,7 +39,6 @@ export function ProductGallery({
       {hasThumbs && (
         <div
           className='mt-2.5 flex w-full max-w-full gap-2 overflow-x-auto pb-0.5 md:grid md:grid-cols-4 md:justify-start md:overflow-visible'
-          style={{ direction: "rtl" }}
         >
           {list.map((src, i) => (
             <button
@@ -51,7 +50,6 @@ export function ProductGallery({
               className={`aspect-square shrink-0 overflow-hidden rounded-[8px] border transition-colors
                 h-16 w-16 md:h-auto md:w-full
                 ${i === index ? "border-primary ring-1 ring-primary/30" : "border-line hover:border-primary-muted"}`}
-              style={{ direction: "ltr" }}
             >
               <ProductImage
                 src={src}

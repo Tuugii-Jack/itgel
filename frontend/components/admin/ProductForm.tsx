@@ -47,6 +47,7 @@ export function ProductForm({
   const [images, setImages] = useState<string[]>(product?.images ?? []);
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const dragFrom = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,6 +159,24 @@ export function ProductForm({
     } finally {
       setUploading(false);
     }
+  };
+
+  const persistImages = async (next: string[]) => {
+    setImages(next);
+    if (!productId) return;
+    try {
+      await adminApi.saveImages(productId, next);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Дараалал хадгалагдаагүй.");
+    }
+  };
+
+  const moveImage = async (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= images.length || to >= images.length) return;
+    const next = [...images];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    await persistImages(next);
   };
 
   const removeImage = async (url: string) => {
@@ -327,21 +346,78 @@ export function ProductForm({
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[15px] font-medium">Зураг</div>
+          <div>
+            <div className="text-[15px] font-medium">Зураг</div>
+            <p className="m-0 text-[13px] text-muted">
+              Эхний зураг дэлгүүрт гол зураг. Чирж эсвэл сумаар байрлуулна.
+            </p>
+          </div>
           <div className="relative flex flex-wrap gap-2">
-            {images.map((url) => (
-              <div key={url} className="relative h-24 w-24 overflow-hidden rounded-[8px] border border-line">
+            {images.map((url, index) => (
+              <div
+                key={`${url}-${index}`}
+                draggable={!uploading}
+                onDragStart={(e) => {
+                  dragFrom.current = index;
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(index));
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const from = dragFrom.current ?? Number.parseInt(e.dataTransfer.getData("text/plain"), 10);
+                  dragFrom.current = null;
+                  if (Number.isInteger(from)) void moveImage(from, index);
+                }}
+                onDragEnd={() => {
+                  dragFrom.current = null;
+                }}
+                className="relative h-24 w-24 cursor-grab overflow-hidden rounded-[8px] border border-line active:cursor-grabbing"
+              >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt="" className="h-full w-full object-cover" />
+                <img src={url} alt="" className="pointer-events-none h-full w-full object-cover" />
+                {index === 0 && (
+                  <span className="absolute left-1 top-1 rounded-[4px] bg-bg/90 px-1 text-[10px] text-ink">
+                    Гол
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={() => removeImage(url)}
+                  onPointerDown={(e) => e.stopPropagation()}
                   aria-label="Зураг устгах"
                   disabled={uploading}
                   className="absolute right-1 top-1 h-6 w-6 cursor-pointer rounded-full border border-line bg-bg text-[12px] disabled:opacity-40"
                 >
                   ×
                 </button>
+                {images.length > 1 && (
+                  <div className="absolute inset-x-1 bottom-1 flex justify-between">
+                    <button
+                      type="button"
+                      aria-label="Зүүн тийш"
+                      disabled={uploading || index === 0}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => void moveImage(index, index - 1)}
+                      className="h-6 w-6 cursor-pointer rounded-[4px] border border-line bg-bg text-[12px] disabled:opacity-30"
+                    >
+                      ←
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Баруун тийш"
+                      disabled={uploading || index === images.length - 1}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => void moveImage(index, index + 1)}
+                      className="h-6 w-6 cursor-pointer rounded-[4px] border border-line bg-bg text-[12px] disabled:opacity-30"
+                    >
+                      →
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
             {images.length === 0 && !uploading && (
