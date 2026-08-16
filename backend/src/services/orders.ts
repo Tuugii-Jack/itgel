@@ -13,6 +13,11 @@ import { conflict } from '../lib/errors.js';
 import { canTransition, ORDER_STATUS_LABEL, previousInFlow, stepsToStatus } from '../lib/orderStatus.js';
 import { mailTemplates, sendMail } from './mail.js';
 import { isProductPaid } from './money.js';
+import {
+  consumeReadyStock as consumeRoundStock,
+  restoreReadyStock as restoreRoundStock,
+  selectionsFromItem,
+} from './readyStock.js';
 import { getSettings } from './settings.js';
 import { sms, smsTemplates } from './sms.js';
 
@@ -385,25 +390,22 @@ async function previousStatusFromAudit(
 async function consumeReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
   const items = await tx.orderItem.findMany({
     where: { orderId, cancelledAt: null },
-    include: { round: true },
+    include: {
+      round: { include: { skuStocks: true, product: { select: { name: true } } } },
+    },
   });
 
   for (const item of items) {
     if (!item.round || item.round.closeAt !== null) continue;
-    const round = await tx.productRound.findUniqueOrThrow({ where: { id: item.roundId } });
-    if (round.stock < item.qty) {
-      throw conflict(
-        `"${item.nameSnapshot}" үлдэгдэл хүрэлцэхгүй (${round.stock}/${item.qty}). Цуцлалтыг буцаах боломжгүй.`,
-      );
-    }
-    const nextStock = round.stock - item.qty;
-    await tx.productRound.update({
-      where: { id: item.roundId },
-      data: {
-        stock: nextStock,
-        ...(nextStock <= 0 && round.status === 'ACTIVE' ? { status: 'SOLD_OUT' as const } : {}),
+    await consumeRoundStock(
+      tx,
+      {
+        ...item.round,
+        product: { name: item.round.product.name },
       },
-    });
+      item.qty,
+      selectionsFromItem(item),
+    );
   }
 }
 
@@ -446,18 +448,12 @@ async function batchForOrder(
 async function restoreReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
   const items = await tx.orderItem.findMany({
     where: { orderId, cancelledAt: null },
-    include: { round: true },
+    include: { round: { include: { skuStocks: true } } },
   });
 
   for (const item of items) {
     if (!item.round || item.round.closeAt !== null) continue;
-    await tx.productRound.update({
-      where: { id: item.roundId },
-      data: {
-        stock: { increment: item.qty },
-        ...(item.round.status === 'SOLD_OUT' ? { status: 'ACTIVE' as const } : {}),
-      },
-    });
+    await restoreRoundStock(tx, item.round, item.qty, selectionsFromItem(item));
   }
 }
 

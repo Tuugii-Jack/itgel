@@ -10,6 +10,7 @@ import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
 import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
+import { consumeReadyStock } from '../../services/readyStock.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
 import { paidPayoutDaySet } from '../../services/returns.js';
@@ -18,6 +19,7 @@ import { getSettings, getSettingsCached, districtNames } from '../../services/se
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { resolveOptionPrice } from '../../lib/optionPrices.js';
+import { comboLabel, findSku } from '../../lib/skuStock.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
 
@@ -58,7 +60,7 @@ publicOrdersRouter.post(
     // `productId` нь дэлгүүрийн зүгээс ТОЙРГИЙН id — /products тэрийг буцаадаг.
     const rounds = await prisma.productRound.findMany({
       where: { id: { in: body.items.map((i) => i.productId) }, deletedAt: null },
-      include: { product: { include: { variants: true } }, optionPrices: true },
+      include: { product: { include: { variants: true } }, optionPrices: true, skuStocks: true },
     });
     const byId = new Map(rounds.map((r) => [r.id, r]));
 
@@ -75,9 +77,6 @@ publicOrdersRouter.post(
       if (round.closeAt && round.closeAt <= now) {
         throw conflict(`"${name}" барааны захиалга хаагдсан байна.`);
       }
-      if (round.closeAt === null && round.stock < item.qty) {
-        throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${round.stock}).`);
-      }
       const options = optionsFromVariants(round.product.variants);
       const selections = normalizeSelections({
         selections: item.selections,
@@ -91,6 +90,22 @@ publicOrdersRouter.post(
             option: opt.name,
             values: opt.values,
           });
+        }
+      }
+      if (round.closeAt === null) {
+        const picked = Object.fromEntries(options.map((opt) => [opt.name, selections[opt.name]!]));
+        if (round.skuStocks.length > 0) {
+          const sku = findSku(round.skuStocks, picked);
+          if (!sku) {
+            throw conflict(`"${name}" барааны сонголтыг сонгоно уу.`);
+          }
+          if (sku.stock < item.qty) {
+            throw conflict(
+              `"${name}" — ${comboLabel(picked)} үлдэгдэл хүрэлцэхгүй байна (${sku.stock}).`,
+            );
+          }
+        } else if (round.stock < item.qty) {
+          throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${round.stock}).`);
         }
       }
     }
@@ -131,22 +146,10 @@ publicOrdersRouter.post(
         await tx.customer.update({ where: { id: customerId }, data: { name: body.name } });
       }
 
-      for (const item of body.items) {
-        const round = byId.get(item.productId)!;
+      for (const mapped of items) {
+        const round = byId.get(mapped.roundId)!;
         if (round.closeAt !== null) continue;
-
-        const updated = await tx.productRound.updateMany({
-          where: { id: round.id, stock: { gte: item.qty } },
-          data: { stock: { decrement: item.qty } },
-        });
-        if (updated.count === 0) {
-          throw conflict(`"${round.product.name}" барааны үлдэгдэл хүрэлцэхгүй байна.`);
-        }
-
-        const after = await tx.productRound.findUniqueOrThrow({ where: { id: round.id } });
-        if (after.stock === 0) {
-          await tx.productRound.update({ where: { id: round.id }, data: { status: 'SOLD_OUT' } });
-        }
+        await consumeReadyStock(tx, round, mapped.qty, mapped.selections);
       }
 
       const created = await createWithUniqueCode(tx, {

@@ -46,7 +46,11 @@ export function displayPriceRange(
 export function publicOptionPrices(optionPrices: OptionPriceRow[] | undefined) {
   return (optionPrices ?? [])
     .filter((r) => r.sellPrice > 0)
-    .map((r) => ({ kind: r.kind, value: r.value, price: r.sellPrice }));
+    .map((r) => ({
+      kind: r.kind,
+      value: r.value,
+      price: r.sellPrice,
+    }));
 }
 
 export function adminOptionPrices(optionPrices: OptionPriceRow[] | undefined) {
@@ -66,7 +70,7 @@ export async function replaceRoundOptionPrices(
 ): Promise<void> {
   if (rows === undefined) return;
   await tx.roundOptionPrice.deleteMany({ where: { roundId } });
-  const clean = rows.filter((r) => r.sellPrice > 0 && r.kind.trim() && r.value.trim());
+  const clean = rows.filter((r) => r.kind.trim() && r.value.trim() && r.sellPrice > 0);
   if (clean.length === 0) return;
   await tx.roundOptionPrice.createMany({
     data: clean.map((r) => ({

@@ -1017,6 +1017,23 @@ components:
         images: { type: array, items: { type: string } }
         sizes: { type: array, items: { type: string } }
         colors: { type: array, items: { type: string } }
+        optionPrices:
+          type: array
+          items:
+            type: object
+            properties:
+              kind: { type: string }
+              value: { type: string }
+              price: { type: integer }
+        skuStocks:
+          type: array
+          items:
+            type: object
+            properties:
+              selections:
+                type: object
+                additionalProperties: { type: string }
+              stock: { type: integer }
         sizeChart:
           type: array
           items:

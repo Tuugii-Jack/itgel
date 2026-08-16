@@ -16,7 +16,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { money } from "@/lib/format";
-import { priceForSelections, priceLabel } from "@/lib/options";
+import { optionValueSoldOut, priceForSelections, priceLabel, productSoldOut, selectedSkuStock } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -43,7 +43,11 @@ export default function ProductPage({
         setStore(s);
         const initial: Record<string, string> = {};
         for (const opt of p.options ?? []) {
-          if (opt.values.length === 1) initial[opt.name] = opt.values[0]!;
+          if (opt.values.length !== 1) continue;
+          const value = opt.values[0]!;
+          const gone = p.type === "ready" && optionValueSoldOut(p.skuStocks, {}, opt.name, value);
+          if (gone) continue;
+          initial[opt.name] = value;
         }
         setSelections(initial);
       })
@@ -83,8 +87,7 @@ export default function ProductPage({
   }
 
   const isOrder = product.type === "order";
-  const soldOut =
-    product.status === "SOLD_OUT" || (!isOrder && product.stock <= 0);
+  const soldOut = productSoldOut(product);
   const closed = product.status === "CLOSED";
   const blocked = soldOut || closed;
   const options = product.options ?? [];
@@ -94,11 +97,22 @@ export default function ProductPage({
     product.optionPrices,
     selections,
   );
+  const selectedStock = selectedSkuStock(product.skuStocks, selections, options);
+  const lineStock = selectedStock != null ? selectedStock : product.stock;
+  const selectedGone = !isOrder && selectedStock === 0;
+  const cannotBuy = closed || soldOut || selectedGone || (!isOrder && lineStock <= 0);
+  const qtyMax = isOrder ? 50 : Math.max(0, lineStock);
   const total = unitPrice * qty;
 
   const addToCart = () => {
     if (missingOpt) {
       const message = `${missingOpt.name}-г сонгоно уу.`;
+      setNotice(message);
+      toast.error(message);
+      return;
+    }
+    if (!isOrder && lineStock < qty) {
+      const message = "Энэ сонголтын үлдэгдэл хүрэлцэхгүй байна.";
       setNotice(message);
       toast.error(message);
       return;
@@ -115,7 +129,7 @@ export default function ProductPage({
       qty,
       arriveFrom: product.arriveFrom,
       arriveTo: product.arriveTo,
-      stock: product.stock,
+      stock: lineStock,
     });
     toast.success("Сагсанд нэмэгдлээ. Өөр бараа нэмж болно.");
   };
@@ -213,7 +227,7 @@ export default function ProductPage({
               closed={closed}
             />
 
-            {!blocked &&
+            {!closed &&
               options.map((opt) => {
                 const selected = selections[opt.name] ?? null;
                 return (
@@ -228,27 +242,37 @@ export default function ProductPage({
                           ? 4
                           : Math.max(2, opt.values.length)
                       }
-                      options={opt.values.map((v) => ({
-                        value: v,
-                        label: v,
-                      }))}
+                      options={opt.values.map((v) => {
+                        const gone =
+                          !isOrder &&
+                          optionValueSoldOut(product.skuStocks, selections, opt.name, v);
+                        return {
+                          value: v,
+                          label: v,
+                          disabled: gone,
+                          note: gone ? "Дууссан" : undefined,
+                        };
+                      })}
                       value={selected}
                       onChange={(v) => {
-                        setSelections((prev) => ({ ...prev, [opt.name]: v }));
+                        const next = { ...selections, [opt.name]: v };
+                        setSelections(next);
                         setNotice(null);
+                        const cap = selectedSkuStock(product.skuStocks, next, options);
+                        if (cap != null && qty > cap) setQty(Math.max(1, cap));
                       }}
                     />
                   </div>
                 );
               })}
 
-            {!blocked && (
+            {!cannotBuy && (
               <div className='lg:hidden'>
                 <div className='mb-2.5 text-[15px] font-medium'>Тоо ширхэг</div>
                 <div className='flex items-center gap-3'>
                   <Stepper
                     qty={qty}
-                    max={isOrder ? 50 : Math.max(1, product.stock)}
+                    max={qtyMax || 1}
                     onChange={setQty}
                   />
                   <span className='tnum text-[15px] text-ink-2'>
@@ -261,7 +285,7 @@ export default function ProductPage({
             {notice && <ErrorNote>{notice}</ErrorNote>}
 
             <div className='hidden lg:flex lg:flex-col lg:gap-2'>
-              {blocked ? (
+              {cannotBuy ? (
                 <Link href='/' className='no-underline'>
                   <Button full size='bar' variant='outline'>
                     Бусад бараа үзэх
@@ -272,7 +296,7 @@ export default function ProductPage({
                   <div className='flex items-center gap-4'>
                     <Stepper
                       qty={qty}
-                      max={isOrder ? 50 : Math.max(1, product.stock)}
+                      max={qtyMax || 1}
                       onChange={setQty}
                       size='lg'
                     />
@@ -341,7 +365,7 @@ export default function ProductPage({
         shadow-[0_-8px_24px_rgba(20,20,25,0.06)]
         pb-[calc(1rem+env(safe-area-inset-bottom))] lg:hidden'
       >
-        {blocked ? (
+        {cannotBuy ? (
           <Link href='/' className='w-full no-underline'>
             <Button full size='lg' variant='outline'>
               Бусад бараа үзэх

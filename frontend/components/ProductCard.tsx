@@ -7,15 +7,14 @@ import { ShopPrice } from "@/components/ShopPrice";
 import { Badge, Button, Divider } from "@/components/ui";
 import { useCart } from "@/lib/cart";
 import { countdown } from "@/lib/format";
-import { priceLabel } from "@/lib/options";
+import { priceLabel, productSoldOut } from "@/lib/options";
 import type { Product } from "@/lib/types";
 
 /** Дэлгүүрийн барааны карт. */
 export function ProductCard({ product }: { product: Product }) {
   const cart = useCart();
   const isOrder = product.type === "order";
-  const soldOut =
-    product.status === "SOLD_OUT" || (!isOrder && product.stock <= 0);
+  const soldOut = productSoldOut(product);
   const closed = product.status === "CLOSED";
   const needsChoice =
     (product.options?.length ?? 0) > 0 ||

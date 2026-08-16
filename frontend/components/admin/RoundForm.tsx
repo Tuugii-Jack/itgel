@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import { Calendar } from "@/components/shadcn/calendar";
 import { OptionPriceEditor, seedOptionPriceDrafts } from "@/components/admin/OptionPriceEditor";
+import { SkuStockEditor, seedSkuStockDrafts } from "@/components/admin/SkuStockEditor";
 import { Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, datetimeLocalKey, fromDatetimeLocal } from "@/lib/format";
-import { pricedOptionName } from "@/lib/options";
+import { pricedOptionName, skuStockSum } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminBatch, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -68,6 +69,13 @@ export function RoundForm({
       sell: String(base?.sellPrice ?? ""),
     }),
   );
+  const [skuRows, setSkuRows] = useState(() =>
+    seedSkuStockDrafts(
+      product.options,
+      (round ?? product.currentRound)?.skuStocks,
+      true,
+    ),
+  );
   const [stock, setStock] = useState(String(round?.stock ?? 0));
   const [isOrder, setIsOrder] = useState(base ? base.type === "order" : true);
   const [closeAt, setCloseAt] = useState(
@@ -101,9 +109,13 @@ export function RoundForm({
     .map((r) => ({
       kind: r.kind,
       value: r.value,
-      sellPrice: Number(r.sell) || 0,
+      sellPrice: Number(r.sell) || sell || 0,
       costPrice: 0,
     }));
+  const skuStocks = skuRows.map((r) => ({
+    selections: r.selections,
+    stock: Number(r.stock) || 0,
+  }));
   const canSave = primaryPriced && (sell > 0 || optionPrices.length > 0);
 
   const { date: selectedDay, hour, minute } = useMemo(() => splitCloseAt(closeAt), [closeAt]);
@@ -141,13 +153,14 @@ export function RoundForm({
       const body = {
         costPrice: 0,
         sellPrice: derivedSell,
-        stock: isOrder ? 0 : Number(stock) || 0,
+        stock: isOrder ? 0 : hasOptions ? skuStockSum(skuStocks) ?? 0 : Number(stock) || 0,
         closeAt: isOrder && closeAt ? fromDatetimeLocal(closeAt) : null,
         leadMinDays: Number(leadMin) || 0,
         leadMaxDays: Number(leadMax) || 0,
         status,
         note: note.trim() || null,
         optionPrices: hasOptions ? optionPrices : [],
+        skuStocks: !isOrder && hasOptions ? skuStocks : [],
         ...(isOrder ? { batchId: batchId.trim() ? batchId : null } : {}),
       };
 
@@ -331,6 +344,12 @@ export function RoundForm({
                   />
                 </Field>
               </>
+            ) : hasOptions ? (
+              <SkuStockEditor
+                options={product.options}
+                rows={skuRows}
+                onChange={setSkuRows}
+              />
             ) : (
               <Field label="Үлдэгдэл">
                 <Input

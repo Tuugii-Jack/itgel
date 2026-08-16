@@ -108,6 +108,12 @@ export interface OptionPrice {
   costPrice?: number;
 }
 
+/** Нэг хослол — ж: Хар + XL + Хөвөн. */
+export interface SkuStock {
+  selections: Record<string, string>;
+  stock: number;
+}
+
 /**
  * Хэрэглэгчийн API — costPrice энд хэзээ ч байхгүй.
  *
@@ -130,6 +136,8 @@ export interface Product {
   priceMax?: number;
   /** Гаргалт дээрх сонголтын үнэ — ж: Хэмжээ S = 10000. */
   optionPrices?: OptionPrice[];
+  /** Бэлэн барааны хослол бүрийн үлдэгдэл. */
+  skuStocks?: SkuStock[];
   stock: number;
   type: "order" | "ready";
   status: ProductStatus;

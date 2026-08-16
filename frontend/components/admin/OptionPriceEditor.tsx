@@ -54,7 +54,9 @@ export function OptionPriceEditor({
   const patch = (kind: string, value: string, next: string) => {
     onChange(
       rows.map((r) =>
-        r.kind === kind && r.value === value ? { ...r, sell: next.replace(/\D/g, ""), cost: "0" } : r,
+        r.kind === kind && r.value === value
+          ? { ...r, sell: next.replace(/\D/g, ""), cost: "0" }
+          : r,
       ),
     );
   };

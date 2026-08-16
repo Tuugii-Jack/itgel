@@ -16,6 +16,7 @@ import {
 import { finalizeRoundClose } from '../../services/orders.js';
 import { adminRound } from '../../services/serialize.js';
 import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
+import { replaceRoundSkuStocks, skuStockSum } from '../../lib/skuStock.js';
 import { selectionsOf, sizeColorFromSelections, tallyVariants } from '../../lib/options.js';
 import { computeArrival, diffUbDays } from '../../lib/date.js';
 import { productStatus, roundFields } from './products.js';
@@ -37,6 +38,7 @@ const roundInclude = {
     },
   },
   optionPrices: true,
+  skuStocks: true,
 };
 
 adminRoundsRouter.get(
@@ -177,6 +179,7 @@ const patchBody = z
     /** null = багцаас салгах; string = IN_TRANSIT багцад холбох. */
     batchId: z.string().min(1).nullable().optional(),
     optionPrices: roundFields.optionPrices,
+    skuStocks: roundFields.skuStocks,
   })
   .partial();
 
@@ -230,7 +233,7 @@ adminRoundsRouter.patch(
         data: {
           costPrice: body.costPrice,
           sellPrice: body.sellPrice,
-          stock: body.stock,
+          stock: skuStockSum(body.skuStocks) ?? body.stock,
           closeAt: body.closeAt === undefined ? undefined : body.closeAt,
           leadMinDays: body.leadMinDays,
           leadMaxDays: body.leadMaxDays,
@@ -242,6 +245,7 @@ adminRoundsRouter.patch(
       });
 
       await replaceRoundOptionPrices(tx, updated.id, body.optionPrices);
+      await replaceRoundSkuStocks(tx, updated.id, body.skuStocks);
 
       if (batchId !== undefined) {
         if (batchId) {

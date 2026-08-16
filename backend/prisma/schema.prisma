@@ -147,10 +147,11 @@ model ProductRound {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  product      Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
-  batch        Batch?            @relation(fields: [batchId], references: [id])
+  product      Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batch        Batch?             @relation(fields: [batchId], references: [id])
   orderItems   OrderItem[]
   optionPrices RoundOptionPrice[]
+  skuStocks    RoundSkuStock[]
 
   @@unique([productId, roundNo])
   @@index([status])
@@ -171,6 +172,21 @@ model RoundOptionPrice {
   round ProductRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
 
   @@unique([roundId, kind, value])
+  @@index([roundId])
+}
+
+/// Бэлэн барааны нэг хослол — ж: Хар + XL + Хөвөн = нэг бараа, нэг үлдэгдэл.
+model RoundSkuStock {
+  id          String @id @default(cuid())
+  roundId     String
+  /// Тогтвортой түлхүүр — ж: «Материал=Хөвөн|Хэмжээ=XL|Өнгө=Хар».
+  skuKey      String
+  selections  Json
+  stock       Int
+
+  round ProductRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, skuKey])
   @@index([roundId])
 }
 

@@ -8,6 +8,7 @@ import type {
   ProductRound,
   ProductVariant,
   RoundOptionPrice,
+  RoundSkuStock,
   SizeChartRow,
 } from '@prisma/client';
 import { computeArrival, payoutDateForReturn, toIso } from '../lib/date.js';
@@ -24,6 +25,7 @@ import {
   sizeColorFromSelections,
 } from '../lib/options.js';
 import { BATCH_STAGE_LABEL, ORDER_STATUS_LABEL } from '../lib/orderStatus.js';
+import { publicSkuStocks } from '../lib/skuStock.js';
 
 export type ProductWithRelations = Product & {
   category?: Category | null;
@@ -37,6 +39,7 @@ export type RoundWithProduct = ProductRound & {
   /** Аль багцад зориулж гаргасан бэ — админ жагсаалтад холбоос болно. */
   batch?: Pick<Batch, 'id' | 'name' | 'stage'> | null;
   optionPrices?: Pick<RoundOptionPrice, 'kind' | 'value' | 'sellPrice' | 'costPrice'>[];
+  skuStocks?: Pick<RoundSkuStock, 'selections' | 'stock'>[];
 };
 
 /**
@@ -61,6 +64,7 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     price: range.price,
     priceMax: range.priceMax,
     optionPrices: publicOptionPrices(round.optionPrices),
+    skuStocks: publicSkuStocks(round.skuStocks),
     stock: round.stock,
     type: round.closeAt === null ? ('ready' as const) : ('order' as const),
     status: round.status,
@@ -101,6 +105,7 @@ export function adminRound(
     // `price` нь хэрэглэгчийн нэр — админд `sellPrice` гэж бас өгнө.
     sellPrice: round.sellPrice,
     optionPrices: adminOptionPrices(round.optionPrices),
+    skuStocks: publicSkuStocks(round.skuStocks),
     profit: round.sellPrice - round.costPrice,
     marginPercent: marginPercent(round.sellPrice, round.costPrice),
     note: round.note,

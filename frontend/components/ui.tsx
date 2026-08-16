@@ -252,7 +252,7 @@ export function ChoiceGroup({
   onChange,
   columns,
 }: {
-  options: { value: string; label: string; disabled?: boolean }[];
+  options: { value: string; label: string; disabled?: boolean; note?: string }[];
   value: string | null;
   onChange: (value: string) => void;
   columns?: number;
@@ -267,19 +267,32 @@ export function ChoiceGroup({
       }
     >
       {options.map((option) => {
-        const active = option.value === value;
+        const disabled = Boolean(option.disabled);
+        const active = option.value === value && !disabled;
         return (
           <button
             key={option.value}
             type='button'
-            disabled={option.disabled}
+            disabled={disabled}
             onClick={() => onChange(option.value)}
-            className={`h-11 rounded-[8px] border px-3 text-[14px] leading-tight transition-colors
-              ${active ? "border-primary bg-primary text-white" : "border-line bg-bg text-ink hover:border-primary-muted"}
-              ${option.disabled ? "opacity-35" : "cursor-pointer"}
+            className={`min-h-11 rounded-[8px] border px-3 py-1.5 text-[14px] leading-tight transition-colors
+              ${
+                disabled
+                  ? "cursor-not-allowed border-line bg-surface text-muted"
+                  : active
+                    ? "border-primary bg-primary text-white"
+                    : "cursor-pointer border-line bg-bg text-ink hover:border-primary-muted"
+              }
               ${columns ? "" : "min-w-11"}`}
           >
-            {option.label}
+            <span className="flex flex-col items-center justify-center">
+              <span>{option.label}</span>
+              {option.note && (
+                <span className={`text-[11px] ${disabled ? "text-danger" : active ? "text-white/80" : "text-muted"}`}>
+                  {option.note}
+                </span>
+              )}
+            </span>
           </button>
         );
       })}

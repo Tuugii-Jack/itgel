@@ -554,6 +554,10 @@ export const adminApi = {
         sellPrice: number;
         costPrice?: number;
       }[];
+      skuStocks?: {
+        selections: Record<string, string>;
+        stock: number;
+      }[];
     },
   ) =>
     request<AdminProduct>(`/admin/products/${productId}/rounds`, {
@@ -579,6 +583,10 @@ export const adminApi = {
         value: string;
         sellPrice: number;
         costPrice?: number;
+      }[];
+      skuStocks?: {
+        selections: Record<string, string>;
+        stock: number;
       }[];
     }>,
   ) =>

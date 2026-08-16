@@ -6,7 +6,9 @@ import { computeArrival } from '../lib/date.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { subtotalOf } from '../lib/money.js';
 import { resolveOptionPrice } from '../lib/optionPrices.js';
+import { comboLabel, findSku } from '../lib/skuStock.js';
 import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../lib/options.js';
+import { consumeReadyStock } from './readyStock.js';
 import { changeOrderStatus } from './orders.js';
 import { recordPayment } from './payments.js';
 
@@ -44,7 +46,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const rounds = await prisma.productRound.findMany({
     where: { id: { in: input.items.map((i) => i.productId) }, deletedAt: null },
-    include: { product: { include: { variants: true } }, optionPrices: true },
+    include: { product: { include: { variants: true } }, optionPrices: true, skuStocks: true },
   });
   const byId = new Map(rounds.map((r) => [r.id, r]));
 
@@ -60,9 +62,6 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     if (!input.allowClosed && round.closeAt && round.closeAt <= now) {
       throw conflict(`"${name}" барааны захиалга хаагдсан байна.`);
     }
-    if (round.closeAt === null && round.stock < item.qty) {
-      throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${round.stock}).`);
-    }
     const options = optionsFromVariants(round.product.variants);
     const selections = normalizeSelections({
       selections: item.selections,
@@ -76,6 +75,22 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
           option: opt.name,
           values: opt.values,
         });
+      }
+    }
+    if (round.closeAt === null) {
+      const picked = Object.fromEntries(options.map((opt) => [opt.name, selections[opt.name]!]));
+      if (round.skuStocks.length > 0) {
+        const sku = findSku(round.skuStocks, picked);
+        if (!sku) {
+          throw conflict(`"${name}" барааны сонголтыг сонгоно уу.`);
+        }
+        if (sku.stock < item.qty) {
+          throw conflict(
+            `"${name}" — ${comboLabel(picked)} үлдэгдэл хүрэлцэхгүй байна (${sku.stock}).`,
+          );
+        }
+      } else if (round.stock < item.qty) {
+        throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${round.stock}).`);
       }
     }
   }
@@ -117,22 +132,10 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       });
     }
 
-    for (const item of input.items) {
-      const round = byId.get(item.productId)!;
+    for (const mapped of items) {
+      const round = byId.get(mapped.roundId)!;
       if (round.closeAt !== null) continue;
-
-      const updated = await tx.productRound.updateMany({
-        where: { id: round.id, stock: { gte: item.qty } },
-        data: { stock: { decrement: item.qty } },
-      });
-      if (updated.count === 0) {
-        throw conflict(`"${round.product.name}" барааны үлдэгдэл хүрэлцэхгүй байна.`);
-      }
-
-      const after = await tx.productRound.findUniqueOrThrow({ where: { id: round.id } });
-      if (after.stock === 0) {
-        await tx.productRound.update({ where: { id: round.id }, data: { status: 'SOLD_OUT' } });
-      }
+      await consumeReadyStock(tx, round, mapped.qty, mapped.selections);
     }
 
     const created = await createWithUniqueCode(tx, {

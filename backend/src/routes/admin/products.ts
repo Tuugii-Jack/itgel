@@ -7,7 +7,8 @@ import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { replaceRoundOptionPrices, type OptionPriceRow } from '../../lib/optionPrices.js';
-import { variantRowsFromOptions, type ProductOption } from '../../lib/options.js';
+import { replaceRoundSkuStocks, skuStockSum, type SkuStockRow } from '../../lib/skuStock.js';
+import { selectionsOf, variantRowsFromOptions, type ProductOption } from '../../lib/options.js';
 import { roundStats } from '../../services/roundStats.js';
 import { adminProduct } from '../../services/serialize.js';
 import { getSettings } from '../../services/settings.js';
@@ -63,6 +64,11 @@ export const optionPriceRow = z.object({
   costPrice: z.coerce.number().int().min(0).max(100_000_000).default(0),
 });
 
+export const skuStockRow = z.object({
+  selections: z.record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(40)),
+  stock: z.number().int().min(0).max(1_000_000),
+});
+
 export const roundFields = {
   costPrice: z.coerce.number().int().min(0),
   sellPrice: z.coerce.number().int().min(0),
@@ -73,6 +79,7 @@ export const roundFields = {
   status: productStatus.default('DRAFT'),
   note: z.string().trim().max(300).optional(),
   optionPrices: z.array(optionPriceRow).max(80).optional(),
+  skuStocks: z.array(skuStockRow).max(120).optional(),
 };
 
 /** Бараа үүсгэх — зөвхөн загвар. Үнэ, огноо нь тусад нь «гаргалт»-аар нэмэгдэнэ. */
@@ -98,7 +105,7 @@ const roundInclude = {
   rounds: {
     where: { deletedAt: null },
     orderBy: { roundNo: 'desc' },
-    include: { batch: { select: { id: true, name: true, stage: true } }, optionPrices: true },
+    include: { batch: { select: { id: true, name: true, stage: true } }, optionPrices: true, skuStocks: true },
   },
 } satisfies Prisma.ProductInclude;
 
@@ -288,6 +295,7 @@ adminProductsRouter.post(
         /** Хоосон үүсгээд дараа нь багцтай холбож болно. */
         batchId: z.string().min(1).nullable().optional(),
         optionPrices: roundFields.optionPrices,
+        skuStocks: roundFields.skuStocks,
       })
       .default({}),
   }),
@@ -303,6 +311,7 @@ adminProductsRouter.post(
       note?: string;
       batchId?: string | null;
       optionPrices?: OptionPriceRow[];
+      skuStocks?: SkuStockRow[];
     };
 
     const product = await prisma.product.findFirst({
@@ -312,7 +321,7 @@ adminProductsRouter.post(
           where: { deletedAt: null },
           orderBy: { roundNo: 'desc' },
           take: 1,
-          include: { optionPrices: true },
+          include: { optionPrices: true, skuStocks: true },
         },
       },
     });
@@ -345,6 +354,13 @@ adminProductsRouter.post(
       _max: { roundNo: true },
     });
 
+    const skuRows =
+      body.skuStocks ??
+      last?.skuStocks.map((s) => ({
+        selections: selectionsOf(s.selections),
+        stock: s.stock,
+      }));
+
     const round = await prisma.$transaction(async (tx) => {
       const created = await tx.productRound.create({
         data: {
@@ -353,7 +369,7 @@ adminProductsRouter.post(
           roundNo: (maxNo._max.roundNo ?? 0) + 1,
           costPrice,
           sellPrice,
-          stock: body.stock ?? 0,
+          stock: skuStockSum(skuRows) ?? body.stock ?? 0,
           closeAt: body.closeAt === undefined ? null : body.closeAt,
           leadMinDays,
           leadMaxDays,
@@ -363,6 +379,7 @@ adminProductsRouter.post(
       });
       const prices = body.optionPrices ?? last?.optionPrices;
       await replaceRoundOptionPrices(tx, created.id, prices);
+      await replaceRoundSkuStocks(tx, created.id, skuRows);
       return created;
     });
 

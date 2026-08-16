@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import { OptionPriceEditor, seedOptionPriceDrafts } from "@/components/admin/OptionPriceEditor";
+import { SkuStockEditor, seedSkuStockDrafts } from "@/components/admin/SkuStockEditor";
 import { Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { fromDatetimeLocal } from "@/lib/format";
-import { pricedOptionName } from "@/lib/options";
+import { pricedOptionName, skuStockSum } from "@/lib/options";
 import type { AdminProduct, ProductStatus } from "@/lib/types";
 
 const STATUSES: { value: ProductStatus; label: string }[] = [
@@ -45,6 +46,9 @@ export function ReleaseForm({
   const [optionRows, setOptionRows] = useState<
     ReturnType<typeof seedOptionPriceDrafts>
   >([]);
+  const [skuRows, setSkuRows] = useState<ReturnType<typeof seedSkuStockDrafts>>(
+    [],
+  );
   const [stock, setStock] = useState("0");
   const [closeAt, setCloseAt] = useState("");
   const [leadMin, setLeadMin] = useState("7");
@@ -95,6 +99,9 @@ export function ReleaseForm({
           sell: String(next.sellPrice),
         }),
       );
+      setSkuRows(seedSkuStockDrafts(product.options, next.skuStocks));
+    } else {
+      setSkuRows(seedSkuStockDrafts(product.options, undefined));
     }
     setSeeded(true);
   }, [product, seeded]);
@@ -107,9 +114,13 @@ export function ReleaseForm({
     .map((r) => ({
       kind: r.kind,
       value: r.value,
-      sellPrice: Number(r.sell) || 0,
+      sellPrice: Number(r.sell) || sell || 0,
       costPrice: 0,
     }));
+  const skuStocks = skuRows.map((r) => ({
+    selections: r.selections,
+    stock: Number(r.stock) || 0,
+  }));
   const primaryOk =
     !primaryKind ||
     optionRows.filter((r) => r.kind === primaryKind).every((r) => Number(r.sell) > 0);
@@ -118,7 +129,7 @@ export function ReleaseForm({
   const hint =
     kind === "preorder"
       ? "Каталогоос бараа сонгоод хаах огноо, үнэ тавина. Багцтай дараа холбоно."
-      : "Каталогоос бараа сонгоод үнэ, үлдэгдэл тавина.";
+      : "Каталогоос бараа сонгоод үнэ, хослол бүрийн үлдэгдэл тавина.";
 
   const canSave =
     Boolean(productId) &&
@@ -139,11 +150,13 @@ export function ReleaseForm({
           sell: String(next.sellPrice),
         }),
       );
+      setSkuRows(seedSkuStockDrafts(picked?.options, next.skuStocks));
     } else {
       setSellPrice("");
       setLeadMin("7");
       setLeadMax("14");
       setOptionRows(seedOptionPriceDrafts(picked?.options, undefined, { sell: "" }));
+      setSkuRows(seedSkuStockDrafts(picked?.options, undefined));
     }
   };
 
@@ -161,7 +174,11 @@ export function ReleaseForm({
       await adminApi.createRound(productId, {
         costPrice: 0,
         sellPrice: derivedSell,
-        stock: kind === "ready" ? Number(stock) || 0 : 0,
+        stock: kind === "ready"
+          ? hasOptions
+            ? skuStockSum(skuStocks) ?? 0
+            : Number(stock) || 0
+          : 0,
         closeAt:
           kind === "preorder" && closeAt ? fromDatetimeLocal(closeAt) : null,
         leadMinDays: Number(leadMin) || 0,
@@ -169,6 +186,7 @@ export function ReleaseForm({
         status,
         note: note.trim() || undefined,
         optionPrices: hasOptions ? optionPrices : [],
+        skuStocks: kind === "ready" && hasOptions ? skuStocks : [],
       });
       toast.success(kind === "preorder" ? "Урьдчилсан захиалга үүслээ." : "Бэлэн бараа гарлаа.");
       await onSaved();
@@ -276,6 +294,12 @@ export function ReleaseForm({
                 багцын хуудаснаас хийнэ.
               </p>
             </>
+          ) : hasOptions && product ? (
+            <SkuStockEditor
+              options={product.options}
+              rows={skuRows}
+              onChange={setSkuRows}
+            />
           ) : (
             <Field label="Үлдэгдэл">
               <Input

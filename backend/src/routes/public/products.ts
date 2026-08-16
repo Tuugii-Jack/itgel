@@ -53,6 +53,7 @@ const roundInclude = {
     },
   },
   optionPrices: true,
+  skuStocks: true,
 };
 
 publicProductsRouter.get(

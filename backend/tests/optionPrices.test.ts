@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { displayPriceRange, pricedOptionName, resolveOptionPrice } from '../src/lib/optionPrices.js';
+import {
+  comboLabel,
+  findSku,
+  optionCombinations,
+  skuKeyOf,
+  skuStockSum,
+} from '../src/lib/skuStock.js';
 
 const rows = [
   { kind: 'Хэмжээ', value: 'S', sellPrice: 10_000, costPrice: 4_000 },
@@ -35,5 +42,31 @@ describe('Сонголтын үнэ', () => {
     expect(pricedOptionName([{ name: 'Өнгө' }, { name: 'Хэмжээ' }])).toBe('Хэмжээ');
     expect(pricedOptionName([{ name: 'Өнгө' }])).toBe('Өнгө');
     expect(pricedOptionName([])).toBeNull();
+  });
+});
+
+describe('SKU хослол', () => {
+  it('хэмжээ × өнгө бүх хослол гаргана', () => {
+    const combos = optionCombinations([
+      { name: 'Өнгө', values: ['Хар', 'Цагаан'] },
+      { name: 'Хэмжээ', values: ['S', 'XL'] },
+    ]);
+    expect(combos).toHaveLength(4);
+    expect(combos).toContainEqual({ Өнгө: 'Хар', Хэмжээ: 'XL' });
+  });
+
+  it('түлхүүр дарааллаас хамаарахгүй', () => {
+    expect(skuKeyOf({ Хэмжээ: 'XL', Өнгө: 'Хар' })).toBe(skuKeyOf({ Өнгө: 'Хар', Хэмжээ: 'XL' }));
+  });
+
+  it('хослолын үлдэгдлийг нэмнэ', () => {
+    const stocks = [
+      { skuKey: skuKeyOf({ Өнгө: 'Хар', Хэмжээ: 'XL' }), stock: 2 },
+      { skuKey: skuKeyOf({ Өнгө: 'Цагаан', Хэмжээ: 'S' }), stock: 0 },
+    ];
+    expect(skuStockSum(stocks)).toBe(2);
+    expect(findSku(stocks, { Өнгө: 'Хар', Хэмжээ: 'XL' })?.stock).toBe(2);
+    expect(findSku(stocks, { Өнгө: 'Хар', Хэмжээ: 'S' })).toBeNull();
+    expect(comboLabel({ Өнгө: 'Хар', Хэмжээ: 'XL' })).toBe('Хар · XL');
   });
 });

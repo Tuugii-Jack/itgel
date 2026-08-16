@@ -9,7 +9,7 @@ import { adminApi, ApiError } from "@/lib/api";
 import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { money, phoneLabel } from "@/lib/format";
-import { optionValuePrice, priceForSelections, priceLabel } from "@/lib/options";
+import { optionValuePrice, optionValueSoldOut, priceForSelections, priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminCustomer, AdminProduct, AdminRound, ProductOption } from "@/lib/types";
 
@@ -372,9 +372,21 @@ export default function AdminCreateOrderPage() {
                           v,
                           line.price,
                         );
+                        const gone =
+                          row?.round.type === "ready" &&
+                          optionValueSoldOut(
+                            row.round.skuStocks,
+                            line.selections,
+                            opt.name,
+                            v,
+                          );
                         return (
-                          <option key={v} value={v}>
-                            {priced ? `${v} · ${money(p)}` : v}
+                          <option key={v} value={v} disabled={gone}>
+                            {gone
+                              ? `${v} — Дууссан`
+                              : priced
+                                ? `${v} · ${money(p)}`
+                                : v}
                           </option>
                         );
                       })}

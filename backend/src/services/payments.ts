@@ -3,6 +3,7 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { assertRefundable, computeTotals, recalcOrderTotals, type OrderTotals } from './money.js';
+import { restoreReadyStock, selectionsFromItem } from './readyStock.js';
 import { syncOrderCargoFee } from './cargoFee.js';
 
 type Tx = Prisma.TransactionClient;
@@ -107,7 +108,7 @@ export async function cancelOrderItem(input: {
 
     const item = await tx.orderItem.findFirst({
       where: { id: input.itemId, orderId: order.id },
-      include: { round: { select: { id: true, closeAt: true, status: true } } },
+      include: { round: { include: { skuStocks: true } } },
     });
     if (!item) throw notFound('Захиалгын мөр олдсонгүй.');
     if (item.cancelledAt) throw conflict('Энэ мөр аль хэдийн цуцлагдсан байна.');
@@ -121,14 +122,7 @@ export async function cancelOrderItem(input: {
 
     // Бэлэн бараа байсан бол үлдэгдлийг тухайн тойрогт нь буцаана.
     if (item.round && item.round.closeAt === null) {
-      await tx.productRound.update({
-        where: { id: item.roundId },
-        data: {
-          stock: { increment: item.qty },
-          // Дууссан гэж хаагдсан байсан бол дахин зарагдах боломжтой болно.
-          ...(item.round.status === 'SOLD_OUT' ? { status: 'ACTIVE' as const } : {}),
-        },
-      });
+      await restoreReadyStock(tx, item.round, item.qty, selectionsFromItem(item));
     }
 
     let refunded = 0;

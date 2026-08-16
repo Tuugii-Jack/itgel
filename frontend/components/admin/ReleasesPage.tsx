@@ -11,6 +11,7 @@ import {
   Th,
 } from "@/components/admin/shared";
 import { OrderDetail } from "@/components/admin/OrderDetail";
+import { ReleaseForm } from "@/components/admin/ReleaseForm";
 import { RoundBuyers } from "@/components/admin/RoundBuyers";
 import { RoundForm } from "@/components/admin/RoundForm";
 import { ProductImage } from "@/components/ProductImage";
@@ -42,13 +43,13 @@ const COPY: Record<
 > = {
   order: {
     title: "Урьдчилсан захиалга",
-    hint: "Гаргалтын огноо, үнэ, захиалга. Шинэ үүсгэх — Бараа хуудаснаас.",
+    hint: "Гаргалтын огноо, үнэ, захиалга. Шинэ үүсгэх товчоор урьдчилсан захиалга нэмнэ.",
     emptyOpen: "Ажиллаж буй урьдчилсан захиалга алга.",
     midCol: "Хаагдах",
   },
   ready: {
     title: "Бэлэн бараа",
-    hint: "Үлдэгдэл, үнэ, захиалга. Шинэ үүсгэх — Бараа хуудаснаас «Бэлэн гаргах».",
+    hint: "Үлдэгдэл, үнэ, захиалга. Шинэ үүсгэх товчоор бэлэн бараа гаргана.",
     emptyOpen: "Ажиллаж буй бэлэн бараа алга.",
     midCol: "Үлдэгдэл",
   },
@@ -70,6 +71,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [roundFor, setRoundFor] = useState<ReleaseRow | null>(null);
+  const [creating, setCreating] = useState(false);
   const [buyersFor, setBuyersFor] = useState<string | null>(null);
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
 
@@ -186,6 +188,19 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
     );
   }
 
+  if (creating) {
+    return (
+      <ReleaseForm
+        kind={kind === "order" ? "preorder" : "ready"}
+        onClose={() => setCreating(false)}
+        onSaved={async () => {
+          setCreating(false);
+          await load();
+        }}
+      />
+    );
+  }
+
   if (roundFor) {
     return (
       <RoundForm
@@ -206,12 +221,9 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
         title={copy.title}
         hint={copy.hint}
         actions={
-          <Link
-            href="/admin/products"
-            className="inline-flex h-11 items-center rounded-[8px] bg-ink px-4 text-[14px] text-white no-underline"
-          >
-            Шинэ үүсгэх
-          </Link>
+          <Button onClick={() => setCreating(true)}>
+            {kind === "order" ? "Урьдчилсан захиалга үүсгэх" : "Бэлэн бараа гаргах"}
+          </Button>
         }
       />
 
