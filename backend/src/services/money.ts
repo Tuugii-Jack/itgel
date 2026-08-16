@@ -131,6 +131,24 @@ export function isProductPaid(order: {
   return order.paidAmount - order.refundedAmount >= order.subtotal;
 }
 
+/**
+ * Каргоноос үлдсэн төлбөр. Бараа, агуулахын дараа үлдсэн цэвэр орлогоос бодно.
+ * Хүргэлтээр авахад энэ дүн > 0 бол карго төлүүлэх ёстой.
+ */
+export function unpaidCargoFee(input: {
+  subtotal: number;
+  storageFee?: number;
+  cargoFee?: number;
+  paidAmount: number;
+  refundedAmount: number;
+}): number {
+  const cargoFee = Math.max(0, input.cargoFee ?? 0);
+  if (cargoFee <= 0) return 0;
+  const netPaid = input.paidAmount - input.refundedAmount;
+  const towardCargo = Math.max(0, netPaid - input.subtotal - (input.storageFee ?? 0));
+  return Math.max(0, cargoFee - towardCargo);
+}
+
 export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
   UNPAID: 'Төлөгдөөгүй',
   PARTIAL: 'Хэсэгчилсэн',

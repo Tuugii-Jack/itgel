@@ -6,7 +6,7 @@ import { FulfilmentChooser } from "@/components/FulfilmentChooser";
 import { PaymentPanel } from "@/components/PaymentPanel";
 import { Badge, Button, ErrorNote, Skeleton, type Tone } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
-import { dayLabel, money, rangeLabel, relativeDay, refundPayoutLabel } from "@/lib/format";
+import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useSession } from "@/lib/session";
 import { awaitingPayment } from "@/lib/payment";
@@ -73,6 +73,7 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
     order &&
       store &&
       order.status !== "CANCELLED" &&
+      order.fulfilment !== "PICKUP" &&
       awaitingPayment(order.paymentState) &&
       order.dueAmount > 0 &&
       order.cargoPayMethod !== "CASH" &&
@@ -266,10 +267,6 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[15px] font-medium">Хүргэлтээр авна</div>
-                  <div className="tnum text-[13px] text-muted">
-                    {dayLabel(order.delivery.scheduledDay)} ·{" "}
-                    {relativeDay(order.delivery.scheduledDay)}
-                  </div>
                 </div>
                 <Badge tone={order.delivery.status === "DELIVERED" ? "ok" : "info"}>
                   {order.delivery.status === "DELIVERED" ? "Хүргэсэн" : "Товлосон"}
@@ -289,6 +286,11 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
               <div className="text-[13px] text-muted">
                 Хүргэлтийн төлбөрийг хүргэлтийн компани авна.
               </div>
+              {(order.cargoFee ?? 0) > 0 && order.dueAmount > 0 && (
+                <div className="tnum text-warn">
+                  Карго {money(order.dueAmount)} — QPay-ээр төлнө үү.
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -306,14 +308,6 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
             <div className="flex flex-col gap-1.5 border-t border-line bg-surface px-4 py-3.5 text-[14px] text-ink-2">
               <div>{store.address}</div>
               <div>{store.workHours}</div>
-              {(order.cargoFee ?? 0) > 0 && order.cargoPayMethod === "CASH" && order.dueAmount > 0 && (
-                <div className="tnum text-warn">
-                  Карго {money(order.dueAmount)}-г дэлгүүрт бэлнээр төлнө.
-                </div>
-              )}
-              {(order.cargoFee ?? 0) > 0 && order.cargoPayMethod === "QPAY" && order.dueAmount > 0 && (
-                <div className="tnum text-warn">Карго {money(order.dueAmount)} — QPay-ээр төлнө үү.</div>
-              )}
             </div>
           </div>
         </div>

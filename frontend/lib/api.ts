@@ -399,11 +399,10 @@ export const api = {
     code: string,
     body: {
       type: "PICKUP" | "DELIVERY";
-      payMethod?: "CASH" | "QPAY";
+      payMethod?: "QPAY";
       district?: string;
       khoroo?: string;
       address?: string;
-      day?: string;
     },
   ) =>
     request<{

@@ -277,7 +277,7 @@ paths:
   /api/orders/{code}/fulfilment:
     post:
       tags: [public]
-      summary: Авах хэлбэр сонгох (зөвхөн ARRIVED төлөвт)
+      summary: Авах хэлбэр сонгох (зөвхөн ARRIVED төлөвт). Хүргэлтээр авахад үлдсэн карго төлүүлнэ; очиж авахад карго шаардахгүй.
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
       requestBody:
@@ -289,10 +289,10 @@ paths:
               required: [type]
               properties:
                 type: { type: string, enum: [PICKUP, DELIVERY] }
+                payMethod: { type: string, enum: [QPAY], description: 'Хүргэлтээр авахад карго үлдсэн бол QPay' }
                 district: { type: string }
                 khoroo: { type: string }
                 address: { type: string }
-                day: { type: string, format: date, example: '2026-01-15' }
       responses:
         '200': { description: Шинэчлэгдсэн захиалга }
         '409': { $ref: '#/components/responses/Conflict' }

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { generateOrderCode } from '../../lib/code.js';
-import { computeArrival, parseUbDay, startOfUbDay } from '../../lib/date.js';
+import { computeArrival, startOfUbDay } from '../../lib/date.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
@@ -12,11 +12,10 @@ import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutOnFor } from '../../services/serialize.js';
-import { computeTotals, paymentState, recalcOrderTotals } from '../../services/money.js';
+import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
 import { getSettings, getSettingsCached, districtNames } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
-import { claimDeliverySlot } from '../../services/delivery.js';
 import { resolveOptionPrice } from '../../lib/optionPrices.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
@@ -387,17 +386,13 @@ publicOrdersRouter.post(
 const fulfilmentBody = z
   .object({
     type: z.enum(['PICKUP', 'DELIVERY']),
-    payMethod: z.enum(['CASH', 'QPAY']).optional(),
+    payMethod: z.enum(['QPAY']).optional(),
     district: z.string().trim().min(1).max(60).optional(),
     khoroo: z.string().trim().min(1).max(60).optional(),
     address: z.string().trim().min(5).max(300).optional(),
-    day: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Огноо YYYY-MM-DD хэлбэртэй байна.')
-      .optional(),
   })
-  .refine((v) => v.type === 'PICKUP' || (v.district && v.khoroo && v.address && v.day), {
-    message: 'Хүргэлтэд байршил, хороо/сум, хаяг болон өдөр заавал шаардлагатай.',
+  .refine((v) => v.type === 'PICKUP' || (v.district && v.khoroo && v.address), {
+    message: 'Хүргэлтэд байршил, хороо/сум, хаяг заавал шаардлагатай.',
   });
 
 /** POST /api/orders/:code/fulfilment — бараа ирсний дараа авах хэлбэрээ сонгоно. */
@@ -421,8 +416,9 @@ publicOrdersRouter.post(
       throw conflict('Авах хэлбэр аль хэдийн сонгогдсон байна.');
     }
 
-    if (body.type === 'PICKUP' && order.cargoFee > 0 && !body.payMethod) {
-      throw badRequest('Очиж авахад карго төлбөрийн хэлбэр сонгоно уу (бэлэн эсвэл QPay).');
+    const cargoDue = unpaidCargoFee(order);
+    if (body.type === 'DELIVERY' && cargoDue > 0 && body.payMethod !== 'QPAY') {
+      throw badRequest('Хүргэлтээр авахад каргог зөвхөн QPay-ээр төлнө.');
     }
 
     const settings = await getSettings();
@@ -441,7 +437,7 @@ publicOrdersRouter.post(
           data: {
             fulfilment: 'PICKUP',
             deliveryFee: 0,
-            cargoPayMethod: order.cargoFee > 0 ? (body.payMethod ?? null) : null,
+            cargoPayMethod: null,
           },
         });
         // Хураамж өөрчлөгдсөн тул дүнг дахин бодуулна.
@@ -452,15 +448,10 @@ publicOrdersRouter.post(
         });
       }
 
-      const day = startOfUbDay(parseUbDay(body.day!));
-
-      // Сул зайг атомикаар эзэлнэ — хоёр хүн сүүлийн зайг зэрэг авахаас сэргийлнэ.
-      await claimDeliverySlot(tx, day, settings.deliveryDailyLimit);
-
       await tx.delivery.create({
         data: {
           orderId: order.id,
-          scheduledDay: day,
+          scheduledDay: startOfUbDay(new Date()),
           district: place!,
           khoroo: body.khoroo ?? null,
           addressText: body.address ?? null,
@@ -473,6 +464,7 @@ publicOrdersRouter.post(
         data: {
           fulfilment: 'DELIVERY',
           deliveryFee: 0,
+          cargoPayMethod: cargoDue > 0 ? 'QPAY' : null,
         },
       });
       await recalcOrderTotals(tx, order.id);
@@ -488,7 +480,7 @@ publicOrdersRouter.post(
       action: 'FULFILMENT',
       entity: 'Order',
       entityId: order.id,
-      after: { fulfilment: body.type, payMethod: body.payMethod, district: place, day: body.day },
+      after: { fulfilment: body.type, payMethod: body.payMethod, district: place },
     });
 
     res.json({

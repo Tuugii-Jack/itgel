@@ -102,7 +102,7 @@ print(free[0] if free else '')")
 if [ -z "$ACODE" ]; then
   echo "  (авах арга сонгоогүй ARRIVED захиалга алга — алгаслаа)"
 else
-  curl -s -X POST -H 'content-type: application/json' -d "{\"type\":\"DELIVERY\",\"district\":\"Налайх\",\"khoroo\":\"3-р хороо\",\"address\":\"Тест гудамж 1\",\"day\":\"$(date -v+2d +%Y-%m-%d)\"}" $API/orders/$ACODE/fulfilment | j "d['data']"
+  curl -s -X POST -H 'content-type: application/json' -d "{\"type\":\"DELIVERY\",\"district\":\"Налайх\",\"khoroo\":\"3-р хороо\",\"address\":\"Тест гудамж 1\"}" $API/orders/$ACODE/fulfilment | j "d['data']"
 fi
 
 echo "=== 21. тайлан — борлуулалт, буцаалт ==="

@@ -7,16 +7,23 @@ import { LocationFields } from "@/components/LocationFields";
 import { api, ApiError } from "@/lib/api";
 import { UB_DISTRICTS } from "@/lib/locations";
 import { useSession } from "@/lib/session";
-import { money, weekdayShort } from "@/lib/format";
+import { money } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useToast } from "@/lib/toast";
-import type { CargoPayMethod, PublicOrder, Slot, Store } from "@/lib/types";
+import type { PublicOrder, Store } from "@/lib/types";
+
+function unpaidCargoFee(order: PublicOrder): number {
+  const cargoFee = Math.max(0, order.cargoFee ?? 0);
+  if (cargoFee <= 0) return 0;
+  const netPaid = order.paidAmount - order.refundedAmount;
+  const towardCargo = Math.max(0, netPaid - order.subtotal - (order.storageFee ?? 0));
+  return Math.max(0, cargoFee - towardCargo);
+}
 
 /**
  * 06 Бараа ирсэн — авах арга сонгох.
  *
- * Дизайны хэмжээ: гарчиг 24px, сонголтын карт 16px дотор зайтай, радио 18px,
- * дүүрэг 2 багана, өдөр 3 багана, доод мөр 12/16px дотор 48px товч.
+ * Хүргэлтээр: үлдсэн карго төлүүлнэ. Очиж авахад карго заавал төлөхгүй.
  */
 export function FulfilmentChooser({
   order,
@@ -30,19 +37,16 @@ export function FulfilmentChooser({
   const session = useSession();
   const toast = useToast();
   const [type, setType] = useState<"PICKUP" | "DELIVERY">("PICKUP");
-  const [payMethod, setPayMethod] = useState<CargoPayMethod | null>(null);
   const [district, setDistrict] = useState<string | null>(null);
   const [khoroo, setKhoroo] = useState("");
   const [address, setAddress] = useState("");
-  const [day, setDay] = useState<string | null>(null);
-  const [slots, setSlots] = useState<Slot[]>([]);
-  const [slotsError, setSlotsError] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [awaitingQpay, setAwaitingQpay] = useState<PublicOrder | null>(null);
 
   const cargoFee = order.cargoFee ?? 0;
-  const needsCargoPay = type === "PICKUP" && cargoFee > 0;
+  const cargoDue = unpaidCargoFee(order);
+  const needsCargoPay = type === "DELIVERY" && cargoDue > 0;
   const namedDistricts = store.deliveryDistricts ?? [];
   const districts =
     namedDistricts.length > 0
@@ -50,23 +54,11 @@ export function FulfilmentChooser({
       : store.deliveryFees.map((d) => d.district);
   const total = order.dueAmount;
 
-  const loadSlots = () => {
-    api
-      .slots(9)
-      .then((data) => setSlots(data.slots))
-      .catch(() => setSlotsError(true));
+  const choose = (next: "PICKUP" | "DELIVERY") => {
+    setType(next);
+    setError(null);
   };
 
-  const retrySlots = () => {
-    setSlotsError(false);
-    loadSlots();
-  };
-
-  // Хүргэлтийн өдрүүд ачаалагдаагүй бол сонголт хоосон харагдана —
-  // алдааг нуулгүй, дахин оролдох боломж өгнө.
-  useEffect(loadSlots, []);
-
-  // Хадгалсан хаяг байвал автоматаар оруулна.
   useEffect(() => {
     const saved = session.me?.address;
     if (!saved) return;
@@ -79,14 +71,8 @@ export function FulfilmentChooser({
 
   const submit = async () => {
     setError(null);
-    if (type === "DELIVERY" && (!district || !khoroo.trim() || !address.trim() || !day)) {
-      const message = "Байршил, хороо/сум, хаяг болон хүргэлтийн өдрөө бөглөнө үү.";
-      setError(message);
-      toast.error(message);
-      return;
-    }
-    if (needsCargoPay && !payMethod) {
-      const message = "Карго төлбөрийн хэлбэр сонгоно уу.";
+    if (type === "DELIVERY" && (!district || !khoroo.trim() || !address.trim())) {
+      const message = "Байршил, хороо/сум, хаягаа бөглөнө үү.";
       setError(message);
       toast.error(message);
       return;
@@ -95,11 +81,10 @@ export function FulfilmentChooser({
     try {
       const result = await api.chooseFulfilment(order.code, {
         type,
-        payMethod: needsCargoPay ? (payMethod ?? undefined) : undefined,
+        payMethod: needsCargoPay ? "QPAY" : undefined,
         district: district ?? undefined,
         khoroo: khoroo || undefined,
         address: address || undefined,
-        day: day ?? undefined,
       });
       if (type === "DELIVERY" && session.me) {
         await api
@@ -111,27 +96,21 @@ export function FulfilmentChooser({
           .catch(() => undefined);
       }
 
-      if (type === "PICKUP" && payMethod === "QPAY" && result.dueAmount > 0) {
+      if (needsCargoPay && result.dueAmount > 0) {
         setAwaitingQpay({
           ...order,
-          fulfilment: "PICKUP",
+          fulfilment: "DELIVERY",
           cargoPayMethod: "QPAY",
           dueAmount: result.dueAmount,
           deliveryFee: result.deliveryFee,
           paymentState: "PARTIAL",
         });
-        toast.success("QPay-ээр карго төлөөрэй.");
+        toast.success("QPay-ээр карго төлнө үү.");
         setBusy(false);
         return;
       }
 
-      toast.success(
-        type === "DELIVERY"
-          ? "Хүргэлт сонгогдлоо."
-          : payMethod === "CASH"
-            ? "Карго-г дэлгүүрт бэлнээр төлнө."
-            : "Авах арга хадгалагдлаа.",
-      );
+      toast.success(type === "DELIVERY" ? "Хүргэлт сонгогдлоо." : "Авах арга хадгалагдлаа.");
       onDone();
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
@@ -147,7 +126,7 @@ export function FulfilmentChooser({
         <div className="tnum text-[13px] text-muted">{order.code}</div>
         <div className="mt-1 text-[24px] font-medium">Карго төлөх</div>
         <p className="mt-1 mb-5 text-[14px] text-ink-2">
-          QPay-ээр {money(awaitingQpay.dueAmount)} төлнө үү. Төлсний дараа бараагаа авна.
+          Хүргэлтээр авахад карго {money(awaitingQpay.dueAmount)}-г QPay-ээр төлнө үү.
         </p>
         <PaymentPanel
           order={awaitingQpay}
@@ -161,6 +140,8 @@ export function FulfilmentChooser({
     );
   }
 
+  const submitLabel = needsCargoPay ? "QPay-ээр үргэлжлүүлэх" : "Баталгаажуулах";
+
   return (
     <div className="pb-24 lg:px-10 lg:pb-12 lg:pt-8">
       <div className="px-4 pt-6 lg:max-w-[1120px] lg:px-0 lg:pt-0">
@@ -169,14 +150,13 @@ export function FulfilmentChooser({
           {liveItems.length} бараа ирлээ
         </div>
         <div className="mt-1 text-[14px] leading-[1.5] text-ink-2 lg:text-[15px]">
-          Хэрхэн авахаа сонгоно уу.
+          Хэрхэн авахаа сонгоно уу. Хүргэлтээр авахад үлдсэн каргог QPay-ээр төлнө.
         </div>
       </div>
 
       <div className="lg:mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8">
         <div className="lg:flex lg:flex-col lg:gap-6">
 
-      {/* Ирсэн бараанууд */}
       <div className="flex flex-col gap-2 px-4 pt-5 lg:px-0 lg:pt-0">
         <div className="text-[13px] text-ink-2">Ирсэн бараа</div>
         <div className="overflow-hidden rounded-[12px] border border-line">
@@ -211,17 +191,9 @@ export function FulfilmentChooser({
       <div className="flex flex-col gap-3 px-4 pt-6 lg:grid lg:grid-cols-2 lg:px-0 lg:pt-3">
         <OptionCard
           selected={type === "PICKUP"}
-          onSelect={() => setType("PICKUP")}
+          onSelect={() => choose("PICKUP")}
           title="Өөрөө ирж авах"
-          right={
-            cargoFee > 0 ? (
-              <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
-                Карго {money(cargoFee)}
-              </span>
-            ) : (
-              <span className="whitespace-nowrap text-[14px] text-ok">Үнэгүй</span>
-            )
-          }
+          right={<span className="whitespace-nowrap text-[14px] text-ok">Карго төлөхгүй</span>}
         >
           <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">{store.address}</span>
           <span className="mt-0.5 block text-[14px] text-ink-2">{store.workHours}</span>
@@ -229,43 +201,25 @@ export function FulfilmentChooser({
 
         <OptionCard
           selected={type === "DELIVERY"}
-          onSelect={() => setType("DELIVERY")}
+          onSelect={() => choose("DELIVERY")}
           title="Хүргүүлэх"
-          right={<span className="whitespace-nowrap text-[14px] text-ink-2">Компани хүргэнэ</span>}
+          right={
+            cargoDue > 0 ? (
+              <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
+                Карго {money(cargoDue)}
+              </span>
+            ) : cargoFee > 0 ? (
+              <span className="whitespace-nowrap text-[14px] text-ok">Карго төлсөн</span>
+            ) : (
+              <span className="whitespace-nowrap text-[14px] text-ink-2">Компани хүргэнэ</span>
+            )
+          }
         >
           <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">
-            Хүргэлтийн төлбөрийг хүргэлтийн компани авна. Мя, Пү, Бя гаригт.
+            Хүргэлтийн төлбөрийг хүргэлтийн компани авна. Үлдсэн каргог QPay-ээр төлнө.
           </span>
         </OptionCard>
       </div>
-
-      {needsCargoPay && (
-        <div className="flex flex-col gap-3 px-4 pt-6 lg:px-0 lg:pt-4">
-          <div className="text-[15px] font-medium lg:text-[17px]">Карго хэрхэн төлнө вэ</div>
-          <div className="flex flex-col gap-3 lg:grid lg:grid-cols-2">
-            <OptionCard
-              selected={payMethod === "CASH"}
-              onSelect={() => setPayMethod("CASH")}
-              title="Бэлэн"
-              right={<span className="tnum text-[14px]">{money(cargoFee)}</span>}
-            >
-              <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">
-                Дэлгүүрт ирээд бэлнээр төлнө.
-              </span>
-            </OptionCard>
-            <OptionCard
-              selected={payMethod === "QPAY"}
-              onSelect={() => setPayMethod("QPAY")}
-              title="QPay"
-              right={<span className="tnum text-[14px]">{money(order.dueAmount)}</span>}
-            >
-              <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">
-                Одоо QR-аар төлнө.
-              </span>
-            </OptionCard>
-          </div>
-        </div>
-      )}
 
       {type === "DELIVERY" && (
         <div className="flex flex-col gap-6 px-4 pt-6 lg:rounded-[12px] lg:border lg:border-line lg:px-6 lg:py-6 lg:pt-6">
@@ -285,49 +239,6 @@ export function FulfilmentChooser({
               rows={3}
             />
           </Field>
-
-          <Field label="Хүргэлтийн өдөр">
-            {slotsError && (
-              <div className="flex items-center justify-between gap-3 rounded-[8px] border border-line bg-danger-bg px-3 py-2.5 text-[13px] text-danger">
-                <span>Хүргэлтийн өдрүүдийг ачаалж чадсангүй.</span>
-                <button
-                  type="button"
-                  onClick={retrySlots}
-                  className="shrink-0 cursor-pointer border-0 bg-transparent p-0 text-danger underline"
-                >
-                  Дахин оролдох
-                </button>
-              </div>
-            )}
-            <div className="grid grid-cols-3 gap-2 lg:max-w-[520px]">
-              {slots.map((slot) => {
-                const active = day === slot.day;
-                return (
-                  <button
-                    key={slot.day}
-                    type="button"
-                    disabled={!slot.available}
-                    onClick={() => setDay(slot.day)}
-                    className={`flex flex-col items-center gap-0.5 rounded-[8px] border px-1 py-2.5
-                      ${active ? "border-ink bg-ink text-white" : "border-line bg-bg"}
-                      ${slot.available ? "cursor-pointer" : "opacity-40"}`}
-                  >
-                    <span className={`text-[13px] ${active ? "opacity-70" : "text-muted"}`}>
-                      {weekdayShort(slot.day)}
-                    </span>
-                    <span className="tnum whitespace-nowrap text-[14px]">
-                      {Number(slot.day.slice(8))}
-                    </span>
-                    <span
-                      className={`text-[12px] ${active ? "opacity-80" : slot.available ? "text-ok" : "text-muted"}`}
-                    >
-                      {slot.available ? `${slot.remaining} сул` : "Дүүрсэн"}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </Field>
         </div>
       )}
 
@@ -338,7 +249,6 @@ export function FulfilmentChooser({
       )}
         </div>
 
-        {/* Хураангуй — laptop дээр баруун талд наалдана */}
         <div className="px-4 pb-6 pt-6 lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-4 lg:rounded-[12px] lg:border lg:border-line lg:p-6">
           <div className="hidden text-[17px] font-medium lg:block">Хураангуй</div>
           <div className="tnum flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5 text-[14px] lg:rounded-none lg:border-0 lg:p-0">
@@ -348,7 +258,21 @@ export function FulfilmentChooser({
               value={order.subtotal <= order.paidAmount - order.refundedAmount ? "Төлөгдсөн" : money(Math.max(0, order.subtotal - (order.paidAmount - order.refundedAmount)))}
               ok={order.subtotal <= order.paidAmount - order.refundedAmount}
             />
-            {cargoFee > 0 && <Row label="Карго" value={money(cargoFee)} />}
+            {cargoFee > 0 && (
+              <Row
+                label="Карго"
+                value={
+                  type === "PICKUP"
+                    ? cargoDue > 0
+                      ? "Одоо төлөхгүй"
+                      : "Төлсөн"
+                    : cargoDue > 0
+                      ? money(cargoDue)
+                      : "Төлсөн"
+                }
+                ok={type === "PICKUP" || cargoDue <= 0}
+              />
+            )}
             {(order.storageFee ?? 0) > 0 && (
               <Row label="Агуулахын хураамж" value={money(order.storageFee)} />
             )}
@@ -357,21 +281,20 @@ export function FulfilmentChooser({
                 Хүргэлтийн төлбөрийг хүргэлтийн компани өөрөө авна.
               </div>
             )}
-            <div className="h-px bg-line" />
-            <div className="flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]">
-              <span>{payMethod === "CASH" ? "Дэлгүүрт төлнө" : "Одоо төлөх"}</span>
-              <span>{payMethod === "CASH" ? money(cargoFee) : money(total)}</span>
-            </div>
+            {needsCargoPay && (
+              <>
+                <div className="h-px bg-line" />
+                <div className="flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]">
+                  <span>QPay-ээр төлөх</span>
+                  <span>{money(total)}</span>
+                </div>
+              </>
+            )}
           </div>
 
-          {/* Laptop дээр товч хураангуйн дотор */}
           <div className="hidden lg:block">
             <Button full size="bar" onClick={submit} loading={busy}>
-              {type === "PICKUP" && payMethod === "QPAY"
-                ? "QPay-ээр үргэлжлүүлэх"
-                : type === "PICKUP" && payMethod === "CASH"
-                  ? "Бэлнээр төлнө"
-                  : "Баталгаажуулах"}
+              {submitLabel}
             </Button>
           </div>
         </div>
@@ -379,11 +302,7 @@ export function FulfilmentChooser({
 
       <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3 lg:hidden">
         <Button full size="bar" onClick={submit} loading={busy}>
-          {type === "PICKUP" && payMethod === "QPAY"
-            ? "QPay-ээр үргэлжлүүлэх"
-            : type === "PICKUP" && payMethod === "CASH"
-              ? "Бэлнээр төлнө"
-              : "Баталгаажуулах"}
+          {submitLabel}
         </Button>
       </div>
     </div>
@@ -408,7 +327,6 @@ function Row({ label, value, ok }: { label: string; value: string; ok?: boolean 
   );
 }
 
-/** Дизайны радио карт — 18px цэг, 17px гарчиг. */
 function OptionCard({
   selected,
   onSelect,

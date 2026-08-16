@@ -4,6 +4,7 @@ import {
   computeTotals,
   paymentState,
   fullyPaid,
+  unpaidCargoFee,
   type OrderTotals,
 } from '../src/services/money.js';
 import { AppError } from '../src/lib/errors.js';
@@ -100,6 +101,26 @@ describe('Төлбөрийн байдал', () => {
     expect(fullyPaid(totals({ subtotal: 100_000, paidAmount: 100_000 }))).toBe(true);
     const withCargo = totals({ subtotal: 100_000, cargoFee: 8_000, paidAmount: 100_000 });
     expect(fullyPaid(withCargo)).toBe(true);
+  });
+});
+
+describe('Карго үлдэгдэл', () => {
+  it('бараа төлөгдсөн ч карго үлдэнэ', () => {
+    expect(
+      unpaidCargoFee({ subtotal: 100_000, cargoFee: 8_000, paidAmount: 100_000, refundedAmount: 0 }),
+    ).toBe(8_000);
+  });
+
+  it('карго бүрэн төлөгдсөн бол 0', () => {
+    expect(
+      unpaidCargoFee({ subtotal: 100_000, cargoFee: 8_000, paidAmount: 108_000, refundedAmount: 0 }),
+    ).toBe(0);
+  });
+
+  it('карго байхгүй бол 0', () => {
+    expect(
+      unpaidCargoFee({ subtotal: 100_000, cargoFee: 0, paidAmount: 50_000, refundedAmount: 0 }),
+    ).toBe(0);
   });
 });
 
