@@ -6,6 +6,7 @@ import type {
   AdminCategory,
   AdminCustomer,
   AdminDelivery,
+  DeliveryHistory,
   AdminOrderDetail,
   AdminOrderQpay,
   AdminOrderRow,
@@ -25,6 +26,8 @@ import type {
   Category,
   CreatedOrder,
   HandoverCustomer,
+  HandoverHistory,
+  HandoverPayMethod,
   Me,
   MyOrder,
   OrderTotals,
@@ -1103,9 +1106,16 @@ export const adminApi = {
       query: { q },
     }).then((r) => r.data),
 
+  handoverHistory: (year: number, month: number) =>
+    request<HandoverHistory>("/admin/handover/history", {
+      ...adminAuth,
+      query: { year, month },
+    }).then((r) => r.data),
+
   handoverPartial: (body: {
     itemIds: string[];
     collectedAmount?: number;
+    method?: HandoverPayMethod;
     note?: string;
   }) =>
     request<{
@@ -1120,7 +1130,7 @@ export const adminApi = {
 
   handoverComplete: (
     orderId: string,
-    body?: { collectedAmount?: number; note?: string },
+    body?: { collectedAmount?: number; method?: HandoverPayMethod; note?: string },
   ) =>
     request<AdminOrderDetail>(`/admin/handover/${orderId}/complete`, {
       ...adminAuth,
@@ -1132,6 +1142,12 @@ export const adminApi = {
     request<AdminDelivery[]>("/admin/deliveries", { ...adminAuth, query }).then(
       (r) => r.data,
     ),
+
+  deliveryHistory: (year: number, month: number) =>
+    request<DeliveryHistory>("/admin/deliveries/history", {
+      ...adminAuth,
+      query: { year, month },
+    }).then((r) => r.data),
 
   updateDelivery: (
     id: string,

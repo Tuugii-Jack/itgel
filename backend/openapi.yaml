@@ -713,6 +713,17 @@ paths:
         '200': { description: Захиалга, canHandOver-той }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /api/admin/handover/history:
+    get:
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      summary: Хүлээлгэн өгсөн бараа, бэлэн/карт орлого (UB сар)
+      parameters:
+        - { name: year, in: query, required: true, schema: { type: integer } }
+        - { name: month, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
+      responses:
+        '200': { description: Өдөр, хэрэглэгч, бэлэн/карт }
+
   /api/admin/handover/{orderId}/complete:
     post:
       tags: [admin]
@@ -726,6 +737,7 @@ paths:
               type: object
               properties:
                 collectedAmount: { type: integer, description: 'Хоосон бол dueAmount-тай тэнцүү гэж үзнэ' }
+                method: { type: string, enum: [CASH, CARD], description: 'Үлдэгдэл авсан хэлбэр' }
                 note: { type: string }
       responses:
         '200': { description: Хүлээлгэн өгсөн захиалга }
@@ -738,10 +750,22 @@ paths:
       summary: Хүргэлтүүд
       parameters:
         - { name: day, in: query, schema: { type: string, format: date } }
+        - { name: days, in: query, schema: { type: string }, description: 'YYYY-MM-DD,YYYY-MM-DD' }
         - { name: status, in: query, schema: { type: string, enum: [PENDING, ASSIGNED, DELIVERED] } }
         - { name: district, in: query, schema: { type: string } }
       responses:
         '200': { description: Жагсаалт }
+
+  /api/admin/deliveries/history:
+    get:
+      tags: [admin]
+      security: [{ bearerAuth: [] }]
+      summary: Хүргэлтийн түүх (UB сар, өдрөөр)
+      parameters:
+        - { name: year, in: query, required: true, schema: { type: integer } }
+        - { name: month, in: query, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
+      responses:
+        '200': { description: Өдөр, дүүрэг, хүргэлтийн хүн }
 
   /api/admin/returns/calendar:
     get:

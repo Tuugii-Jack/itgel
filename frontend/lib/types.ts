@@ -644,6 +644,49 @@ export interface HandoverCustomer {
   items: HandoverCustomerItem[];
 }
 
+/** Хүлээлгэн өгөх үед авсан үлдэгдэл — карт/данс нэг сагс. */
+export type HandoverPayMethod = "CASH" | "CARD";
+
+export interface HandoverHistoryItem {
+  name: string;
+  selections: Record<string, string>;
+  size: string | null;
+  color: string | null;
+  qty: number;
+}
+
+export interface HandoverHistoryRow {
+  customerId: string;
+  name: string | null;
+  phone: string | null;
+  at: string;
+  orderCodes: string[];
+  items: HandoverHistoryItem[];
+  cash: number;
+  card: number;
+}
+
+export interface HandoverHistoryDay {
+  date: string;
+  itemCount: number;
+  customerCount: number;
+  cash: number;
+  card: number;
+  rows: HandoverHistoryRow[];
+}
+
+export interface HandoverHistory {
+  year: number;
+  month: number;
+  days: HandoverHistoryDay[];
+  summary: {
+    itemCount: number;
+    customerCount: number;
+    cash: number;
+    card: number;
+  };
+}
+
 export interface AdminBatch extends BatchSummary {
   orderCount: number;
   totalValue: number;
@@ -737,6 +780,40 @@ export interface AdminDelivery {
     note: string | null;
     customer: { name: string | null; phone: string | null };
     items: AdminDeliveryItem[];
+  };
+}
+
+export interface DeliveryHistoryDistrict {
+  name: string;
+  count: number;
+  delivered: number;
+}
+
+export interface DeliveryHistoryCourier {
+  name: string;
+  count: number;
+  delivered: number;
+}
+
+export interface DeliveryHistoryDay {
+  date: string;
+  total: number;
+  pending: number;
+  assigned: number;
+  delivered: number;
+  districts: DeliveryHistoryDistrict[];
+  couriers: DeliveryHistoryCourier[];
+}
+
+export interface DeliveryHistory {
+  year: number;
+  month: number;
+  days: DeliveryHistoryDay[];
+  summary: {
+    total: number;
+    pending: number;
+    assigned: number;
+    delivered: number;
   };
 }
 

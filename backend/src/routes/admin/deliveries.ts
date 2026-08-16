@@ -8,34 +8,115 @@ import { notFound } from '../../lib/errors.js';
 import { selectionsOf } from '../../lib/options.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
+import { deliveryHistory } from '../../services/deliveryHistory.js';
 import { changeOrderStatus } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
 
 export const adminDeliveriesRouter = Router();
 
+const deliveryInclude = {
+  order: {
+    select: {
+      id: true,
+      code: true,
+      status: true,
+      dueAmount: true,
+      cargoFee: true,
+      note: true,
+      customer: { select: { name: true, phone: true } },
+      items: {
+        where: { cancelledAt: null },
+        select: {
+          nameSnapshot: true,
+          qty: true,
+          selections: true,
+          size: true,
+          color: true,
+        },
+      },
+    },
+  },
+} as const;
+
+type DeliveryWithOrder = Prisma.DeliveryGetPayload<{ include: typeof deliveryInclude }>;
+
+function serializeDelivery(d: DeliveryWithOrder) {
+  return {
+    id: d.id,
+    scheduledDay: d.scheduledDay.toISOString(),
+    district: d.district,
+    khoroo: d.khoroo,
+    addressText: d.addressText,
+    courierName: d.courierName,
+    status: d.status,
+    order: {
+      id: d.order.id,
+      code: d.order.code,
+      status: d.order.status,
+      dueAmount: d.order.dueAmount,
+      cargoFee: d.order.cargoFee,
+      note: d.order.note,
+      customer: { name: d.order.customer.name, phone: d.order.customer.phone },
+      items: d.order.items.map((item) => ({
+        name: item.nameSnapshot,
+        qty: item.qty,
+        selections: selectionsOf(item.selections),
+        size: item.size,
+        color: item.color,
+      })),
+    },
+  };
+}
+
 const listQuery = z.object({
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  days: z.string().optional(),
   status: z.enum(['PENDING', 'ASSIGNED', 'DELIVERED']).optional(),
   district: z.string().trim().min(1).max(60).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(500).default(200),
 });
 
+function parseDayList(q: { day?: string; days?: string }): string[] {
+  const raw = q.days
+    ? q.days.split(',')
+    : q.day
+      ? [q.day]
+      : [];
+  return [...new Set(raw.map((s) => s.trim()).filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s)))].slice(
+    0,
+    62,
+  );
+}
+
 adminDeliveriesRouter.get(
   '/',
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
+    const dayList = parseDayList(q);
+
+    const dayWhere: Prisma.DeliveryWhereInput | undefined =
+      dayList.length === 0
+        ? undefined
+        : dayList.length === 1
+          ? {
+              scheduledDay: {
+                gte: startOfUbDay(parseUbDay(dayList[0]!)),
+                lte: endOfUbDay(parseUbDay(dayList[0]!)),
+              },
+            }
+          : {
+              OR: dayList.map((d) => ({
+                scheduledDay: {
+                  gte: startOfUbDay(parseUbDay(d)),
+                  lte: endOfUbDay(parseUbDay(d)),
+                },
+              })),
+            };
 
     const where: Prisma.DeliveryWhereInput = {
-      ...(q.day
-        ? {
-            scheduledDay: {
-              gte: startOfUbDay(parseUbDay(q.day)),
-              lte: endOfUbDay(parseUbDay(q.day)),
-            },
-          }
-        : {}),
+      ...dayWhere,
       ...(q.status ? { status: q.status } : {}),
       ...(q.district ? { district: q.district } : {}),
     };
@@ -47,60 +128,29 @@ adminDeliveriesRouter.get(
         orderBy: [{ scheduledDay: 'asc' }, { district: 'asc' }, { khoroo: 'asc' }],
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
-        include: {
-          order: {
-            select: {
-              id: true,
-              code: true,
-              status: true,
-              dueAmount: true,
-              cargoFee: true,
-              note: true,
-              customer: { select: { name: true, phone: true } },
-              items: {
-                where: { cancelledAt: null },
-                select: {
-                  nameSnapshot: true,
-                  qty: true,
-                  selections: true,
-                  size: true,
-                  color: true,
-                },
-              },
-            },
-          },
-        },
+        include: deliveryInclude,
       }),
     ]);
 
     res.json({
-      data: deliveries.map((d) => ({
-        id: d.id,
-        scheduledDay: d.scheduledDay.toISOString(),
-        district: d.district,
-        khoroo: d.khoroo,
-        addressText: d.addressText,
-        courierName: d.courierName,
-        status: d.status,
-        order: {
-          id: d.order.id,
-          code: d.order.code,
-          status: d.order.status,
-          dueAmount: d.order.dueAmount,
-          cargoFee: d.order.cargoFee,
-          note: d.order.note,
-          customer: { name: d.order.customer.name, phone: d.order.customer.phone },
-          items: d.order.items.map((item) => ({
-            name: item.nameSnapshot,
-            qty: item.qty,
-            selections: selectionsOf(item.selections),
-            size: item.size,
-            color: item.color,
-          })),
-        },
-      })),
+      data: deliveries.map(serializeDelivery),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
     });
+  }),
+);
+
+/** GET /deliveries/history?year=&month= — өдрөөр хүргэлтийн түүх. */
+adminDeliveriesRouter.get(
+  '/history',
+  validate({
+    query: z.object({
+      year: z.coerce.number().int().min(2000).max(2100),
+      month: z.coerce.number().int().min(1).max(12),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const q = query<{ year: number; month: number }>(req);
+    res.json({ data: await deliveryHistory(q.year, q.month) });
   }),
 );
 
@@ -155,7 +205,7 @@ adminDeliveriesRouter.patch(
           kind: 'PAYMENT',
           amount: before.order.dueAmount,
           method: 'CASH',
-          note: `Хүргэлтээр авсан${before.courierName ? ` — ${before.courierName}` : ''}`,
+          note: `Хүргэлтээр авсан${after.courierName ? ` — ${after.courierName}` : before.courierName ? ` — ${before.courierName}` : ''}`,
           actor,
         });
       }

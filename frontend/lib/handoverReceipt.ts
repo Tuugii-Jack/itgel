@@ -15,10 +15,13 @@ export type HandoverReceiptItem = {
 export type HandoverReceiptData = {
   customerName: string | null;
   customerPhone: string | null;
-  customerEmail?: string | null;
   items: HandoverReceiptItem[];
-  /** Бэлнээр авсан бол харуулна. */
+  orderCodes?: string[];
+  /** Авсан үлдэгдэл — бэлэн эсвэл карт/данс. */
   collectedAmount?: number;
+  collectedMethod?: "CASH" | "CARD";
+  cashTaken?: number;
+  cardTaken?: number;
   note?: string;
 };
 
@@ -32,7 +35,7 @@ function esc(s: string): string {
 
 /**
  * 80мм кассын цаасанд хэвлэх хүлээлгэн өгөх баримт.
- * Гарын үсэг зуруулсны дараа бараа өгнө.
+ * Тод, бүдэгрэхгүй бичиг — Arial + pt хэмжээ, саарал/Courier хэрэглэхгүй.
  */
 export function printHandoverReceipt(data: HandoverReceiptData) {
   if (data.items.length === 0) {
@@ -45,7 +48,7 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
       return `<div class="line">
         <div class="row">
           <span class="name">${esc(item.name)}</span>
-          <span class="qty">×${item.qty}</span>
+          <span class="qty">${item.qty} ш</span>
         </div>
         ${sel ? `<div class="sel">${esc(sel)}</div>` : ""}
         <div class="meta">${esc(item.orderCode)}${
@@ -57,6 +60,16 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
 
   const totalQty = data.items.reduce((s, i) => s + i.qty, 0);
   const now = dayTimeLabel(new Date().toISOString());
+  const phone = data.customerPhone?.trim()
+    ? phoneLabel(data.customerPhone)
+    : "Утасгүй";
+  const codes = (data.orderCodes ?? []).filter(Boolean);
+  const cash =
+    data.cashTaken ??
+    (data.collectedMethod !== "CARD" ? data.collectedAmount ?? 0 : 0);
+  const card =
+    data.cardTaken ??
+    (data.collectedMethod === "CARD" ? data.collectedAmount ?? 0 : 0);
 
   const html = `<!DOCTYPE html>
 <html lang="mn">
@@ -64,71 +77,82 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
   <meta charset="utf-8" />
   <title>Хүлээлгэн өгөх</title>
   <style>
-    /* 80mm thermal — printable ~72–74mm after margins */
     @page {
       size: 80mm auto;
-      margin: 3mm 4mm;
+      margin: 3mm;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      width: 72mm;
-      max-width: 72mm;
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: none;
+      -moz-osx-font-smoothing: unset;
+      font-smooth: never;
     }
+    html, body { width: 74mm; max-width: 74mm; }
     body {
       margin: 0 auto;
-      padding: 2mm 0 5mm;
-      font-family: "Courier New", Courier, ui-monospace, monospace;
-      font-size: 12px;
-      line-height: 1.35;
+      padding: 1mm 0 4mm;
+      font-family: Arial, Helvetica, "Noto Sans", sans-serif;
+      font-size: 13pt;
+      font-weight: 700;
+      line-height: 1.2;
       color: #000;
       background: #fff;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     .center { text-align: center; }
-    .brand { font-size: 16px; font-weight: 700; letter-spacing: 0.06em; }
-    .title { font-size: 12px; margin-top: 3px; font-weight: 700; }
-    .dash {
-      border: none;
-      border-top: 1px dashed #000;
-      margin: 7px 0;
+    .brand { font-size: 20pt; font-weight: 800; }
+    .title { font-size: 13pt; margin-top: 2px; font-weight: 800; }
+    .bar {
+      height: 2px;
+      background: #000;
+      border: 0;
+      margin: 6px 0;
     }
-    .cust { margin: 4px 0; }
-    .cust strong { font-size: 13px; }
-    .muted { font-size: 11px; }
-    .line { margin-bottom: 7px; }
+    .phone {
+      font-size: 18pt;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      margin: 2px 0 2px;
+    }
+    .cust-name { font-size: 14pt; font-weight: 800; }
+    .when { font-size: 11pt; font-weight: 700; margin-top: 3px; }
+    .codes { font-size: 11pt; font-weight: 700; margin-top: 2px; }
+    .line { margin-bottom: 8px; }
     .row {
       display: flex;
       justify-content: space-between;
-      gap: 6px;
+      gap: 8px;
       align-items: flex-start;
     }
     .name {
-      font-weight: 700;
-      font-size: 12px;
+      font-weight: 800;
+      font-size: 13pt;
       word-break: break-word;
       flex: 1;
       min-width: 0;
     }
-    .qty { font-weight: 700; white-space: nowrap; font-size: 12px; }
-    .sel { font-size: 11px; margin-top: 1px; }
-    .meta { font-size: 10px; opacity: 0.85; margin-top: 1px; }
-    .sum { font-size: 12px; font-weight: 700; }
+    .qty { font-weight: 800; white-space: nowrap; font-size: 13pt; }
+    .sel { font-size: 12pt; font-weight: 700; margin-top: 1px; }
+    .meta { font-size: 11pt; font-weight: 700; margin-top: 1px; }
+    .sum { font-size: 13pt; font-weight: 800; margin-top: 2px; }
     .sign-box {
       margin-top: 10px;
-      border: 1px dashed #000;
-      min-height: 24mm;
+      border: 2px solid #000;
+      min-height: 22mm;
       padding: 5px 6px;
     }
-    .sign-label { font-size: 11px; margin-bottom: 4px; }
-    .sign-hint { font-size: 10px; opacity: 0.75; margin-top: 14mm; }
-    .foot { margin-top: 8px; font-size: 10px; text-align: center; }
+    .sign-label { font-size: 12pt; font-weight: 800; }
+    .sign-hint { font-size: 11pt; font-weight: 700; margin-top: 12mm; }
+    .foot { margin-top: 8px; font-size: 11pt; font-weight: 700; text-align: center; }
     @media print {
-      html, body { width: 72mm; max-width: 72mm; }
+      html, body { width: 74mm; max-width: 74mm; }
     }
     @media screen {
       body {
-        border: 1px dashed #ccc;
+        border: 2px solid #000;
         padding: 4mm;
         margin: 8px auto;
       }
@@ -140,23 +164,20 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
     <div class="brand">itgel</div>
     <div class="title">ХҮЛЭЭЛГЭН ӨГӨХ</div>
   </div>
-  <hr class="dash" />
-  <div class="cust">
-    <strong>${esc(data.customerName ?? "Нэргүй")}</strong><br />
-    ${data.customerPhone ? `Утас: ${esc(phoneLabel(data.customerPhone))}<br />` : ""}
-    ${data.customerEmail ? `И-мэйл: ${esc(data.customerEmail)}<br />` : ""}
-    <span class="muted">${esc(now)}</span>
+  <hr class="bar" />
+  <div class="center">
+    <div class="phone">${esc(phone)}</div>
+    <div class="cust-name">${esc(data.customerName ?? "Нэргүй")}</div>
+    ${codes.length > 0 ? `<div class="codes">${esc(codes.join(" · "))}</div>` : ""}
+    <div class="when">${esc(now)}</div>
   </div>
-  <hr class="dash" />
+  <hr class="bar" />
   ${lines}
-  <hr class="dash" />
+  <hr class="bar" />
   <div class="sum">Нийт: ${totalQty} ш · ${data.items.length} мөр</div>
-  ${
-    data.collectedAmount && data.collectedAmount > 0
-      ? `<div class="sum">Бэлэн авсан: ${esc(money(data.collectedAmount))}</div>`
-      : ""
-  }
-  ${data.note ? `<div class="muted" style="margin-top:4px">${esc(data.note)}</div>` : ""}
+  ${cash > 0 ? `<div class="sum">Бэлэн авсан: ${esc(money(cash))}</div>` : ""}
+  ${card > 0 ? `<div class="sum">Карт/дансаар авсан: ${esc(money(card))}</div>` : ""}
+  ${data.note ? `<div class="when" style="margin-top:4px">${esc(data.note)}</div>` : ""}
   <div class="sign-box">
     <div class="sign-label">Хүлээн авагчийн гарын үсэг</div>
     <div class="sign-hint">______________________________</div>

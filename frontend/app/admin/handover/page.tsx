@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Metric, OrderBadge, PageHead, Select } from "@/components/admin/shared";
 import { QrScanner } from "@/components/QrScanner";
-import { OrderBadge, PageHead } from "@/components/admin/shared";
 import { Badge, Button, Card, Divider, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { money, phoneLabel } from "@/lib/format";
+import { dayKey, dayLabel, dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { printHandoverReceipt } from "@/lib/handoverReceipt";
 import { formatSelections } from "@/lib/options";
 import { useToast } from "@/lib/toast";
@@ -14,6 +14,9 @@ import type {
   AdminOrderRow,
   HandoverCustomer,
   HandoverCustomerItem,
+  HandoverHistory,
+  HandoverHistoryDay,
+  HandoverPayMethod,
 } from "@/lib/types";
 
 type Found = AdminOrderDetail & {
@@ -22,12 +25,38 @@ type Found = AdminOrderDetail & {
   pickableItemIds?: string[];
 };
 
+type Tab = "give" | "done";
+
+const MONTHS = [
+  "1-р сар", "2-р сар", "3-р сар", "4-р сар", "5-р сар", "6-р сар",
+  "7-р сар", "8-р сар", "9-р сар", "10-р сар", "11-р сар", "12-р сар",
+];
+
 const ITEM_STATUS_LABEL: Record<HandoverCustomerItem["itemStatus"], string> = {
   waiting: "Хүлээж байна",
   arrived: "Ирсэн",
   handed_over: "Авсан",
   cancelled: "Цуцлагдсан",
 };
+
+function isReceiptItem(item: {
+  cancelled?: boolean;
+  canPick?: boolean;
+  itemStatus: HandoverCustomerItem["itemStatus"] | AdminOrderDetail["items"][number]["itemStatus"];
+}): boolean {
+  if (item.cancelled) return false;
+  return item.canPick === true || item.itemStatus === "arrived" || item.itemStatus === "handed_over";
+}
+
+function isCheckableItem(item: HandoverCustomerItem): boolean {
+  return item.canPick || item.itemStatus === "handed_over";
+}
+
+function selectableItemIds(items: HandoverCustomerItem[]): string[] {
+  const pickable = items.filter((i) => i.canPick).map((i) => i.id);
+  if (pickable.length > 0) return pickable;
+  return items.filter((i) => i.itemStatus === "handed_over").map((i) => i.id);
+}
 
 type DueOrderLine = {
   code: string;
@@ -62,6 +91,12 @@ function SumLine({
   );
 }
 
+function paySub(method: HandoverPayMethod | null): string {
+  if (method === "CARD") return "карт/дансаар авч, хүлээлгэн өгөх";
+  if (method === "CASH") return "бэлэн авч, хүлээлгэн өгөх";
+  return "авч, хүлээлгэн өгөх";
+}
+
 /**
  * Доод үйлдлийн мөр — sidebar-ийн баруун талд, дүн урт байсан ч эвдрэхгүй.
  * Үндсэн CTA дээр, хэвлэх доор (бүтэн өргөн).
@@ -72,6 +107,7 @@ function HandoverActionBar({
   onPrint,
   primaryLabel,
   primaryAmount,
+  primarySub,
   primaryDisabled,
   primaryLoading,
   onPrimary,
@@ -81,6 +117,7 @@ function HandoverActionBar({
   onPrint: () => void;
   primaryLabel: string;
   primaryAmount?: number | null;
+  primarySub?: string;
   primaryDisabled?: boolean;
   primaryLoading?: boolean;
   onPrimary: () => void;
@@ -103,7 +140,9 @@ function HandoverActionBar({
             {primaryAmount != null && primaryAmount > 0 ? (
               <span className="flex flex-col items-center leading-tight">
                 <span className="tnum text-[17px] font-medium">{money(primaryAmount)}</span>
-                <span className="text-[12px] font-normal opacity-90">бэлэн авч, хүлээлгэн өгөх</span>
+                <span className="text-[12px] font-normal opacity-90">
+                  {primarySub ?? "авч, хүлээлгэн өгөх"}
+                </span>
               </span>
             ) : (
               primaryLabel
@@ -124,6 +163,46 @@ function HandoverActionBar({
   );
 }
 
+function PayMethodPicker({
+  amount,
+  value,
+  onChange,
+}: {
+  amount: number;
+  value: HandoverPayMethod | null;
+  onChange: (v: HandoverPayMethod) => void;
+}) {
+  return (
+    <div className="border-t border-line bg-warn-bg px-4 py-3">
+      <div className="mb-2 text-[13px] text-ink-2">
+        <span className="tnum font-medium text-ink">{money(amount)}</span>-ийг яаж авсан бэ
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {(
+          [
+            { id: "CASH", label: "Бэлэн" },
+            { id: "CARD", label: "Карт / данс" },
+          ] as const
+        ).map((opt) => {
+          const on = value === opt.id;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => onChange(opt.id)}
+              className={`h-11 cursor-pointer rounded-[8px] border text-[14px] font-medium ${
+                on ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"
+              }`}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Төлбөрийн задаргаа: бараа + хүргэлт + агуулах = нийт → төлсөн → үлдэгдэл.
  */
@@ -135,8 +214,8 @@ function PaymentDueCard({
   paidAmount = 0,
   dueAmount,
   orders,
-  cashTaken,
-  onCashTaken,
+  payMethod,
+  onPayMethod,
   selectedDue,
 }: {
   subtotal?: number;
@@ -146,8 +225,8 @@ function PaymentDueCard({
   paidAmount?: number;
   dueAmount: number;
   orders?: DueOrderLine[];
-  cashTaken?: boolean;
-  onCashTaken?: (v: boolean) => void;
+  payMethod?: HandoverPayMethod | null;
+  onPayMethod?: (v: HandoverPayMethod) => void;
   selectedDue?: number;
 }) {
   const fromOrders = orders && orders.length > 0;
@@ -208,26 +287,228 @@ function PaymentDueCard({
         </div>
       )}
 
-      {onCashTaken && collect > 0 && (
-        <label className="flex cursor-pointer items-start gap-2.5 border-t border-line bg-warn-bg px-4 py-3 text-[14px] leading-[1.45] text-ink">
-          <input
-            type="checkbox"
-            checked={Boolean(cashTaken)}
-            onChange={(e) => onCashTaken(e.target.checked)}
-            className="mt-0.5 size-4 shrink-0"
-          />
-          <span>
-            <span className="tnum font-medium">{money(collect)}</span>-ийг бэлнээр авлаа.
-          </span>
-        </label>
+      {onPayMethod && collect > 0 && (
+        <PayMethodPicker amount={collect} value={payMethod ?? null} onChange={onPayMethod} />
       )}
     </Card>
+  );
+}
+
+function HistoryPanel({
+  year,
+  month,
+  years,
+  onYear,
+  onMonth,
+  history,
+  loading,
+  error,
+  openDate,
+  onOpenDate,
+}: {
+  year: number;
+  month: number;
+  years: number[];
+  onYear: (v: number) => void;
+  onMonth: (v: number) => void;
+  history: HandoverHistory | null;
+  loading: boolean;
+  error: string | null;
+  openDate: string | null;
+  onOpenDate: (date: string) => void;
+}) {
+  const open = history?.days.find((d) => d.date === openDate) ?? null;
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap gap-2">
+        <Select
+          value={String(year)}
+          onChange={(v) => onYear(Number(v))}
+          options={years.map((y) => ({ value: String(y), label: `${y} он` }))}
+        />
+        <Select
+          value={String(month)}
+          onChange={(v) => onMonth(Number(v))}
+          options={MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))}
+        />
+      </div>
+
+      {error && (
+        <div className="mb-4">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex justify-center py-16">
+          <Spinner className="text-muted" />
+        </div>
+      ) : !history || history.days.length === 0 ? (
+        <Empty>Энэ сард хүлээлгэн өгсөн бараа алга.</Empty>
+      ) : (
+        <>
+          <div className="mb-4 grid grid-cols-2 gap-3">
+            <Metric label="Бэлэн" value={money(history.summary.cash)} tone="ok" />
+            <Metric label="Карт / данс" value={money(history.summary.card)} />
+            <Metric label="Хүн" value={history.summary.customerCount} tone="info" />
+            <Metric label="Бараа" value={history.summary.itemCount} />
+          </div>
+
+          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {history.days.map((d) => (
+              <button
+                key={d.date}
+                type="button"
+                onClick={() => onOpenDate(d.date)}
+                className={`cursor-pointer rounded-[12px] border p-3 text-left ${
+                  openDate === d.date ? "border-ink bg-surface" : "border-line bg-bg hover:bg-surface"
+                }`}
+              >
+                <div className="text-[14px]">{dayLabel(`${d.date}T12:00:00+08:00`)}</div>
+                <div className="tnum mt-1 text-[16px] font-medium text-ok">{money(d.cash)}</div>
+                <div className="tnum text-[12px] text-muted">
+                  бэлэн · карт {money(d.card)}
+                </div>
+                <div className="mt-1 text-[12px] text-muted">
+                  {d.customerCount} хүн · {d.itemCount} бараа
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {open && <HistoryDayDetail day={open} />}
+        </>
+      )}
+    </div>
+  );
+}
+
+function printHistoryRow(row: HandoverHistoryDay["rows"][number]) {
+  if (row.items.length === 0) {
+    throw new Error("Хэвлэх бараа байхгүй.");
+  }
+  printHandoverReceipt({
+    customerName: row.name,
+    customerPhone: row.phone,
+    orderCodes: row.orderCodes,
+    items: row.items.map((item) => ({
+      orderCode: row.orderCodes[0] ?? "",
+      name: item.name,
+      selections: item.selections,
+      size: item.size,
+      color: item.color,
+      qty: item.qty,
+    })),
+    cashTaken: row.cash,
+    cardTaken: row.card,
+  });
+}
+
+function HistoryDayDetail({ day }: { day: HandoverHistoryDay }) {
+  const toast = useToast();
+  return (
+    <div>
+      <div className="mb-3 grid grid-cols-2 gap-3">
+        <Metric label="Энэ өдрийн бэлэн" value={money(day.cash)} tone="ok" />
+        <Metric label="Карт / данс" value={money(day.card)} />
+      </div>
+      <div className="flex flex-col gap-3">
+        {day.rows.map((row) => (
+          <Card key={`${row.customerId}-${row.at}`} className="p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <div className="text-[16px] font-medium">{row.name ?? "Нэргүй"}</div>
+                <div className="mt-0.5 text-[13px] text-ink-2">
+                  {row.phone ? (
+                    <a href={`tel:${row.phone}`} className="tnum">
+                      {phoneLabel(row.phone)}
+                    </a>
+                  ) : (
+                    "Утасгүй"
+                  )}
+                  {" · "}
+                  <span className="tnum">{dayTimeLabel(row.at)}</span>
+                </div>
+              </div>
+              {(row.cash > 0 || row.card > 0) && (
+                <div className="shrink-0 text-right text-[13px]">
+                  {row.cash > 0 && (
+                    <div className="tnum font-medium text-ok">{money(row.cash)} бэлэн</div>
+                  )}
+                  {row.card > 0 && (
+                    <div className="tnum text-ink-2">{money(row.card)} карт</div>
+                  )}
+                </div>
+              )}
+            </div>
+            {row.orderCodes.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {row.orderCodes.map((code) => (
+                  <Badge key={code} tone="neutral">
+                    {code}
+                  </Badge>
+                ))}
+              </div>
+            )}
+            {row.items.length > 0 && (
+              <div className="mt-3 divide-y divide-line border-t border-line">
+                {row.items.map((item, i) => {
+                  const sel = formatSelections(item.selections, item.size, item.color);
+                  return (
+                    <div key={`${item.name}-${i}`} className="flex items-start justify-between gap-2 py-2">
+                      <div className="min-w-0">
+                        <div className="text-[14px]">{item.name}</div>
+                        {sel ? <div className="text-[12px] text-muted">{sel}</div> : null}
+                      </div>
+                      <span className="tnum shrink-0 text-[14px] font-medium">{item.qty} ш</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <Button
+              full
+              variant="outline"
+              className="mt-3"
+              disabled={row.items.length === 0}
+              onClick={() => {
+                try {
+                  printHistoryRow(row);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
+                }
+              }}
+            >
+              Баримт хэвлэх
+            </Button>
+          </Card>
+        ))}
+      </div>
+    </div>
   );
 }
 
 /** Ажилтан нөгөө гартаа хайрцаг барьж байгаа — товч доод талд, том. */
 export default function HandoverPage() {
   const toast = useToast();
+  const today = useMemo(() => new Date(), []);
+  const todayKey = dayKey(today);
+  const years = useMemo(() => {
+    const list: number[] = [];
+    for (let y = today.getFullYear() + 1; y >= today.getFullYear() - 4; y--) list.push(y);
+    return list;
+  }, [today]);
+
+  const [tab, setTab] = useState<Tab>("give");
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [history, setHistory] = useState<HandoverHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [openDate, setOpenDate] = useState<string | null>(todayKey);
+  const [todayTake, setTodayTake] = useState<{ cash: number; card: number } | null>(null);
+
   const [pending, setPending] = useState<AdminOrderRow[]>([]);
   const [found, setFound] = useState<Found | null>(null);
   const [customers, setCustomers] = useState<HandoverCustomer[] | null>(null);
@@ -240,8 +521,7 @@ export default function HandoverPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
-  /** Үлдэгдэлтэй захиалгад бэлэн мөнгө авсныг ажилтан баталгаажуулсан эсэх. */
-  const [cashTaken, setCashTaken] = useState(false);
+  const [payMethod, setPayMethod] = useState<HandoverPayMethod | null>(null);
 
   const loadPending = useCallback(async () => {
     setLoading(true);
@@ -257,13 +537,51 @@ export default function HandoverPage() {
     }
   }, [toast]);
 
+  const loadHistory = useCallback(async (y: number, m: number) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const data = await adminApi.handoverHistory(y, m);
+      setHistory(data);
+      const now = new Date();
+      if (y === now.getFullYear() && m === now.getMonth() + 1) {
+        const day = data.days.find((d) => d.date === dayKey(now));
+        setTodayTake({ cash: day?.cash ?? 0, card: day?.card ?? 0 });
+      }
+    } catch (e) {
+      setHistory(null);
+      setHistoryError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadPending();
   }, [loadPending]);
 
+  useEffect(() => {
+    void loadHistory(year, month);
+  }, [year, month, loadHistory]);
+
+  useEffect(() => {
+    if (!history) return;
+    if (openDate && history.days.some((d) => d.date === openDate)) return;
+    setOpenDate(history.days[0]?.date ?? null);
+  }, [history, openDate]);
+
   const resetSelection = () => {
     setSelected(new Set());
-    setCashTaken(false);
+    setPayMethod(null);
+  };
+
+  const goToDone = () => {
+    const now = new Date();
+    setTab("done");
+    setYear(now.getFullYear());
+    setMonth(now.getMonth() + 1);
+    setOpenDate(dayKey(now));
+    void loadHistory(now.getFullYear(), now.getMonth() + 1);
   };
 
   const lookup = useCallback(
@@ -306,8 +624,7 @@ export default function HandoverPage() {
       setCustomers(list);
       setActiveCustomer(list.length === 1 ? list[0]! : null);
       if (list.length === 1) {
-        const pickable = list[0]!.items.filter((i) => i.canPick).map((i) => i.id);
-        setSelected(new Set(pickable));
+        setSelected(new Set(selectableItemIds(list[0]!.items)));
       }
     } catch (e) {
       setCustomers(null);
@@ -322,15 +639,15 @@ export default function HandoverPage() {
 
   const openCustomer = (c: HandoverCustomer) => {
     setActiveCustomer(c);
-    setSelected(new Set(c.items.filter((i) => i.canPick).map((i) => i.id)));
-    setCashTaken(false);
+    setSelected(new Set(selectableItemIds(c.items)));
+    setPayMethod(null);
   };
 
   const dueForSelected = useMemo(() => {
     if (!activeCustomer) return 0;
     const orderDue = new Map<string, number>();
     for (const item of activeCustomer.items) {
-      if (!selected.has(item.id)) continue;
+      if (!selected.has(item.id) || !item.canPick) continue;
       if (!orderDue.has(item.orderId)) orderDue.set(item.orderId, item.dueAmount);
     }
     return [...orderDue.values()].reduce((a, b) => a + b, 0);
@@ -341,8 +658,18 @@ export default function HandoverPage() {
     return activeCustomer.items.filter((i) => selected.has(i.id));
   }, [activeCustomer, selected]);
 
-  const toggleItem = (id: string, canPick: boolean) => {
-    if (!canPick) return;
+  const pickableSelected = useMemo(
+    () => selectedItems.filter((i) => i.canPick),
+    [selectedItems],
+  );
+
+  const printItems = useMemo(
+    () => selectedItems.filter((i) => isReceiptItem(i)),
+    [selectedItems],
+  );
+
+  const toggleItem = (id: string, checkable: boolean) => {
+    if (!checkable) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -352,13 +679,17 @@ export default function HandoverPage() {
   };
 
   const printSlip = () => {
-    if (!activeCustomer || selectedItems.length === 0) return;
+    if (!activeCustomer) return;
+    const items = printItems.length > 0 ? printItems : activeCustomer.items.filter(isReceiptItem);
+    if (items.length === 0) {
+      toast.error("Хэвлэх бараа байхгүй.");
+      return;
+    }
     try {
       printHandoverReceipt({
         customerName: activeCustomer.name,
         customerPhone: activeCustomer.phone,
-        customerEmail: activeCustomer.email,
-        items: selectedItems.map((item) => ({
+        items: items.map((item) => ({
           orderCode: item.orderCode,
           name: item.name,
           selections: item.selections,
@@ -368,6 +699,7 @@ export default function HandoverPage() {
           unitPrice: item.unitPrice,
         })),
         collectedAmount: dueForSelected > 0 ? dueForSelected : 0,
+        collectedMethod: payMethod ?? undefined,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
@@ -376,7 +708,7 @@ export default function HandoverPage() {
 
   const printFoundSlip = () => {
     if (!found) return;
-    const items = found.items.filter((i) => !i.cancelled && i.itemStatus !== "handed_over");
+    const items = found.items.filter(isReceiptItem);
     if (items.length === 0) {
       toast.error("Хэвлэх бараа байхгүй.");
       return;
@@ -385,7 +717,6 @@ export default function HandoverPage() {
       printHandoverReceipt({
         customerName: found.customer.name,
         customerPhone: found.customer.phone,
-        customerEmail: found.customer.email,
         items: items.map((item) => ({
           orderCode: found.code,
           name: item.name,
@@ -396,6 +727,7 @@ export default function HandoverPage() {
           unitPrice: item.unitPrice,
         })),
         collectedAmount: found.dueAmount > 0 ? found.dueAmount : 0,
+        collectedMethod: payMethod ?? undefined,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
@@ -403,14 +735,15 @@ export default function HandoverPage() {
   };
 
   const markReceived = async () => {
-    if (!activeCustomer || selected.size === 0) return;
+    if (!activeCustomer || pickableSelected.length === 0) return;
+    if (dueForSelected > 0 && !payMethod) return;
     setBusy(true);
     setError(null);
     try {
       const result = await adminApi.handoverPartial({
-        itemIds: [...selected],
+        itemIds: pickableSelected.map((i) => i.id),
         collectedAmount: dueForSelected > 0 ? dueForSelected : 0,
-        note: dueForSelected > 0 ? "Хүлээлгэн өгөх үед бэлнээр авсан" : undefined,
+        method: dueForSelected > 0 ? (payMethod ?? undefined) : undefined,
       });
       setDone(`${result.itemCount} бараа өгсөн`);
       toast.success(`${result.itemCount} бараа хүлээлгэж өглөө.`);
@@ -419,6 +752,7 @@ export default function HandoverPage() {
       setCustomerQ("");
       resetSelection();
       await loadPending();
+      goToDone();
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хүлээлгэн өгч чадсангүй.";
       setError(message);
@@ -430,21 +764,23 @@ export default function HandoverPage() {
 
   const complete = async () => {
     if (!found) return;
+    if (found.dueAmount > 0 && !payMethod) return;
     setBusy(true);
     setError(null);
     try {
       const result = await adminApi.handoverComplete(
         found.id,
         found.dueAmount > 0
-          ? { collectedAmount: found.dueAmount, note: "Хүлээлгэн өгөх үед бэлнээр авсан" }
+          ? { collectedAmount: found.dueAmount, method: payMethod ?? "CASH" }
           : { collectedAmount: 0 },
       );
       setDone(result.code);
       toast.success(`${result.code} хүлээлгэж өглөө.`);
       setFound(null);
       setCode("");
-      setCashTaken(false);
+      setPayMethod(null);
       await loadPending();
+      goToDone();
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хүлээлгэн өгч чадсангүй.";
       setError(message);
@@ -453,6 +789,28 @@ export default function HandoverPage() {
       setBusy(false);
     }
   };
+
+  const tabBar = (
+    <div className="no-scrollbar mb-5 flex gap-2 overflow-x-auto">
+      {(
+        [
+          { key: "give" as const, label: "Өгөх" },
+          { key: "done" as const, label: "Өгсөн" },
+        ] as const
+      ).map((t) => (
+        <button
+          key={t.key}
+          type="button"
+          onClick={() => setTab(t.key)}
+          className={`h-10 shrink-0 cursor-pointer whitespace-nowrap rounded-[8px] border px-4 text-[14px] ${
+            tab === t.key ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
 
   // Байдал: хэрэглэгчийн мөрүүд
   if (activeCustomer) {
@@ -506,27 +864,28 @@ export default function HandoverPage() {
             paidAmount: o.paidAmount,
           }))}
           selectedDue={dueForSelected}
-          cashTaken={cashTaken}
-          onCashTaken={setCashTaken}
+          payMethod={payMethod}
+          onPayMethod={setPayMethod}
         />
 
         <Card className="mb-3 divide-y divide-line">
           {activeCustomer.items.map((item) => {
             const checked = selected.has(item.id);
             const sel = formatSelections(item.selections, item.size, item.color);
+            const checkable = isCheckableItem(item);
             return (
               <label
                 key={item.id}
                 className={`flex cursor-pointer items-start gap-3 p-4 ${
-                  item.canPick ? "" : "opacity-70"
+                  checkable ? "" : "opacity-70"
                 }`}
               >
                 <input
                   type="checkbox"
                   className="mt-1 size-4 shrink-0"
-                  disabled={!item.canPick}
+                  disabled={!checkable}
                   checked={checked}
-                  onChange={() => toggleItem(item.id, item.canPick)}
+                  onChange={() => toggleItem(item.id, checkable)}
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -566,15 +925,16 @@ export default function HandoverPage() {
 
         <HandoverActionBar
           maxWidth="560px"
-          printDisabled={selected.size === 0}
+          printDisabled={printItems.length === 0 && !activeCustomer.items.some(isReceiptItem)}
           onPrint={printSlip}
           primaryLabel={
             dueForSelected > 0
               ? `${money(dueForSelected)} авч өгөх`
-              : `Авсан (${selected.size})`
+              : `Авсан (${pickableSelected.length})`
           }
           primaryAmount={dueForSelected > 0 ? dueForSelected : null}
-          primaryDisabled={selected.size === 0 || (dueForSelected > 0 && !cashTaken)}
+          primarySub={paySub(payMethod)}
+          primaryDisabled={pickableSelected.length === 0 || (dueForSelected > 0 && !payMethod)}
           primaryLoading={busy}
           onPrimary={() => void markReceived()}
         />
@@ -640,7 +1000,7 @@ export default function HandoverPage() {
             size="sm"
             onClick={() => {
               setFound(null);
-              setCashTaken(false);
+              setPayMethod(null);
             }}
           >
             Цуцлах
@@ -668,8 +1028,8 @@ export default function HandoverPage() {
           storageFee={found.storageFee}
           cargoFee={found.cargoFee}
           paidAmount={found.paidAmount}
-          cashTaken={cashTaken}
-          onCashTaken={setCashTaken}
+          payMethod={payMethod}
+          onPayMethod={setPayMethod}
         />
 
         <Card className="mb-3 divide-y divide-line">
@@ -719,12 +1079,14 @@ export default function HandoverPage() {
 
         <HandoverActionBar
           maxWidth="480px"
+          printDisabled={!found.items.some(isReceiptItem)}
           onPrint={printFoundSlip}
           primaryLabel={
             found.dueAmount > 0 ? `${money(found.dueAmount)} авч өгөх` : "Хүлээлгэн өгөх"
           }
           primaryAmount={found.dueAmount > 0 ? found.dueAmount : null}
-          primaryDisabled={!found.canHandOver || (found.dueAmount > 0 && !cashTaken)}
+          primarySub={paySub(payMethod)}
+          primaryDisabled={!found.canHandOver || (found.dueAmount > 0 && !payMethod)}
           primaryLoading={busy}
           onPrimary={complete}
         />
@@ -732,108 +1094,145 @@ export default function HandoverPage() {
     );
   }
 
-  // Байдал 1 — хайлт
+  // Байдал 1 — хайлт / өгсөн түүх
   return (
-    <div className="mx-auto max-w-[480px]">
+    <div className="mx-auto max-w-[560px]">
       <PageHead
         title="Хүлээлгэн өгөх"
-        hint={loading ? "Ачаалж байна…" : `Өнөөдөр авах ёстой: ${pending.length}`}
+        hint={
+          tab === "done"
+            ? "Өмнө өгсөн хүмүүс, тухайн өдрийн бэлэн орлого"
+            : loading
+              ? "Ачаалж байна…"
+              : `Өнөөдөр авах ёстой: ${pending.length}`
+        }
       />
 
-      {done && (
-        <Card className="mb-4 border-ok bg-ok-bg p-4">
-          <span className="tnum text-[14px] text-ok">{done} — хүлээлгэн өгсөн.</span>
-        </Card>
-      )}
+      {tabBar}
 
-      {scanning ? (
-        <div className="mb-4">
-          <QrScanner onResult={lookup} />
-          <Button full variant="outline" className="mt-3" onClick={() => setScanning(false)}>
-            Скан хаах
-          </Button>
-        </div>
-      ) : (
-        <Button full variant="outline" className="mb-4 h-14" onClick={() => setScanning(true)}>
-          QR уншуулах
-        </Button>
-      )}
-
-      <Card className="mb-4 flex flex-col gap-3 p-4">
-        <div className="text-[14px] font-medium">Утас, нэр эсвэл и-мэйл</div>
-        <p className="m-0 text-[13px] leading-[1.4] text-muted">
-          Утсаар захиалсан / сайт дээр «өөрөө авна» дараагүй байсан ч утасны дугаараар олж өгнө.
-        </p>
-        <Input
-          value={customerQ}
-          onChange={setCustomerQ}
-          placeholder="99112233 / Бат / you@gmail.com"
+      {tab === "done" ? (
+        <HistoryPanel
+          year={year}
+          month={month}
+          years={years}
+          onYear={setYear}
+          onMonth={setMonth}
+          history={history}
+          loading={historyLoading}
+          error={historyError}
+          openDate={openDate}
+          onOpenDate={setOpenDate}
         />
-        <Button full onClick={() => void searchCustomer()} loading={busy} disabled={customerQ.trim().length < 2}>
-          Хэрэглэгч хайх
-        </Button>
-      </Card>
-
-      <Card className="mb-6 flex flex-col gap-3 p-4">
-        <div className="text-[14px] text-ink-2">Эсвэл захиалгын код</div>
-        <Input
-          value={code}
-          onChange={(v) => setCode(v.toUpperCase())}
-          placeholder="PH-XXXXXX"
-          maxLength={9}
-        />
-        <Button full onClick={() => lookup(code)} loading={busy} disabled={code.length < 3}>
-          Кодоор хайх
-        </Button>
-        {error && <ErrorNote>{error}</ErrorNote>}
-      </Card>
-
-      <Divider className="mb-4" />
-
-      <div className="mb-2 text-[15px] font-medium">Хүлээгдэж буй</div>
-      {loading ? (
-        <div className="flex justify-center py-10">
-          <Spinner className="text-muted" />
-        </div>
-      ) : pending.length === 0 ? (
-        <Empty>Хүлээгдэж буй захиалга алга.</Empty>
       ) : (
-        <div className="flex flex-col gap-3">
-          {pending.map((order) => (
-            <Card key={order.id} className="p-4">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="tnum text-[15px] font-medium">{order.code}</div>
-                  <div className="text-[13px] text-muted">
-                    {order.customer.name ?? "Нэргүй"} ·{" "}
-                    <span className="tnum">{phoneLabel(order.customer.phone)}</span>
-                  </div>
-                </div>
-                <OrderBadge status={order.status} />
-              </div>
-              <div className="mt-2 flex items-baseline justify-between gap-2 text-[13px]">
-                <span className="text-muted">
-                  {order.itemCount} бараа ·{" "}
-                  {order.fulfilment === "DELIVERY"
-                    ? "Хүргэлт"
-                    : order.fulfilment === "PICKUP"
-                      ? "Өөрөө авна"
-                      : "Сонгоогүй"}
-                  {(order.storageFee ?? 0) > 0 ? ` · Агуулах ${money(order.storageFee)}` : ""}
-                  {(order.cargoFee ?? 0) > 0 ? ` · Карго ${money(order.cargoFee)}` : ""}
-                </span>
-                <span
-                  className={`tnum font-medium ${order.dueAmount > 0 ? "text-warn" : "text-ok"}`}
-                >
-                  {order.dueAmount > 0 ? `Үлдэгдэл ${money(order.dueAmount)}` : "Төлөгдсөн"}
-                </span>
-              </div>
-              <Button full variant="outline" className="mt-3" onClick={() => lookup(order.code)}>
-                Нээх
-              </Button>
+        <>
+          {todayTake && (
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <Metric
+                label="Өнөөдөр бэлэн"
+                value={money(todayTake.cash)}
+                tone="ok"
+                sub="дэлгүүрт орсон"
+              />
+              <Metric label="Карт / данс" value={money(todayTake.card)} sub="өнөөдөр" />
+            </div>
+          )}
+
+          {done && (
+            <Card className="mb-4 border-ok bg-ok-bg p-4">
+              <span className="tnum text-[14px] text-ok">{done} — хүлээлгэн өгсөн.</span>
             </Card>
-          ))}
-        </div>
+          )}
+
+          {scanning ? (
+            <div className="mb-4">
+              <QrScanner onResult={lookup} />
+              <Button full variant="outline" className="mt-3" onClick={() => setScanning(false)}>
+                Скан хаах
+              </Button>
+            </div>
+          ) : (
+            <Button full variant="outline" className="mb-4 h-14" onClick={() => setScanning(true)}>
+              QR уншуулах
+            </Button>
+          )}
+
+          <Card className="mb-4 flex flex-col gap-3 p-4">
+            <div className="text-[14px] font-medium">Утас, нэр эсвэл и-мэйл</div>
+            <p className="m-0 text-[13px] leading-[1.4] text-muted">
+              Утсаар захиалсан / сайт дээр «өөрөө авна» дараагүй байсан ч утасны дугаараар олж өгнө.
+            </p>
+            <Input
+              value={customerQ}
+              onChange={setCustomerQ}
+              placeholder="99112233 / Бат / you@gmail.com"
+            />
+            <Button full onClick={() => void searchCustomer()} loading={busy} disabled={customerQ.trim().length < 2}>
+              Хэрэглэгч хайх
+            </Button>
+          </Card>
+
+          <Card className="mb-6 flex flex-col gap-3 p-4">
+            <div className="text-[14px] text-ink-2">Эсвэл захиалгын код</div>
+            <Input
+              value={code}
+              onChange={(v) => setCode(v.toUpperCase())}
+              placeholder="PH-XXXXXX"
+              maxLength={9}
+            />
+            <Button full onClick={() => lookup(code)} loading={busy} disabled={code.length < 3}>
+              Кодоор хайх
+            </Button>
+            {error && <ErrorNote>{error}</ErrorNote>}
+          </Card>
+
+          <Divider className="mb-4" />
+
+          <div className="mb-2 text-[15px] font-medium">Хүлээгдэж буй</div>
+          {loading ? (
+            <div className="flex justify-center py-10">
+              <Spinner className="text-muted" />
+            </div>
+          ) : pending.length === 0 ? (
+            <Empty>Хүлээгдэж буй захиалга алга.</Empty>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {pending.map((order) => (
+                <Card key={order.id} className="p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="tnum text-[15px] font-medium">{order.code}</div>
+                      <div className="text-[13px] text-muted">
+                        {order.customer.name ?? "Нэргүй"} ·{" "}
+                        <span className="tnum">{phoneLabel(order.customer.phone)}</span>
+                      </div>
+                    </div>
+                    <OrderBadge status={order.status} />
+                  </div>
+                  <div className="mt-2 flex items-baseline justify-between gap-2 text-[13px]">
+                    <span className="text-muted">
+                      {order.itemCount} бараа ·{" "}
+                      {order.fulfilment === "DELIVERY"
+                        ? "Хүргэлт"
+                        : order.fulfilment === "PICKUP"
+                          ? "Өөрөө авна"
+                          : "Сонгоогүй"}
+                      {(order.storageFee ?? 0) > 0 ? ` · Агуулах ${money(order.storageFee)}` : ""}
+                      {(order.cargoFee ?? 0) > 0 ? ` · Карго ${money(order.cargoFee)}` : ""}
+                    </span>
+                    <span
+                      className={`tnum font-medium ${order.dueAmount > 0 ? "text-warn" : "text-ok"}`}
+                    >
+                      {order.dueAmount > 0 ? `Үлдэгдэл ${money(order.dueAmount)}` : "Төлөгдсөн"}
+                    </span>
+                  </div>
+                  <Button full variant="outline" className="mt-3" onClick={() => lookup(order.code)}>
+                    Нээх
+                  </Button>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

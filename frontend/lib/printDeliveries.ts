@@ -90,18 +90,31 @@ function itemLine(item: AdminDelivery["order"]["items"][number]): string {
   return `${item.name}${sel ? ` (${sel})` : ""} × ${item.qty}`;
 }
 
+function daysTitle(opts?: { day?: string; days?: string[] }): string {
+  const list = [...(opts?.days ?? (opts?.day ? [opts.day] : []))].sort();
+  if (list.length === 0) return "Бүх өдөр";
+  if (list.length === 1) return dayLabel(list[0]!);
+  if (list.length <= 5) return list.map((d) => dayLabel(d)).join(", ");
+  return `${dayLabel(list[0]!)} – ${dayLabel(list[list.length - 1]!)} · ${list.length} өдөр`;
+}
+
 export function printDeliveries(
   rows: AdminDelivery[],
-  opts?: { day?: string; district?: string },
+  opts?: { day?: string; days?: string[]; district?: string; courier?: string },
 ): void {
   const groups = groupDeliveriesByDistrict(rows);
   const zones = splitDeliveryZones(groups);
-  const dayTitle = opts?.day ? dayLabel(opts.day) : "Бүх өдөр";
+  const dayTitle = daysTitle(opts);
   const cityN = groups.filter((g) => g.zone !== "aimag").length;
   const aimagN = groups.filter((g) => g.zone === "aimag").length;
   const subtitle = opts?.district
     ? `${placeTitle(opts.district)} — ${rows.length} хүргэлт`
-    : [cityN ? `${cityN} дүүрэг` : null, aimagN ? `${aimagN} аймаг` : null, `${rows.length} хүргэлт`]
+    : [
+        opts?.courier ? opts.courier : null,
+        cityN ? `${cityN} дүүрэг` : null,
+        aimagN ? `${aimagN} аймаг` : null,
+        `${rows.length} хүргэлт`,
+      ]
         .filter(Boolean)
         .join(" · ");
 
@@ -164,7 +177,7 @@ export function printDeliveries(
 <html lang="mn">
 <head>
   <meta charset="utf-8" />
-  <title>Хүргэлт — ${esc(opts?.district ?? dayTitle)}</title>
+  <title>Хүргэлт — ${esc(opts?.courier ?? opts?.district ?? dayTitle)}</title>
   <style>
     @page { size: A4; margin: 12mm 12mm 14mm; }
     * { box-sizing: border-box; }
@@ -222,7 +235,7 @@ export function printDeliveries(
   </style>
 </head>
 <body>
-  <h1>Хүргэлтийн жагсаалт</h1>
+  <h1>Хүргэлтийн жагсаалт${opts?.courier ? ` — ${esc(opts.courier)}` : ""}</h1>
   <div class="sub">${esc(dayTitle)} · ${esc(subtitle)} · ${esc(dayTimeLabel(new Date().toISOString()))}</div>
   ${sections || "<p>Хүргэлт олдсонгүй.</p>"}
 </body>

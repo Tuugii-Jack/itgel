@@ -8,6 +8,7 @@ import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { handOverItems } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
+import { HANDOVER_PAY_NOTE, handoverHistory } from '../../services/handoverHistory.js';
 import { adminOrderItem, publicOrderItem } from '../../services/serialize.js';
 import { syncOrderStorageFee, syncOrdersStorageFees } from '../../services/storageFee.js';
 import { adminOrderDetail } from './orders.js';
@@ -19,6 +20,23 @@ const lookupQuery = z.object({ code: z.string().trim().min(3).max(20) });
 const customerQuery = z.object({
   q: z.string().trim().min(2).max(120),
 });
+
+const payMethod = z.enum(['CASH', 'CARD']);
+
+/** GET /handover/history?year=&month= — өгсөн бараа, бэлэн/карт. */
+adminHandoverRouter.get(
+  '/history',
+  validate({
+    query: z.object({
+      year: z.coerce.number().int().min(2000).max(2100),
+      month: z.coerce.number().int().min(1).max(12),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const q = query<{ year: number; month: number }>(req);
+    res.json({ data: await handoverHistory(q.year, q.month) });
+  }),
+);
 
 /** GET /handover/lookup?code= — QR эсвэл кодоор хайна. */
 adminHandoverRouter.get(
@@ -199,6 +217,7 @@ adminHandoverRouter.post(
     body: z.object({
       itemIds: z.array(z.string().min(1)).min(1).max(200),
       collectedAmount: z.coerce.number().int().min(0).optional(),
+      method: payMethod.optional(),
       note: z.string().trim().max(300).optional(),
     }),
   }),
@@ -206,6 +225,7 @@ adminHandoverRouter.post(
     const body = req.body as {
       itemIds: string[];
       collectedAmount?: number;
+      method?: 'CASH' | 'CARD';
       note?: string;
     };
     const actor = actorOf(req);
@@ -252,8 +272,8 @@ adminHandoverRouter.post(
           orderId,
           kind: 'PAYMENT',
           amount: due,
-          method: 'CASH',
-          note: body.note ?? 'Хүлээлгэн өгөх үед авсан',
+          method: body.method ?? 'CASH',
+          note: body.note ?? HANDOVER_PAY_NOTE,
           actor,
         });
       }
@@ -268,6 +288,7 @@ adminHandoverRouter.post(
         itemIds: body.itemIds,
         orderIds: result.orderIds,
         completedOrderIds: result.completedOrderIds,
+        method: body.method ?? null,
         note: body.note,
       },
     });
@@ -290,12 +311,17 @@ adminHandoverRouter.post(
     body: z
       .object({
         collectedAmount: z.coerce.number().int().min(0).optional(),
+        method: payMethod.optional(),
         note: z.string().trim().max(300).optional(),
       })
       .default({}),
   }),
   asyncHandler(async (req, res) => {
-    const { collectedAmount, note } = req.body as { collectedAmount?: number; note?: string };
+    const { collectedAmount, method, note } = req.body as {
+      collectedAmount?: number;
+      method?: 'CASH' | 'CARD';
+      note?: string;
+    };
     const orderId = param(req, 'orderId');
 
     await syncOrderStorageFee(orderId);
@@ -338,8 +364,8 @@ adminHandoverRouter.post(
         orderId: order.id,
         kind: 'PAYMENT',
         amount: collected,
-        method: 'CASH',
-        note: note ?? 'Хүлээлгэн өгөх үед авсан',
+        method: method ?? 'CASH',
+        note: note ?? HANDOVER_PAY_NOTE,
         actor,
       });
     }
