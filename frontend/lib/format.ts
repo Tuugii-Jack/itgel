@@ -61,13 +61,14 @@ export function dayKey(iso: string | Date): string {
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
 
-/** "2026-08-10" → "8-р сарын 10-нд буцаалт тань орно" */
-export function refundPayoutLabel(payoutDay: string, now: Date = new Date()): string {
+/** "2026-08-10" → хүлээгдэж байвал өдөр, орсон бол «Буцаалт орсон» */
+export function refundPayoutLabel(
+  payoutDay: string,
+  paid = false,
+): string {
+  if (paid) return "Буцаалт орсон";
   const p = parts(`${payoutDay}T12:00:00+08:00`);
-  if (payoutDay >= dayKey(now)) {
-    return `${p.month}-р сарын ${p.day}-нд буцаалт тань орно`;
-  }
-  return `${p.month}-р сарын ${p.day}-ны буцаалтад орсон`;
+  return `${p.month}-р сарын ${p.day}-нд буцаалт тань орно`;
 }
 
 /** "2026-08-12T14:30" — input[type=datetime-local], UB цагаар. */

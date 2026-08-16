@@ -11,7 +11,8 @@ import { ipRateLimit } from '../../lib/rateLimit.js';
 import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { buildTimeline } from '../../services/orders.js';
-import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutOnFor } from '../../services/serialize.js';
+import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
+import { paidPayoutDaySet } from '../../services/returns.js';
 import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
 import { getSettings, getSettingsCached, districtNames } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
@@ -285,6 +286,10 @@ publicOrdersRouter.get(
       subtotal = moneyRow.subtotal;
     }
 
+    const dates = refundPayoutDatesFor({ items: order.items, refunds: order.payments });
+    const paidDays = await paidPayoutDaySet(order.customerId, dates);
+    const refund = refundPayoutStatus(dates, paidDays);
+
     res.json({
       data: {
         code: order.code,
@@ -324,8 +329,9 @@ publicOrdersRouter.get(
           phone: maskPhone(order.customer.phone),
           email: order.customer.email,
         },
-        items: order.items.map(publicOrderItem),
-        refundPayoutOn: refundPayoutOnFor({ items: order.items, refunds: order.payments }),
+        items: order.items.map((item) => publicOrderItem(item, paidDays)),
+        refundPayoutOn: refund.refundPayoutOn,
+        refundPaid: refund.refundPaid,
         batch: batchSummary(order.batch),
         delivery: publicDelivery(order.delivery),
         timeline: buildTimeline(order),

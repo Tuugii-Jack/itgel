@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { useCountdown } from "@/components/ProductCard";
 import { ProductGallery } from "@/components/ProductGallery";
+import { ShopPrice } from "@/components/ShopPrice";
 
 import {
   Button,
@@ -161,9 +162,14 @@ export default function ProductPage({
                 {product.name}
               </h1>
               <div className='tnum text-[26px] font-medium leading-none lg:text-[28px]'>
-                {missingOpt
-                  ? priceLabel(product.price, product.priceMax)
-                  : money(unitPrice)}
+                <ShopPrice noteClassName='text-[15px] font-normal text-muted lg:text-[16px]'>
+                  {missingOpt
+                    ? priceLabel(product.price, product.priceMax)
+                    : money(unitPrice)}
+                </ShopPrice>
+              </div>
+              <div className='text-[13px] leading-[1.45] text-muted lg:text-[14px]'>
+                Бараа ирсний дараа карго үнэ бодогдоно.
               </div>
             </div>
 

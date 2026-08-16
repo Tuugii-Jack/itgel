@@ -367,10 +367,16 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                     <Badge tone="warn">Хүлээж байна</Badge>
                   )}
                 </div>
-                <span className="tnum hidden text-[13px] text-ink-2 lg:inline">
+                <span
+                  className={`tnum hidden text-[13px] lg:inline ${
+                    (item.cancelled || item.itemStatus === "cancelled") && item.refundPaid
+                      ? "text-ok"
+                      : "text-ink-2"
+                  }`}
+                >
                   {item.cancelled || item.itemStatus === "cancelled"
                     ? item.refundPayoutOn
-                      ? refundPayoutLabel(item.refundPayoutOn)
+                      ? refundPayoutLabel(item.refundPayoutOn, item.refundPaid)
                       : ""
                     : item.itemStatus === "handed_over"
                       ? "Авсан"
@@ -391,8 +397,10 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                 </div>
               </div>
               {item.cancelled && item.refundPayoutOn && (
-                <div className="text-[13px] text-ink-2 lg:hidden">
-                  {refundPayoutLabel(item.refundPayoutOn)}
+                <div
+                  className={`text-[13px] lg:hidden ${item.refundPaid ? "text-ok" : "text-ink-2"}`}
+                >
+                  {refundPayoutLabel(item.refundPayoutOn, item.refundPaid)}
                 </div>
               )}
               {!item.cancelled &&
@@ -573,7 +581,7 @@ function etaOf(order: PublicOrder): { label: string; value: string; note: string
       label: "Төлөв",
       value: "Цуцлагдсан",
       note: order.refundPayoutOn
-        ? refundPayoutLabel(order.refundPayoutOn)
+        ? refundPayoutLabel(order.refundPayoutOn, order.refundPaid)
         : "Энэ захиалга цуцлагдсан. Асуулт байвал бидэнтэй холбогдоно уу.",
     };
   }

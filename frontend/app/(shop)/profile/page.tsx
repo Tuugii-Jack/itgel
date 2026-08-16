@@ -20,6 +20,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
+import { BankAccountFields } from "@/components/BankAccountFields";
 import { EmailAuthForm } from "@/components/EmailAuthForm";
 import { LocationFields } from "@/components/LocationFields";
 import { dayLabel, money, phoneLabel, refundPayoutLabel } from "@/lib/format";
@@ -193,11 +194,7 @@ function Profile() {
         ) : tab === "orders" ? (
           <OrdersTab orders={orders} activeCount={totals.activeCount} />
         ) : tab === "payments" ? (
-          <PaymentsTab
-            orders={orders}
-            totalSpent={totals.totalSpent}
-            store={store}
-          />
+          <PaymentsTab />
         ) : (
           <InfoTab store={store} />
         )}
@@ -298,7 +295,9 @@ function OrdersTab({
                 {order.refundPayoutOn && (
                   <div className='flex items-baseline justify-between gap-2 text-[13px]'>
                     <span className='text-muted'>Буцаалт</span>
-                    <span className='text-right'>{refundPayoutLabel(order.refundPayoutOn)}</span>
+                    <span className={`text-right ${order.refundPaid ? "text-ok" : ""}`}>
+                      {refundPayoutLabel(order.refundPayoutOn, order.refundPaid)}
+                    </span>
                   </div>
                 )}
 
@@ -326,15 +325,7 @@ function OrdersTab({
   );
 }
 
-function PaymentsTab({
-  orders,
-  totalSpent,
-  store,
-}: {
-  orders: MyOrder[];
-  totalSpent: number;
-  store: Store | null;
-}) {
+function PaymentsTab() {
   const session = useSession();
   const toast = useToast();
   const me = session.me!;
@@ -345,9 +336,6 @@ function PaymentsTab({
   const [bankAccountName, setBankAccountName] = useState(
     me.bank?.accountName ?? "",
   );
-  const [defaultPayoutBank, setDefaultPayoutBank] = useState(
-    me.bank?.defaultPayout ?? false,
-  );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -355,17 +343,25 @@ function PaymentsTab({
     setBankName(me.bank?.name ?? "");
     setBankAccountNumber(me.bank?.accountNumber ?? "");
     setBankAccountName(me.bank?.accountName ?? "");
-    setDefaultPayoutBank(me.bank?.defaultPayout ?? false);
   }, [me.bank]);
 
+  const complete =
+    bankName.trim().length > 0 &&
+    bankAccountNumber.trim().length >= 6 &&
+    bankAccountName.trim().length > 0;
+
   const saveBank = async () => {
+    if (!complete) {
+      toast.error("Банк, дансны дугаар, дансны нэрийг бөглөнө үү.");
+      return;
+    }
     setSaving(true);
     try {
       await api.updateMe({
-        bankName: bankName.trim() || null,
-        bankAccountNumber: bankAccountNumber.trim() || null,
-        bankAccountName: bankAccountName.trim() || null,
-        defaultPayoutBank,
+        bankName: bankName.trim(),
+        bankAccountNumber: bankAccountNumber.trim(),
+        bankAccountName: bankAccountName.trim(),
+        defaultPayoutBank: true,
       });
       await session.refresh();
       setSaved(true);
@@ -380,154 +376,36 @@ function PaymentsTab({
     }
   };
 
-  const paid = orders.filter(
-    (o) =>
-      o.status !== "CANCELLED" && (o.paidAmount > 0 || o.refundedAmount > 0),
-  );
-
   return (
     <div className='px-4 pt-4 lg:px-0 lg:pt-0'>
       <div className='mb-3 hidden text-[20px] font-medium lg:block'>Данс</div>
 
       <Card className='mb-4 p-4 lg:p-5'>
-        <div className='mb-4 flex items-center justify-between gap-3'>
-          <div>
-            <div className='text-[15px] font-medium'>Миний данс</div>
-            <p className='mt-1 mb-0 text-[13px] text-muted'>
-              Төлбөр төлсөн дансаа сонгоно уу.
-            </p>
-          </div>
+        <div className='mb-4'>
+          <div className='text-[15px] font-medium'>Буцаалтын данс</div>
+          <p className='mt-1 mb-0 text-[13px] text-muted'>
+            Бараа буцаахад мөнгө энэ данс руу орно. Админ буцаалт болон таны мэдээлэл дээр харна.
+          </p>
         </div>
 
-        <div className='flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4'>
-          <Field label='Банк'>
-            <Input
-              value={bankName}
-              onChange={setBankName}
-              placeholder='Банкны нэр...'
-            />
-          </Field>
-          <Field label='Дансны дугаар'>
-            <Input
-              value={bankAccountNumber}
-              onChange={setBankAccountNumber}
-              placeholder='Дансны дугаар...'
-            />
-          </Field>
-          <div className='lg:col-span-2'>
-            <Field label='Дансны нэр'>
-              <Input
-                value={bankAccountName}
-                onChange={setBankAccountName}
-                placeholder='Жишээ: Б. Бат-Эрдэнэ'
-              />
-            </Field>
-          </div>
-        </div>
+        <BankAccountFields
+          bankName={bankName}
+          accountNumber={bankAccountNumber}
+          accountName={bankAccountName}
+          onBankName={setBankName}
+          onAccountNumber={setBankAccountNumber}
+          onAccountName={setBankAccountName}
+        />
 
         <div className='mt-4 flex items-center justify-between gap-3'>
           <span className='text-[12px] text-muted'>
-            {saved
-              ? "Өөрчлөлт хадгалагдлаа."
-              : "Буцаалт хийхэд энэ данс ашиглагдана."}
+            {saved ? "Өөрчлөлт хадгалагдлаа." : "Хадгалсны дараа буцаалтад ашиглагдана."}
           </span>
-          <Button size='sm' onClick={() => void saveBank()} loading={saving}>
+          <Button size='sm' onClick={() => void saveBank()} loading={saving} disabled={!complete}>
             Хадгалах
           </Button>
         </div>
       </Card>
-
-      {/* <Card
-        surface
-        className='mb-3 flex items-baseline justify-between gap-2 p-4 lg:hidden'
-      >
-        <span className='text-[14px] text-ink-2'>Нийт төлсөн</span>
-        <span className='tnum text-[20px] font-medium'>
-          {money(totalSpent)}
-        </span>
-      </Card> */}
-
-      {/* {paid.length > 0 && (
-        <div className='hidden overflow-hidden rounded-[12px] border border-line lg:block'>
-          <div className='grid grid-cols-[140px_minmax(0,1fr)_150px_150px] gap-x-4 border-b border-line bg-surface px-5 py-3 text-[13px] text-ink-2'>
-            <span>Захиалга</span>
-            <span>Огноо</span>
-            <span>Дүн</span>
-            <span>Төлөв</span>
-          </div>
-          {paid.map((order) => (
-            <div
-              key={order.code}
-              className='grid grid-cols-[140px_minmax(0,1fr)_150px_150px] items-center gap-x-4 border-b border-line px-5 py-3.5 last:border-b-0'
-            >
-              <span className='tnum text-[14px]'>{order.code}</span>
-              <span className='tnum text-[14px] text-ink-2'>
-                {dayLabel(order.createdAt)}
-              </span>
-              <span className='tnum text-[15px]'>
-                {money(order.paidAmount)}
-                {order.refundedAmount > 0 && (
-                  <span className='block text-[13px] text-muted'>
-                    − {money(order.refundedAmount)}
-                  </span>
-                )}
-              </span>
-              <span>
-                <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                  {PAYMENT_LABEL[order.paymentState]}
-                </Badge>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {paid.length === 0 ? (
-        <Empty>Төлбөрийн бичилт алга.</Empty>
-      ) : (
-        <Card className='divide-y divide-line lg:hidden'>
-          {paid.map((order) => (
-            <div key={order.code} className='flex flex-col gap-1.5 p-3.5'>
-              <div className='flex items-start justify-between gap-2'>
-                <div>
-                  <div className='tnum text-[14px]'>{order.code}</div>
-                  <div className='text-[13px] text-muted'>
-                    {dayLabel(order.createdAt)}
-                  </div>
-                </div>
-                <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                  {PAYMENT_LABEL[order.paymentState]}
-                </Badge>
-              </div>
-              <div className='flex items-baseline justify-between gap-2 text-[13px]'>
-                <span className='text-muted'>Төлсөн дүн</span>
-                <span className='tnum'>{money(order.paidAmount)}</span>
-              </div>
-              {order.refundedAmount > 0 && (
-                <div className='flex items-baseline justify-between gap-2 text-[13px]'>
-                  <span className='text-muted'>Буцаасан</span>
-                  <span className='tnum'>− {money(order.refundedAmount)}</span>
-                </div>
-              )}
-              {order.dueAmount > 0 && (
-                <div className='flex items-baseline justify-between gap-2 text-[13px]'>
-                  <span className='text-muted'>Үлдэгдэл</span>
-                  <span className='tnum text-warn'>
-                    {money(order.dueAmount)}
-                  </span>
-                </div>
-              )}
-            </div>
-          ))}
-        </Card>
-      )} */}
-
-      {/* {store && (
-        <p className='mt-3 mb-0 text-[13px] text-muted'>
-          Баримт хэрэгтэй бол <span className='tnum'>{store.phone}</span>{" "}
-          дугаарт хандана уу.
-        </p>
-      )} */}
     </div>
   );
 }
@@ -672,6 +550,25 @@ function InfoTab({ store }: { store: Store | null }) {
             />
           </Field>
         </div>
+      </Card>
+
+      <Card className='flex flex-col gap-3 p-4 lg:gap-4 lg:p-6'>
+        <div className='text-[15px] font-medium'>Буцаалтын данс</div>
+        {me.bank?.accountNumber ? (
+          <div className='flex flex-col gap-1.5 text-[14px]'>
+            <div>{me.bank.name || "Банк сонгоогүй"}</div>
+            <div className='tnum'>{me.bank.accountNumber}</div>
+            <div className='text-ink-2'>{me.bank.accountName || "Дансны нэр алга"}</div>
+            <p className='mb-0 mt-1 text-[13px] text-muted'>
+              Засах бол «Данс» хэсэгт орно уу.
+            </p>
+          </div>
+        ) : (
+          <p className='m-0 text-[13px] text-muted'>
+            Данс хадгалаагүй байна. «Данс» хэсэгт банк, дугаар, нэрээ оруулна уу. Буцаалт энэ
+            данс руу орно.
+          </p>
+        )}
       </Card>
 
       <Card className='flex flex-col gap-3 p-4 lg:gap-4 lg:p-6'>

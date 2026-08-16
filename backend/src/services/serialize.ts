@@ -163,7 +163,7 @@ export function adminProduct(
   };
 }
 
-export function publicOrderItem(item: OrderItem) {
+export function publicOrderItem(item: OrderItem, paidDays?: ReadonlySet<string>) {
   const selections = (() => {
     const fromJson = selectionsOf(item.selections);
     if (Object.keys(fromJson).length > 0) return fromJson;
@@ -179,6 +179,7 @@ export function publicOrderItem(item: OrderItem) {
       : arrived
         ? ('arrived' as const)
         : ('waiting' as const);
+  const refundPayoutOn = item.cancelledAt ? payoutDateForReturn(item.cancelledAt) : null;
   return {
     id: item.id,
     cancelled: item.cancelledAt !== null,
@@ -201,8 +202,25 @@ export function publicOrderItem(item: OrderItem) {
     /** waiting | arrived | handed_over | cancelled */
     itemStatus,
     /** Сар бүрийн 10/20/30 — цуцлагдсан мөрийн буцаалт аль өдөрт орох. */
-    refundPayoutOn: item.cancelledAt ? payoutDateForReturn(item.cancelledAt) : null,
+    refundPayoutOn,
+    /** Админ данс руу шилжүүлснийг баталгаажуулсан. */
+    refundPaid: Boolean(refundPayoutOn && paidDays?.has(refundPayoutOn)),
   };
+}
+
+/** Захиалгын буцаалтын 10/20/30 өдрүүд (давхардалгүй, өсөхөөр). */
+export function refundPayoutDatesFor(input: {
+  items: { cancelledAt: Date | null }[];
+  refunds?: { createdAt: Date }[];
+}): string[] {
+  return [
+    ...new Set([
+      ...input.items
+        .filter((item) => item.cancelledAt)
+        .map((item) => payoutDateForReturn(item.cancelledAt!)),
+      ...(input.refunds ?? []).map((row) => payoutDateForReturn(row.createdAt)),
+    ]),
+  ].sort();
 }
 
 /** Захиалгын хамгийн ойрын буцаалтын 10/20/30. */
@@ -210,13 +228,20 @@ export function refundPayoutOnFor(input: {
   items: { cancelledAt: Date | null }[];
   refunds?: { createdAt: Date }[];
 }): string | null {
-  const dates = [
-    ...input.items
-      .filter((item) => item.cancelledAt)
-      .map((item) => payoutDateForReturn(item.cancelledAt!)),
-    ...(input.refunds ?? []).map((row) => payoutDateForReturn(row.createdAt)),
-  ].sort();
-  return dates[0] ?? null;
+  return refundPayoutDatesFor(input)[0] ?? null;
+}
+
+/** Төлөгдөөгүй хамгийн ойрын өдөр; бүгд орсон бол сүүлийн өдөр + paid. */
+export function refundPayoutStatus(
+  dates: string[],
+  paidDays: ReadonlySet<string>,
+): { refundPayoutOn: string | null; refundPaid: boolean } {
+  if (dates.length === 0) return { refundPayoutOn: null, refundPaid: false };
+  const unpaid = dates.filter((day) => !paidDays.has(day));
+  if (unpaid.length === 0) {
+    return { refundPayoutOn: dates[dates.length - 1]!, refundPaid: true };
+  }
+  return { refundPayoutOn: unpaid[0]!, refundPaid: false };
 }
 
 function normalizeLegacy(size: string | null, color: string | null): Record<string, string> {

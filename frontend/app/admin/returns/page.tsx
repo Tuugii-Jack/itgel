@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Metric, PageHead, Select, Table, Td, Th } from "@/components/admin/shared";
-import { Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
+import { useAdminSession } from "@/lib/admin-session";
+import { isFullAdmin } from "@/lib/admin-role";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayKey, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
@@ -57,6 +59,8 @@ function groupProducts(rows: ReturnProduct[]): {
 }
 
 export default function AdminReturnsPage() {
+  const { user } = useAdminSession();
+  const canWrite = isFullAdmin(user?.role);
   const today = useMemo(() => new Date(), []);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -69,6 +73,9 @@ export default function AdminReturnsPage() {
   const [error, setError] = useState<string | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [printOpts, setPrintOpts] = useState<ReturnsPrintOptions>(DEFAULT_RETURNS_PRINT);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [ask, setAsk] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const years = useMemo(() => {
     const list: number[] = [];
@@ -123,6 +130,8 @@ export default function AdminReturnsPage() {
   }, []);
 
   useEffect(() => {
+    setChecked(new Set());
+    setAsk(false);
     void loadList(selected);
   }, [selected, loadList]);
 
@@ -141,12 +150,45 @@ export default function AdminReturnsPage() {
 
   const missingBank = data?.payouts.filter((p) => !p.bankAccountNumber.trim()).length ?? 0;
   const grouped = useMemo(() => groupProducts(data?.products ?? []), [data]);
+  const unpaidPayouts = data?.payouts.filter((p) => !p.paid) ?? [];
+
+  const toggleChecked = (customerId: string) => {
+    setAsk(false);
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(customerId)) next.delete(customerId);
+      else next.add(customerId);
+      return next;
+    });
+  };
+
+  const toggleAllUnpaid = (on: boolean) => {
+    setAsk(false);
+    setChecked(on ? new Set(unpaidPayouts.map((p) => p.customerId)) : new Set());
+  };
+
+  const confirmPaid = async () => {
+    const ids = [...checked].filter((id) => unpaidPayouts.some((p) => p.customerId === id));
+    if (ids.length === 0 || selected.length === 0) return;
+    setConfirming(true);
+    setError(null);
+    try {
+      const next = await adminApi.confirmReturnPayouts(selected, ids);
+      setData(next);
+      setChecked(new Set());
+      setAsk(false);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Баталгаажуулж чадсангүй.");
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   return (
     <div>
       <PageHead
         title="Буцаалт"
-        hint="10-оос өмнө буцаасан нь 10-нд, 20-оос өмнө нь 20-нд, 30-аас өмнө нь 30-нд орно. Хэрэглэгчид ч мөн тэр өдрийг харна."
+        hint="Данс руу шилжүүлсний дараа хэрэглэгчийг тэмдэглээд Тийм дарна. Тэгвэл хэрэглэгчид «Буцаалт орсон» гэж харагдана."
         actions={
           <Button
             size="sm"
@@ -301,8 +343,16 @@ export default function AdminReturnsPage() {
             <Metric
               label="Хэрэглэгч"
               value={data.summary.customerCount}
-              sub={missingBank > 0 ? `${missingBank} дансгүй` : undefined}
-              tone={missingBank > 0 ? "warn" : "info"}
+              sub={
+                missingBank > 0
+                  ? `${missingBank} дансгүй`
+                  : data.summary.unpaidCustomerCount
+                    ? `${data.summary.unpaidCustomerCount} шилжүүлээгүй`
+                    : data.payouts.some((p) => p.paid)
+                      ? "бүгд орсон"
+                      : undefined
+              }
+              tone={missingBank > 0 || (data.summary.unpaidCustomerCount ?? 0) > 0 ? "warn" : "info"}
             />
           </div>
 
@@ -360,7 +410,54 @@ export default function AdminReturnsPage() {
           ) : data.payouts.length === 0 ? (
             <Empty>Сонгосон өдөрт хэрэглэгч алга.</Empty>
           ) : (
-            <PayoutTable rows={data.payouts} />
+            <>
+              <PayoutTable
+                rows={data.payouts}
+                canWrite={canWrite}
+                checked={checked}
+                onToggle={toggleChecked}
+                onToggleAll={toggleAllUnpaid}
+              />
+              {canWrite && unpaidPayouts.length > 0 && (
+                <Card className="mt-3 p-4">
+                  {ask ? (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-[14px]">
+                        Сонгосон {checked.size} хэрэглэгчийн данс руу мөнгө шилжүүлсэн үү?
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={confirming}
+                          onClick={() => setAsk(false)}
+                        >
+                          Үгүй
+                        </Button>
+                        <Button size="sm" loading={confirming} onClick={() => void confirmPaid()}>
+                          Тийм
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-[13px] text-ink-2">
+                        {checked.size > 0
+                          ? `${checked.size} хэрэглэгч сонгосон — шилжүүлсний дараа Тийм дарна.`
+                          : "Шилжүүлсэн хэрэглэгчийг тэмдэглээд Тийм дарна. Хэрэглэгчид «Буцаалт орсон» гэж харагдана."}
+                      </div>
+                      <Button
+                        size="sm"
+                        disabled={checked.size === 0}
+                        onClick={() => setAsk(true)}
+                      >
+                        Тийм
+                      </Button>
+                    </div>
+                  )}
+                </Card>
+              )}
+            </>
           )}
         </>
       ) : null}
@@ -368,17 +465,43 @@ export default function AdminReturnsPage() {
   );
 }
 
-function PayoutTable({ rows }: { rows: ReturnPayout[] }) {
+function PayoutTable({
+  rows,
+  canWrite,
+  checked,
+  onToggle,
+  onToggleAll,
+}: {
+  rows: ReturnPayout[];
+  canWrite: boolean;
+  checked: Set<string>;
+  onToggle: (customerId: string) => void;
+  onToggleAll: (on: boolean) => void;
+}) {
+  const unpaid = rows.filter((row) => !row.paid);
+  const allChecked = unpaid.length > 0 && unpaid.every((row) => checked.has(row.customerId));
   return (
     <Table>
       <thead>
         <tr>
+          {canWrite && (
+            <Th className="w-10">
+              {unpaid.length > 0 ? (
+                <input
+                  type="checkbox"
+                  aria-label="Бүгдийг сонгох"
+                  checked={allChecked}
+                  onChange={(e) => onToggleAll(e.target.checked)}
+                />
+              ) : null}
+            </Th>
+          )}
           <Th>Хэрэглэгч</Th>
           <Th>Банк</Th>
           <Th>Данс эзэмшигч</Th>
           <Th>Дансны дугаар</Th>
-          <Th>Дансны дугаар</Th>
           <Th className="text-right">Дүн</Th>
+          <Th>Төлөв</Th>
         </tr>
       </thead>
       <tbody>
@@ -386,7 +509,19 @@ function PayoutTable({ rows }: { rows: ReturnPayout[] }) {
           const account = row.bankAccountNumber.trim() || "—";
           const missing = !row.bankAccountNumber.trim();
           return (
-            <tr key={row.customerId}>
+            <tr key={row.customerId} className={checked.has(row.customerId) ? "bg-surface" : ""}>
+              {canWrite && (
+                <Td>
+                  {row.paid ? null : (
+                    <input
+                      type="checkbox"
+                      aria-label={`${row.name ?? row.email} сонгох`}
+                      checked={checked.has(row.customerId)}
+                      onChange={() => onToggle(row.customerId)}
+                    />
+                  )}
+                </Td>
+              )}
               <Td>
                 <div className="font-medium">{row.name?.trim() || "Нэргүй"}</div>
                 <div className="text-[12px] text-muted">{phoneLabel(row.phone)}</div>
@@ -394,8 +529,10 @@ function PayoutTable({ rows }: { rows: ReturnPayout[] }) {
               <Td>{row.bankName.trim() || "—"}</Td>
               <Td>{row.bankAccountName.trim() || "—"}</Td>
               <Td className={`tnum font-medium ${missing ? "text-danger" : ""}`}>{account}</Td>
-              <Td className={`tnum font-medium ${missing ? "text-danger" : ""}`}>{account}</Td>
               <Td className="tnum text-right">{money(row.amount)}</Td>
+              <Td>
+                {row.paid ? <Badge tone="ok">Орсон</Badge> : <Badge tone="warn">Хүлээгдэж</Badge>}
+              </Td>
             </tr>
           );
         })}

@@ -1,9 +1,11 @@
 import { prisma } from '../prisma.js';
+import { audit } from '../lib/audit.js';
 import {
   payoutDateForReturn,
   payoutDaysInMonth,
   payoutWindow,
 } from '../lib/date.js';
+import { badRequest } from '../lib/errors.js';
 import { itemSelections, variantKey } from '../lib/options.js';
 
 export type ReturnCalendarDay = {
@@ -36,6 +38,9 @@ export type ReturnPayout = {
   amount: number;
   qty: number;
   orderCodes: string[];
+  /** Админ данс руу шилжүүлснийг баталгаажуулсан эсэх. */
+  paid: boolean;
+  paidAt: string | null;
 };
 
 function rangesForDays(days: string[]): { gte: Date; lte: Date }[] {
@@ -109,7 +114,10 @@ function productsForRefund(note: string | null, items: ItemRow[]): ItemRow[] {
 }
 
 type ProductAgg = ReturnProduct & { orders: Set<string>; customers: Set<string> };
-type PayoutAgg = ReturnPayout & { codes: Set<string> };
+type PayoutAgg = Omit<ReturnPayout, 'paid' | 'paidAt' | 'orderCodes'> & {
+  codes: Set<string>;
+  days: Set<string>;
+};
 
 function addProduct(
   products: Map<string, ProductAgg>,
@@ -148,6 +156,7 @@ function addPayout(
   amount: number,
   qty: number,
   orderCode: string,
+  payoutDay: string,
 ): void {
   if (amount <= 0 && qty <= 0) return;
   const payout = payouts.get(customer.id) ?? {
@@ -160,12 +169,13 @@ function addPayout(
     bankAccountName: customer.bankAccountName,
     amount: 0,
     qty: 0,
-    orderCodes: [],
     codes: new Set<string>(),
+    days: new Set<string>(),
   };
   payout.amount += amount;
   payout.qty += qty;
   payout.codes.add(orderCode);
+  payout.days.add(payoutDay);
   payouts.set(customer.id, payout);
 }
 
@@ -179,8 +189,9 @@ function finalize(products: Map<string, ProductAgg>, payouts: Map<string, Payout
     .sort((a, b) => a.name.localeCompare(b.name, 'mn') || b.qty - a.qty);
 
   const payoutRows = [...payouts.values()]
-    .map(({ codes, ...row }) => ({
+    .map(({ codes, days, ...row }) => ({
       ...row,
+      days,
       orderCodes: [...codes].sort(),
     }))
     .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email, 'mn'));
@@ -296,7 +307,13 @@ export async function listReturns(days: string[]): Promise<{
   days: string[];
   products: ReturnProduct[];
   payouts: ReturnPayout[];
-  summary: { qty: number; amount: number; productCount: number; customerCount: number };
+  summary: {
+    qty: number;
+    amount: number;
+    productCount: number;
+    customerCount: number;
+    unpaidCustomerCount: number;
+  };
 }> {
   const uniqueDays = [...new Set(days)].sort();
   if (uniqueDays.length === 0) {
@@ -304,7 +321,7 @@ export async function listReturns(days: string[]): Promise<{
       days: [],
       products: [],
       payouts: [],
-      summary: { qty: 0, amount: 0, productCount: 0, customerCount: 0 },
+      summary: { qty: 0, amount: 0, productCount: 0, customerCount: 0, unpaidCustomerCount: 0 },
     };
   }
 
@@ -320,6 +337,7 @@ export async function listReturns(days: string[]): Promise<{
       select: {
         amount: true,
         note: true,
+        createdAt: true,
         order: {
           select: {
             id: true,
@@ -366,10 +384,131 @@ export async function listReturns(days: string[]): Promise<{
     for (const item of linked) {
       addProduct(products, seenItems, item, refund.order.id, refund.order.customer.id);
     }
-    addPayout(payouts, refund.order.customer, refund.amount, qty, refund.order.code);
+    addPayout(
+      payouts,
+      refund.order.customer,
+      refund.amount,
+      qty,
+      refund.order.code,
+      payoutDateForReturn(refund.createdAt),
+    );
   }
 
-  const { products: productRows, payouts: payoutRows, summary } = finalize(products, payouts);
+  const { products: productRows, payouts: payoutDrafts, summary } = finalize(products, payouts);
+  const payoutRows = await attachPaid(payoutDrafts, uniqueDays);
 
-  return { days: uniqueDays, products: productRows, payouts: payoutRows, summary };
+  return {
+    days: uniqueDays,
+    products: productRows,
+    payouts: payoutRows,
+    summary: {
+      ...summary,
+      unpaidCustomerCount: payoutRows.filter((row) => !row.paid).length,
+    },
+  };
+}
+
+type PayoutDraft = Omit<ReturnPayout, 'paid' | 'paidAt'> & { days: Set<string> };
+
+async function attachPaid(payouts: PayoutDraft[], selectedDays: string[]): Promise<ReturnPayout[]> {
+  if (payouts.length === 0) return [];
+  const confirms = await prisma.refundPayout.findMany({
+    where: {
+      customerId: { in: payouts.map((row) => row.customerId) },
+      payoutDay: { in: selectedDays },
+    },
+    select: { customerId: true, payoutDay: true, paidAt: true },
+  });
+  const paidAtByKey = new Map(
+    confirms.map((row) => [`${row.customerId}:${row.payoutDay}`, row.paidAt] as const),
+  );
+  return payouts.map(({ days, ...row }) => {
+    const relevant = selectedDays.filter((day) => days.has(day));
+    const times = relevant
+      .map((day) => paidAtByKey.get(`${row.customerId}:${day}`))
+      .filter((at): at is Date => Boolean(at));
+    const paid = relevant.length > 0 && times.length === relevant.length;
+    const latest = times.sort((a, b) => a.getTime() - b.getTime()).at(-1) ?? null;
+    return {
+      ...row,
+      paid,
+      paidAt: latest ? latest.toISOString() : null,
+    };
+  });
+}
+
+/** Хэрэглэгчийн аль 10/20/30-нд мөнгө орсон бэ. */
+export async function paidPayoutDaySet(
+  customerId: string,
+  days: string[],
+): Promise<Set<string>> {
+  const unique = [...new Set(days.filter(Boolean))];
+  if (unique.length === 0) return new Set();
+  const rows = await prisma.refundPayout.findMany({
+    where: { customerId, payoutDay: { in: unique } },
+    select: { payoutDay: true },
+  });
+  return new Set(rows.map((row) => row.payoutDay));
+}
+
+/** Админ данс руу шилжүүлснийг баталгаажуулна — хэрэглэгчид «Буцаалт орсон». */
+export async function confirmRefundPayouts(
+  days: string[],
+  customerIds: string[],
+  actor: string,
+): Promise<{
+  days: string[];
+  products: ReturnProduct[];
+  payouts: ReturnPayout[];
+  summary: {
+    qty: number;
+    amount: number;
+    productCount: number;
+    customerCount: number;
+    unpaidCustomerCount: number;
+  };
+}> {
+  const uniqueDays = [...new Set(days)].sort();
+  const wanted = new Set(customerIds.filter(Boolean));
+  if (wanted.size === 0) throw badRequest('Хэрэглэгч сонгоно уу.');
+  if (uniqueDays.length === 0) throw badRequest('Буцаалтын өдөр сонгоно уу.');
+
+  const ops: { customerId: string; payoutDay: string; amount: number }[] = [];
+  for (const day of uniqueDays) {
+    const list = await listReturns([day]);
+    for (const row of list.payouts) {
+      if (!wanted.has(row.customerId)) continue;
+      ops.push({ customerId: row.customerId, payoutDay: day, amount: row.amount });
+    }
+  }
+  if (ops.length === 0) {
+    throw badRequest('Сонгосон өдөрт эдгээр хэрэглэгчийн шилжүүлэх буцаалт алга.');
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const op of ops) {
+      await tx.refundPayout.upsert({
+        where: { customerId_payoutDay: { customerId: op.customerId, payoutDay: op.payoutDay } },
+        create: {
+          customerId: op.customerId,
+          payoutDay: op.payoutDay,
+          amount: op.amount,
+          actor,
+        },
+        update: {},
+      });
+    }
+    await audit(
+      {
+        actor,
+        action: 'UPDATE',
+        entity: 'RefundPayout',
+        entityId: uniqueDays.join(','),
+        after: { days: uniqueDays, customerIds: [...wanted], count: ops.length },
+      },
+      tx,
+    );
+  });
+
+  return listReturns(uniqueDays);
 }

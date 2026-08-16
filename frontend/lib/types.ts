@@ -318,6 +318,8 @@ export interface OrderItem {
   itemStatus: "waiting" | "arrived" | "handed_over" | "cancelled";
   /** Сар бүрийн 10/20/30 — YYYY-MM-DD. Цуцлаагүй бол null. */
   refundPayoutOn?: string | null;
+  /** Админ данс руу шилжүүлснийг баталгаажуулсан. */
+  refundPaid?: boolean;
 }
 
 export interface TimelineStep {
@@ -390,6 +392,8 @@ export interface PublicOrder {
   items: OrderItem[];
   /** Захиалгын хамгийн ойрын буцаалтын 10/20/30. */
   refundPayoutOn?: string | null;
+  /** Админ данс руу шилжүүлснийг баталгаажуулсан. */
+  refundPaid?: boolean;
   batch: BatchSummary | null;
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
@@ -413,6 +417,7 @@ export interface MyOrder {
   itemCount: number;
   items: OrderItem[];
   refundPayoutOn?: string | null;
+  refundPaid?: boolean;
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
   createdAt: string;
@@ -829,6 +834,12 @@ export interface AdminCustomer {
     khoroo: string | null;
     addressText: string | null;
   };
+  bank?: {
+    name: string;
+    accountNumber: string;
+    accountName: string;
+    defaultPayout: boolean;
+  };
   notifications?: {
     payment: boolean;
     arrival: boolean;
@@ -1019,6 +1030,7 @@ export interface ReturnsList {
     amount: number;
     productCount: number;
     customerCount: number;
+    unpaidCustomerCount?: number;
   };
 }
 
@@ -1045,6 +1057,9 @@ export interface ReturnPayout {
   amount: number;
   qty: number;
   orderCodes: string[];
+  /** Админ данс руу шилжүүлснийг баталгаажуулсан. */
+  paid: boolean;
+  paidAt: string | null;
 }
 
 export interface ArchiveDay {

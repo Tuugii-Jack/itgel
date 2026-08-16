@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ProductImage } from "@/components/ProductImage";
+import { ShopPrice } from "@/components/ShopPrice";
 import {
   PRODUCT_STATUS_LABEL,
   PRODUCT_STATUS_TONE,
@@ -91,7 +92,7 @@ export function StorefrontCard({
 
         <div className="flex items-baseline gap-2">
           <span className="tnum text-[18px] font-medium">
-            {priceLabel(round.price, round.priceMax)}
+            <ShopPrice>{priceLabel(round.price, round.priceMax)}</ShopPrice>
           </span>
         </div>
 

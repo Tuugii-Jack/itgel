@@ -229,7 +229,8 @@ model Customer {
   bankAccountName   String  @default("")
   defaultPayoutBank Boolean @default(false)
 
-  orders Order[]
+  orders        Order[]
+  refundPayouts RefundPayout[]
 }
 
 model EmailOtp {
@@ -476,6 +477,21 @@ model Setting {
   storageFeePerDay  Int    @default(1000)
 
   updatedAt DateTime @updatedAt
+}
+
+/// Админ буцаалтын мөнгийг хэрэглэгчийн данс руу шилжүүлсний баталгаа (10/20/30).
+model RefundPayout {
+  id         String   @id @default(cuid())
+  customerId String
+  /// YYYY-MM-DD — сарын 10, 20, 30 (богино сард сарын сүүл).
+  payoutDay  String
+  amount     Int
+  paidAt     DateTime @default(now())
+  actor      String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, payoutDay])
+  @@index([payoutDay])
 }
 
 model AuditLog {

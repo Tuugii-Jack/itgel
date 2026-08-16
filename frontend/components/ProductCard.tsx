@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
+import { ShopPrice } from "@/components/ShopPrice";
 import { Badge, Button, Divider } from "@/components/ui";
 import { useCart } from "@/lib/cart";
 import { countdown } from "@/lib/format";
@@ -48,7 +49,7 @@ export function ProductCard({ product }: { product: Product }) {
         </Link>
 
         <div className='tnum text-[18px] font-medium'>
-          {priceLabel(product.price, product.priceMax)}
+          <ShopPrice>{priceLabel(product.price, product.priceMax)}</ShopPrice>
         </div>
 
         {!isOrder && (

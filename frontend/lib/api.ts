@@ -1170,6 +1170,13 @@ export const adminApi = {
       query: { days: days.join(",") },
     }).then((r) => r.data),
 
+  confirmReturnPayouts: (days: string[], customerIds: string[]) =>
+    request<ReturnsList>("/admin/returns/payouts", {
+      ...adminAuth,
+      method: "POST",
+      body: { days, customerIds },
+    }).then((r) => r.data),
+
   customers: (query?: Query) =>
     request<AdminCustomer[]>("/admin/customers", { ...adminAuth, query }),
 
@@ -1214,6 +1221,9 @@ export const adminApi = {
       notifyPayment: boolean;
       notifyArrival: boolean;
       notifyPromo: boolean;
+      bankName: string | null;
+      bankAccountNumber: string | null;
+      bankAccountName: string | null;
     }>,
   ) =>
     request<AdminCustomer>(`/admin/customers/${id}`, {

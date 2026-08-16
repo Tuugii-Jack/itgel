@@ -19,8 +19,10 @@ import {
   orderStatusLabel,
   publicDelivery,
   publicOrderItem,
-  refundPayoutOnFor,
+  refundPayoutDatesFor,
+  refundPayoutStatus,
 } from "../../services/serialize.js";
+import { paidPayoutDaySet } from "../../services/returns.js";
 import { mailTemplates, sendMail } from "../../services/mail.js";
 import { ipLimiters, RateLimiter } from "../../lib/rateLimit.js";
 import { randomInt } from "node:crypto";
@@ -103,7 +105,7 @@ const patchBody = z.object({
   defaultPayoutBank: z.boolean().optional(),
 });
 
-/** PATCH /api/me — нэр, утас, хаяг, мэдэгдэл (OTPгүй). */
+/** PATCH /api/me — нэр, хаяг, мэдэгдэл, буцаалтын данс. */
 publicMeRouter.patch(
   "/",
   validate({ body: patchBody }),
@@ -118,14 +120,14 @@ publicMeRouter.patch(
     const customer = await prisma.customer.update({
       where: { id: req.auth!.sub },
       data: {
-        name: body.name,
-        phone: body.phone,
-        district: body.district,
-        khoroo: body.khoroo,
-        addressText: body.addressText,
-        notifyPayment: body.notifyPayment,
-        notifyArrival: body.notifyArrival,
-        notifyPromo: body.notifyPromo,
+        ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.phone !== undefined ? { phone: body.phone } : {}),
+        ...(body.district !== undefined ? { district: body.district } : {}),
+        ...(body.khoroo !== undefined ? { khoroo: body.khoroo } : {}),
+        ...(body.addressText !== undefined ? { addressText: body.addressText } : {}),
+        ...(body.notifyPayment !== undefined ? { notifyPayment: body.notifyPayment } : {}),
+        ...(body.notifyArrival !== undefined ? { notifyArrival: body.notifyArrival } : {}),
+        ...(body.notifyPromo !== undefined ? { notifyPromo: body.notifyPromo } : {}),
         ...(body.bankName !== undefined ? { bankName: body.bankName ?? "" } : {}),
         ...(body.bankAccountNumber !== undefined
           ? { bankAccountNumber: body.bankAccountNumber ?? "" }
@@ -133,7 +135,9 @@ publicMeRouter.patch(
         ...(body.bankAccountName !== undefined
           ? { bankAccountName: body.bankAccountName ?? "" }
           : {}),
-        defaultPayoutBank: body.defaultPayoutBank,
+        ...(body.defaultPayoutBank !== undefined
+          ? { defaultPayoutBank: body.defaultPayoutBank }
+          : {}),
       },
     });
     res.json({ data: serializeCustomer(customer) });
@@ -279,34 +283,46 @@ publicMeRouter.get(
       }),
     ]);
 
+    const paidDays = await paidPayoutDaySet(
+      req.auth!.sub,
+      orders.flatMap((order) =>
+        refundPayoutDatesFor({ items: order.items, refunds: order.payments }),
+      ),
+    );
+
     res.json({
-      data: orders.map((order) => ({
-        code: order.code,
-        status: order.status,
-        statusLabel: orderStatusLabel(order.status),
-        subtotal: order.subtotal,
-        deliveryFee: order.deliveryFee,
-        storageFee: order.storageFee,
-        cargoFee: order.cargoFee,
-        cargoPayMethod:
-          order.cargoPayMethod === "CASH" || order.cargoPayMethod === "QPAY"
-            ? order.cargoPayMethod
-            : null,
-        paidAmount: order.paidAmount,
-        refundedAmount: order.refundedAmount,
-        dueAmount: order.dueAmount,
-        paymentState: paymentState(computeTotals(order)),
-        fulfilment: order.fulfilment,
-        canChooseFulfilment:
-          order.status === "ARRIVED" && order.fulfilment === null,
-        itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
-        items: order.items.map(publicOrderItem),
-        refundPayoutOn: refundPayoutOnFor({ items: order.items, refunds: order.payments }),
-        delivery: publicDelivery(order.delivery),
-        timeline: buildTimeline(order),
-        createdAt: order.createdAt.toISOString(),
-        handedOverAt: toIso(order.handedOverAt),
-      })),
+      data: orders.map((order) => {
+        const dates = refundPayoutDatesFor({ items: order.items, refunds: order.payments });
+        const refund = refundPayoutStatus(dates, paidDays);
+        return {
+          code: order.code,
+          status: order.status,
+          statusLabel: orderStatusLabel(order.status),
+          subtotal: order.subtotal,
+          deliveryFee: order.deliveryFee,
+          storageFee: order.storageFee,
+          cargoFee: order.cargoFee,
+          cargoPayMethod:
+            order.cargoPayMethod === "CASH" || order.cargoPayMethod === "QPAY"
+              ? order.cargoPayMethod
+              : null,
+          paidAmount: order.paidAmount,
+          refundedAmount: order.refundedAmount,
+          dueAmount: order.dueAmount,
+          paymentState: paymentState(computeTotals(order)),
+          fulfilment: order.fulfilment,
+          canChooseFulfilment:
+            order.status === "ARRIVED" && order.fulfilment === null,
+          itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
+          items: order.items.map((item) => publicOrderItem(item, paidDays)),
+          refundPayoutOn: refund.refundPayoutOn,
+          refundPaid: refund.refundPaid,
+          delivery: publicDelivery(order.delivery),
+          timeline: buildTimeline(order),
+          createdAt: order.createdAt.toISOString(),
+          handedOverAt: toIso(order.handedOverAt),
+        };
+      }),
       meta: {
         total,
         page: q.page,

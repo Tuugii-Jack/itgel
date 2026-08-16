@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
+import { BankAccountFields } from "@/components/BankAccountFields";
 import { LocationFields } from "@/components/LocationFields";
 import {
   Metric,
@@ -338,6 +339,9 @@ function CustomerDetailView({
   const [district, setDistrict] = useState("");
   const [khoroo, setKhoroo] = useState("");
   const [addressText, setAddressText] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankAccountName, setBankAccountName] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -352,6 +356,9 @@ function CustomerDetailView({
       setDistrict(detail.address?.district ?? "");
       setKhoroo(detail.address?.khoroo ?? "");
       setAddressText(detail.address?.addressText ?? "");
+      setBankName(detail.bank?.name ?? "");
+      setBankAccountNumber(detail.bank?.accountNumber ?? "");
+      setBankAccountName(detail.bank?.accountName ?? "");
       setPassword("");
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
@@ -375,6 +382,9 @@ function CustomerDetailView({
         district: district.trim() || null,
         khoroo: khoroo.trim() || null,
         addressText: addressText.trim() || null,
+        bankName: bankName.trim() || null,
+        bankAccountNumber: bankAccountNumber.trim() || null,
+        bankAccountName: bankAccountName.trim() || null,
         ...(password.trim() ? { password: password.trim() } : {}),
       });
       toast.success("Хэрэглэгч хадгалагдлаа.");
@@ -468,6 +478,18 @@ function CustomerDetailView({
               khoroo={khoroo}
               onKhorooChange={setKhoroo}
               readOnly={!canWrite}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <div className="mb-2 text-[13px] text-ink-2">Буцаалтын данс</div>
+            <BankAccountFields
+              bankName={bankName}
+              accountNumber={bankAccountNumber}
+              accountName={bankAccountName}
+              onBankName={setBankName}
+              onAccountNumber={setBankAccountNumber}
+              onAccountName={setBankAccountName}
+              disabled={!canWrite}
             />
           </div>
           {canWrite && (

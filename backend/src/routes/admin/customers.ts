@@ -44,6 +44,10 @@ function serializeAdminCustomer(customer: {
   notifyPayment: boolean;
   notifyArrival: boolean;
   notifyPromo: boolean;
+  bankName: string;
+  bankAccountNumber: string;
+  bankAccountName: string;
+  defaultPayoutBank: boolean;
   createdAt: Date;
 }) {
   return {
@@ -62,6 +66,12 @@ function serializeAdminCustomer(customer: {
       payment: customer.notifyPayment,
       arrival: customer.notifyArrival,
       promo: customer.notifyPromo,
+    },
+    bank: {
+      name: customer.bankName,
+      accountNumber: customer.bankAccountNumber,
+      accountName: customer.bankAccountName,
+      defaultPayout: customer.defaultPayoutBank,
     },
     createdAt: customer.createdAt.toISOString(),
   };
@@ -215,7 +225,7 @@ adminCustomersRouter.get(
           subtotal: order.subtotal,
           dueAmount: order.dueAmount,
           fulfilment: order.fulfilment,
-          items: order.items.map(publicOrderItem),
+          items: order.items.map((item) => publicOrderItem(item)),
           createdAt: order.createdAt.toISOString(),
         })),
       },
@@ -239,6 +249,9 @@ adminCustomersRouter.patch(
       notifyPayment: z.boolean().optional(),
       notifyArrival: z.boolean().optional(),
       notifyPromo: z.boolean().optional(),
+      bankName: z.string().trim().max(80).nullable().optional(),
+      bankAccountNumber: z.string().trim().max(40).nullable().optional(),
+      bankAccountName: z.string().trim().max(80).nullable().optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -255,6 +268,9 @@ adminCustomersRouter.patch(
       notifyPayment?: boolean;
       notifyArrival?: boolean;
       notifyPromo?: boolean;
+      bankName?: string | null;
+      bankAccountNumber?: string | null;
+      bankAccountName?: string | null;
     };
 
     const existing = await prisma.customer.findUnique({ where: { id } });
@@ -282,7 +298,10 @@ adminCustomersRouter.patch(
       body.addressText === undefined &&
       body.notifyPayment === undefined &&
       body.notifyArrival === undefined &&
-      body.notifyPromo === undefined
+      body.notifyPromo === undefined &&
+      body.bankName === undefined &&
+      body.bankAccountNumber === undefined &&
+      body.bankAccountName === undefined
     ) {
       throw badRequest('Өөрчлөх талбар алга.');
     }
@@ -299,6 +318,13 @@ adminCustomersRouter.patch(
         ...(body.notifyPayment !== undefined ? { notifyPayment: body.notifyPayment } : {}),
         ...(body.notifyArrival !== undefined ? { notifyArrival: body.notifyArrival } : {}),
         ...(body.notifyPromo !== undefined ? { notifyPromo: body.notifyPromo } : {}),
+        ...(body.bankName !== undefined ? { bankName: body.bankName ?? "" } : {}),
+        ...(body.bankAccountNumber !== undefined
+          ? { bankAccountNumber: body.bankAccountNumber ?? "" }
+          : {}),
+        ...(body.bankAccountName !== undefined
+          ? { bankAccountName: body.bankAccountName ?? "" }
+          : {}),
         ...(body.password !== undefined
           ? { passwordHash: await bcrypt.hash(body.password, BCRYPT_ROUNDS) }
           : {}),

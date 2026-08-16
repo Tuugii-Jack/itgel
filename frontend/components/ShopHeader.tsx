@@ -5,11 +5,14 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui";
 import { api } from "@/lib/api";
+import { useSession } from "@/lib/session";
 import type { Store } from "@/lib/types";
 
 export function ShopHeader() {
+  const { me } = useSession();
   const [store, setStore] = useState<Store | null>(null);
   const hidden = useHideOnScroll(500);
+  const displayName = me?.name?.trim() || "";
 
   useEffect(() => {
     api
@@ -65,14 +68,14 @@ export function ShopHeader() {
 
       {/* Right side */}
       <div className='ml-auto flex items-center gap-2 lg:gap-4'>
-        {store?.phone && (
-          <a
-            href={`tel:${store.phone.replace(/\D/g, "")}`}
-            className='tnum hidden h-10 items-center rounded-[8px] px-3 text-[14px] text-ink-2 no-underline transition-colors hover:text-primary lg:h-11 lg:text-[15px] xl:inline-flex xl:h-12'
+        {displayName ? (
+          <Link
+            href='/profile'
+            className='max-w-[120px] truncate text-[13px] font-medium text-ink no-underline transition-colors hover:text-primary sm:max-w-[180px] sm:text-[14px] lg:text-[15px]'
           >
-            {store.phone}
-          </a>
-        )}
+            {displayName}
+          </Link>
+        ) : null}
 
         <Link href='/profile' className='no-underline'>
           <Button
