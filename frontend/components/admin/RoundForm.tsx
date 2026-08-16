@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import { Calendar } from "@/components/shadcn/calendar";
 import { OptionPriceEditor, seedOptionPriceDrafts } from "@/components/admin/OptionPriceEditor";
-import { Badge, Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
+import { Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { dayTimeLabel, datetimeLocalKey, fromDatetimeLocal, money } from "@/lib/format";
+import { dayTimeLabel, datetimeLocalKey, fromDatetimeLocal } from "@/lib/format";
 import { pricedOptionName } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminBatch, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
@@ -62,12 +62,10 @@ export function RoundForm({
 }) {
   const base = round ?? product.currentRound;
 
-  const [costPrice, setCostPrice] = useState(String(base?.costPrice ?? ""));
   const [sellPrice, setSellPrice] = useState(String(base?.sellPrice ?? ""));
   const [optionRows, setOptionRows] = useState(() =>
     seedOptionPriceDrafts(product.options, (round ?? product.currentRound)?.optionPrices, {
       sell: String(base?.sellPrice ?? ""),
-      cost: String(base?.costPrice ?? ""),
     }),
   );
   const [stock, setStock] = useState(String(round?.stock ?? 0));
@@ -93,10 +91,7 @@ export function RoundForm({
       .catch(() => undefined);
   }, []);
 
-  const cost = Number(costPrice) || 0;
   const sell = Number(sellPrice) || 0;
-  const profit = sell - cost;
-  const margin = sell > 0 ? Math.round((profit / sell) * 100) : 0;
   const hasOptions = (product.options?.length ?? 0) > 0;
   const primaryKind = pricedOptionName(product.options);
   const primaryRows = optionRows.filter((r) => r.kind === primaryKind);
@@ -107,7 +102,7 @@ export function RoundForm({
       kind: r.kind,
       value: r.value,
       sellPrice: Number(r.sell) || 0,
-      costPrice: Number(r.cost) || 0,
+      costPrice: 0,
     }));
   const canSave = primaryPriced && (sell > 0 || optionPrices.length > 0);
 
@@ -143,12 +138,8 @@ export function RoundForm({
           : optionPrices.length
             ? Math.min(...optionPrices.map((p) => p.sellPrice))
             : 0;
-      const derivedCost =
-        cost > 0
-          ? cost
-          : optionPrices.find((p) => p.sellPrice === derivedSell)?.costPrice ?? 0;
       const body = {
-        costPrice: derivedCost,
+        costPrice: 0,
         sellPrice: derivedSell,
         stock: isOrder ? 0 : Number(stock) || 0,
         closeAt: isOrder && closeAt ? fromDatetimeLocal(closeAt) : null,
@@ -238,34 +229,16 @@ export function RoundForm({
             <div className="text-[15px] font-medium">Үнэ</div>
             <p className="m-0 text-[13px] text-ink-2">
               {hasOptions
-                ? "Доорх хүснэгтэд хэмжээ/сонголт бүрийн үнийг тавина. Дээрх нь үндсэн үнэ."
-                : "Энэ гаргалтын өртөг болон зарах үнэ."}
+                ? "Доорх хүснэгтэд хэмжээ/сонголт бүрийн зарах үнийг тавина."
+                : "Энэ гаргалтын зарах үнэ."}
             </p>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Анхны үнэ (өртөг)">
-                <Input
-                  value={costPrice}
-                  onChange={(v) => setCostPrice(v.replace(/\D/g, ""))}
-                  inputMode="numeric"
-                />
-              </Field>
-              <Field label="Зарах үнэ">
-                <Input
-                  value={sellPrice}
-                  onChange={(v) => setSellPrice(v.replace(/\D/g, ""))}
-                  inputMode="numeric"
-                />
-              </Field>
-            </div>
-            {sell > 0 && (
-              <div className="flex items-center gap-2 text-[13px]">
-                <span className="text-ink-2">Ашиг</span>
-                <span className="tnum">{money(profit)}</span>
-                <Badge tone={margin >= 40 ? "ok" : margin >= 0 ? "neutral" : "danger"}>
-                  {margin}%
-                </Badge>
-              </div>
-            )}
+            <Field label="Зарах үнэ">
+              <Input
+                value={sellPrice}
+                onChange={(v) => setSellPrice(v.replace(/\D/g, ""))}
+                inputMode="numeric"
+              />
+            </Field>
             {hasOptions && (
               <OptionPriceEditor
                 options={product.options}
@@ -273,7 +246,7 @@ export function RoundForm({
                 onChange={setOptionRows}
                 onFillAll={() =>
                   setOptionRows((prev) =>
-                    prev.map((r) => ({ ...r, sell: sellPrice, cost: costPrice })),
+                    prev.map((r) => ({ ...r, sell: sellPrice, cost: "0" })),
                   )
                 }
               />

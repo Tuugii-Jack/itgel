@@ -237,10 +237,7 @@ export function RoundBuyers({
           </div>
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-2">
             <span>
-              Өртөг <span className="tnum">{money(round.costPrice * summary.qty)}</span>
-            </span>
-            <span>
-              Ашиг <span className="tnum text-ok">{money(summary.profit)}</span>
+              Дүн <span className="tnum">{money(summary.revenue)}</span>
             </span>
             {summary.cancelledCount > 0 && (
               <span className="text-danger">{summary.cancelledCount} цуцлагдсан</span>

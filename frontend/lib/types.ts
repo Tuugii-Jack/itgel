@@ -867,18 +867,20 @@ export interface RevenueReport {
   period: "3m" | "6m" | "1y";
   series: {
     month: string;
-    revenue: number;
-    profit: number;
+    sold: number;
+    returned: number;
+    net: number;
     orders: number;
-    items: number;
-    marginPercent: number;
+    soldQty: number;
+    returnedQty: number;
   }[];
   totals: {
-    revenue: number;
-    profit: number;
+    sold: number;
+    returned: number;
+    net: number;
     orders: number;
-    marginPercent: number;
-    averageOrderValue: number;
+    soldQty: number;
+    returnedQty: number;
   };
 }
 
@@ -886,12 +888,13 @@ export interface ProductReportRow {
   productId: string;
   name: string;
   category: string | null;
-  qty: number;
-  revenue: number;
-  profit: number;
-  costPrice: number;
+  soldQty: number;
+  soldAmount: number;
+  returnedQty: number;
+  returnedAmount: number;
+  netQty: number;
+  netAmount: number;
   sellPrice: number;
-  marginPercent: number;
 }
 
 export interface Settings {

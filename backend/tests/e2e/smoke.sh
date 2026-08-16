@@ -57,8 +57,8 @@ TOKEN=$(curl -s -X POST $API/admin/auth/login -H 'content-type: application/json
 AUTH="Authorization: Bearer $TOKEN"
 echo "token ok: ${#TOKEN} тэмдэгт"
 
-echo "=== 13. админ бараа — costPrice, ашиг харагдана ==="
-curl -s -H "$AUTH" "$API/admin/products?pageSize=3" | j "[ (p['name'],p['costPrice'],p['sellPrice'],p['profit'],str(p['marginPercent'])+'%') for p in d['data'] ]"
+echo "=== 13. админ бараа — нэр, зарах үнэ ==="
+curl -s -H "$AUTH" "$API/admin/products?pageSize=3" | j "[ (p['name'], p.get('currentRound') and p['currentRound'].get('sellPrice')) for p in d['data'] ]"
 
 echo "=== 14. бараатай ангилал устгах → 409 ==="
 CID=$(curl -s -H "$AUTH" $API/admin/categories | python3 -c "import sys,json;print([c for c in json.load(sys.stdin)['data'] if c['productCount']>0][0]['id'])")
@@ -105,11 +105,11 @@ else
   curl -s -X POST -H 'content-type: application/json' -d "{\"type\":\"DELIVERY\",\"district\":\"Налайх\",\"khoroo\":\"3-р хороо\",\"address\":\"Тест гудамж 1\",\"day\":\"$(date -v+2d +%Y-%m-%d)\"}" $API/orders/$ACODE/fulfilment | j "d['data']"
 fi
 
-echo "=== 21. тайлан — орлого ==="
-curl -s -H "$AUTH" "$API/admin/reports/revenue?period=6m" | j "([ (s['month'],s['revenue'],s['profit'],s['orders']) for s in d['data']['series'] ], d['data']['totals'])"
+echo "=== 21. тайлан — борлуулалт, буцаалт ==="
+curl -s -H "$AUTH" "$API/admin/reports/revenue?period=6m" | j "([ (s['month'],s['sold'],s['returned'],s['orders']) for s in d['data']['series'] ], d['data']['totals'])"
 
-echo "=== 22. тайлан — бараа ашгийн хувиар ==="
-curl -s -H "$AUTH" "$API/admin/reports/products?limit=4" | j "[ (r['name'],r['qty'],r['revenue'],r['profit'],str(r['marginPercent'])+'%') for r in d['data'] ]"
+echo "=== 22. тайлан — бараагаар зарагдсан / буцаасан ==="
+curl -s -H "$AUTH" "$API/admin/reports/products?limit=4" | j "[ (r['name'],r['soldQty'],r['soldAmount'],r['returnedQty'],r['returnedAmount']) for r in d['data'] ]"
 
 echo "=== 23. хэрэглэгчид ==="
 curl -s -H "$AUTH" "$API/admin/customers?pageSize=3" | j "[ (c['name'],c['phone'],c['orderCount'],c['totalSpent']) for c in d['data'] ]"

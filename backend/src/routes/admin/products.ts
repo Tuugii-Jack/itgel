@@ -321,9 +321,9 @@ adminProductsRouter.post(
     const last = product.rounds[0];
     const settings = await getSettings();
 
-    const costPrice = body.costPrice ?? last?.costPrice;
+    const costPrice = body.costPrice ?? last?.costPrice ?? 0;
     const sellPrice = body.sellPrice ?? last?.sellPrice;
-    if (costPrice === undefined || sellPrice === undefined) {
+    if (sellPrice === undefined) {
       throw badRequest('Өмнөх гаргалт байхгүй тул үнийг заавал өгнө үү.');
     }
 

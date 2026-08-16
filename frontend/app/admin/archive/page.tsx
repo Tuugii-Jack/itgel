@@ -225,11 +225,10 @@ function ByProduct() {
           </Button>
         </div>
 
-        <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
           <Metric label="Хэдэн хүн авсан" value={summary.customerCount} />
           <Metric label="Нийт ширхэг" value={summary.qty} tone="info" />
-          <Metric label="Нийт орлого" value={money(summary.revenue)} />
-          <Metric label="Нийт ашиг" value={money(summary.profit)} tone="ok" />
+          <Metric label="Нийт дүн" value={money(summary.revenue)} />
         </div>
 
         <div className="mb-2 text-[15px] font-medium">Гаргалтууд</div>

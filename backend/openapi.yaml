@@ -837,10 +837,10 @@ paths:
     get:
       tags: [admin]
       security: [{ bearerAuth: [] }]
-      summary: Сар тус бүрийн борлуулалт, ашиг
-      description: Зөвхөн HANDED_OVER захиалгууд тооцогдоно.
+      summary: Сар тус бүрийн борлуулалт, буцаалт (зарах үнэ)
       parameters:
         - { name: period, in: query, schema: { type: string, enum: ['3m', '6m', '1y'], default: '6m' } }
+        - { name: productIds, in: query, schema: { type: string }, description: 'id,id' }
       responses:
         '200': { description: Сарын цуваа ба нийлбэр }
 
@@ -848,10 +848,11 @@ paths:
     get:
       tags: [admin]
       security: [{ bearerAuth: [] }]
-      summary: Бараа ашгийн хувиар эрэмбэлсэн
+      summary: Бараа бүрийн зарагдсан / буцаасан тоо, дүн
       parameters:
         - { name: period, in: query, schema: { type: string, enum: ['3m', '6m', '1y'] } }
-        - { name: limit, in: query, schema: { type: integer, default: 50 } }
+        - { name: productIds, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 200 } }
       responses:
         '200': { description: Жагсаалт }
 

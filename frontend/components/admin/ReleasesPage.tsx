@@ -16,7 +16,7 @@ import { RoundForm } from "@/components/admin/RoundForm";
 import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { countdown, dayTimeLabel, money } from "@/lib/format";
+import { countdown, dayTimeLabel } from "@/lib/format";
 import { priceLabel } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
@@ -313,9 +313,6 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                     </Td>
                     <Td className="tnum whitespace-nowrap">
                       <div>{priceLabel(round.price, round.priceMax)}</div>
-                      <div className="text-[13px] text-muted">
-                        өртөг {money(round.costPrice)}
-                      </div>
                     </Td>
                     <Td className="tnum min-w-[120px] text-[13px]">
                       {kind === "order" ? (

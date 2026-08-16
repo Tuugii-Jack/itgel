@@ -7,7 +7,7 @@ import {
   PRODUCT_STATUS_TONE,
 } from "@/components/admin/shared";
 import { Badge, Button, Divider } from "@/components/ui";
-import { arrivalLabel, countdown, money } from "@/lib/format";
+import { arrivalLabel, countdown } from "@/lib/format";
 import { priceLabel } from "@/lib/options";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -93,9 +93,6 @@ export function StorefrontCard({
           <span className="tnum text-[18px] font-medium">
             {priceLabel(round.price, round.priceMax)}
           </span>
-          <span className="tnum text-[12px] text-muted">
-            өртөг {money(round.costPrice)}
-          </span>
         </div>
 
         <Divider className="my-0.5" />
@@ -107,7 +104,10 @@ export function StorefrontCard({
             tone={closed ? "danger" : "neutral"}
           />
           {isOrder ? (
-            <Fact label="Ашиг" value={`${money(round.profit)} · ${round.marginPercent}%`} tone="ok" />
+            <Fact
+              label="Захиалга"
+              value={`${round.orderedQty} ш · ${round.customerCount} хүн`}
+            />
           ) : (
             <Fact
               label="Үлдэгдэл"

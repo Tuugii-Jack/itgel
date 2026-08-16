@@ -15,7 +15,7 @@ export type OptionPriceDraft = {
 export function seedOptionPriceDrafts(
   options: ProductOption[] | undefined,
   existing: OptionPrice[] | undefined,
-  defaults: { sell: string; cost: string },
+  defaults: { sell: string; cost?: string },
 ): OptionPriceDraft[] {
   const byKey = new Map(
     (existing ?? []).map((p) => [`${p.kind}\0${p.value}`, p]),
@@ -25,8 +25,7 @@ export function seedOptionPriceDrafts(
     for (const value of opt.values) {
       const prev = byKey.get(`${opt.name}\0${value}`);
       const sell = prev ? String(prev.sellPrice ?? prev.price) : defaults.sell;
-      const cost = prev ? String(prev.costPrice ?? 0) : defaults.cost;
-      rows.push({ kind: opt.name, value, cost, sell });
+      rows.push({ kind: opt.name, value, cost: "0", sell });
     }
   }
   return rows;
@@ -52,10 +51,10 @@ export function OptionPriceEditor({
     rows: rows.filter((r) => r.kind === opt.name),
   }));
 
-  const patch = (kind: string, value: string, field: "cost" | "sell", next: string) => {
+  const patch = (kind: string, value: string, next: string) => {
     onChange(
       rows.map((r) =>
-        r.kind === kind && r.value === value ? { ...r, [field]: next.replace(/\D/g, "") } : r,
+        r.kind === kind && r.value === value ? { ...r, sell: next.replace(/\D/g, ""), cost: "0" } : r,
       ),
     );
   };
@@ -66,7 +65,7 @@ export function OptionPriceEditor({
         <div>
           <div className="text-[15px] font-medium">Сонголтын үнэ</div>
           <p className="mt-1 mb-0 text-[13px] text-ink-2">
-            Бараан дээр оруулсан {primary} бүрт энэ гаргалтын үнийг тавина.
+            Бараан дээр оруулсан {primary} бүрт энэ гаргалтын зарах үнийг тавина.
           </p>
         </div>
         {onFillAll && (
@@ -85,36 +84,23 @@ export function OptionPriceEditor({
             )}
           </div>
           <div className="overflow-hidden rounded-[8px] border border-line">
-            <div className="grid grid-cols-[minmax(0,1fr)_88px_88px] gap-2 border-b border-line bg-surface px-3 py-2 text-[12px] text-muted">
+            <div className="grid grid-cols-[minmax(0,1fr)_120px] gap-2 border-b border-line bg-surface px-3 py-2 text-[12px] text-muted">
               <span>Утга</span>
-              <span>Өртөг</span>
-              <span>Зарах</span>
+              <span>Зарах үнэ</span>
             </div>
             {group.rows.map((row) => {
               const sell = Number(row.sell) || 0;
-              const cost = Number(row.cost) || 0;
               return (
                 <div
                   key={`${row.kind}-${row.value}`}
-                  className="grid grid-cols-[minmax(0,1fr)_88px_88px] items-center gap-2 border-b border-line px-3 py-2 last:border-b-0"
+                  className="grid grid-cols-[minmax(0,1fr)_120px] items-center gap-2 border-b border-line px-3 py-2 last:border-b-0"
                 >
-                  <div className="min-w-0">
-                    <div className="truncate text-[14px]">{row.value}</div>
-                    {sell > 0 && (
-                      <div className="tnum text-[12px] text-muted">{money(sell - cost)}</div>
-                    )}
-                  </div>
-                  <Input
-                    value={row.cost}
-                    onChange={(v) => patch(row.kind, row.value, "cost", v)}
-                    inputMode="numeric"
-                    placeholder="0"
-                  />
+                  <div className="min-w-0 truncate text-[14px]">{row.value}</div>
                   <Input
                     value={row.sell}
-                    onChange={(v) => patch(row.kind, row.value, "sell", v)}
+                    onChange={(v) => patch(row.kind, row.value, v)}
                     inputMode="numeric"
-                    placeholder="0"
+                    placeholder={sell > 0 ? money(sell) : "0"}
                   />
                 </div>
               );

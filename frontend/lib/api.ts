@@ -1223,16 +1223,23 @@ export const adminApi = {
       body,
     }).then((r) => r.data),
 
-  revenue: (period: "3m" | "6m" | "1y") =>
+  revenue: (period: "3m" | "6m" | "1y", productIds?: string[]) =>
     request<RevenueReport>("/admin/reports/revenue", {
       ...adminAuth,
-      query: { period },
+      query: {
+        period,
+        productIds: productIds && productIds.length > 0 ? productIds.join(",") : undefined,
+      },
     }).then((r) => r.data),
 
-  productReport: (period: "3m" | "6m" | "1y", limit = 20) =>
+  productReport: (period: "3m" | "6m" | "1y", limit = 200, productIds?: string[]) =>
     request<ProductReportRow[]>("/admin/reports/products", {
       ...adminAuth,
-      query: { period, limit },
+      query: {
+        period,
+        limit,
+        productIds: productIds && productIds.length > 0 ? productIds.join(",") : undefined,
+      },
     }).then((r) => r.data),
 
   // --- Архив: устгасан бичлэгийг ч агуулсан бүрэн түүх ---

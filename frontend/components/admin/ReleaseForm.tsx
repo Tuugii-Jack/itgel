@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import { OptionPriceEditor, seedOptionPriceDrafts } from "@/components/admin/OptionPriceEditor";
-import { Badge, Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
+import { Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
-import { fromDatetimeLocal, money } from "@/lib/format";
+import { fromDatetimeLocal } from "@/lib/format";
 import { pricedOptionName } from "@/lib/options";
 import type { AdminProduct, ProductStatus } from "@/lib/types";
 
@@ -41,7 +41,6 @@ export function ReleaseForm({
     [products, productId],
   );
 
-  const [costPrice, setCostPrice] = useState("");
   const [sellPrice, setSellPrice] = useState("");
   const [optionRows, setOptionRows] = useState<
     ReturnType<typeof seedOptionPriceDrafts>
@@ -88,24 +87,19 @@ export function ReleaseForm({
     if (!product || seeded) return;
     const next = product.currentRound;
     if (next) {
-      setCostPrice(String(next.costPrice));
       setSellPrice(String(next.sellPrice));
       setLeadMin(String(next.leadMinDays));
       setLeadMax(String(next.leadMaxDays));
       setOptionRows(
         seedOptionPriceDrafts(product.options, next.optionPrices, {
           sell: String(next.sellPrice),
-          cost: String(next.costPrice),
         }),
       );
     }
     setSeeded(true);
   }, [product, seeded]);
 
-  const cost = Number(costPrice) || 0;
   const sell = Number(sellPrice) || 0;
-  const profit = sell - cost;
-  const margin = sell > 0 ? Math.round((profit / sell) * 100) : 0;
   const hasOptions = (product?.options?.length ?? 0) > 0;
   const primaryKind = pricedOptionName(product?.options);
   const optionPrices = optionRows
@@ -114,7 +108,7 @@ export function ReleaseForm({
       kind: r.kind,
       value: r.value,
       sellPrice: Number(r.sell) || 0,
-      costPrice: Number(r.cost) || 0,
+      costPrice: 0,
     }));
   const primaryOk =
     !primaryKind ||
@@ -137,22 +131,19 @@ export function ReleaseForm({
     const picked = products.find((p) => p.id === id);
     const next = picked?.currentRound;
     if (next) {
-      setCostPrice(String(next.costPrice));
       setSellPrice(String(next.sellPrice));
       setLeadMin(String(next.leadMinDays));
       setLeadMax(String(next.leadMaxDays));
       setOptionRows(
         seedOptionPriceDrafts(picked?.options, next.optionPrices, {
           sell: String(next.sellPrice),
-          cost: String(next.costPrice),
         }),
       );
     } else {
-      setCostPrice("");
       setSellPrice("");
       setLeadMin("7");
       setLeadMax("14");
-      setOptionRows(seedOptionPriceDrafts(picked?.options, undefined, { sell: "", cost: "" }));
+      setOptionRows(seedOptionPriceDrafts(picked?.options, undefined, { sell: "" }));
     }
   };
 
@@ -167,12 +158,8 @@ export function ReleaseForm({
           : optionPrices.length
             ? Math.min(...optionPrices.map((p) => p.sellPrice))
             : 0;
-      const derivedCost =
-        cost > 0
-          ? cost
-          : optionPrices.find((p) => p.sellPrice === derivedSell)?.costPrice ?? 0;
       await adminApi.createRound(productId, {
-        costPrice: derivedCost,
+        costPrice: 0,
         sellPrice: derivedSell,
         stock: kind === "ready" ? Number(stock) || 0 : 0,
         closeAt:
@@ -233,31 +220,13 @@ export function ReleaseForm({
 
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Үнэ</div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Анхны үнэ (өртөг)">
-              <Input
-                value={costPrice}
-                onChange={(v) => setCostPrice(v.replace(/\D/g, ""))}
-                inputMode="numeric"
-              />
-            </Field>
-            <Field label="Зарах үнэ">
-              <Input
-                value={sellPrice}
-                onChange={(v) => setSellPrice(v.replace(/\D/g, ""))}
-                inputMode="numeric"
-              />
-            </Field>
-          </div>
-            {sell > 0 && (
-              <div className="flex items-center gap-2 text-[13px]">
-                <span className="text-ink-2">Ашиг</span>
-                <span className="tnum">{money(profit)}</span>
-                <Badge tone={margin >= 40 ? "ok" : margin >= 0 ? "neutral" : "danger"}>
-                  {margin}%
-                </Badge>
-              </div>
-            )}
+          <Field label="Зарах үнэ">
+            <Input
+              value={sellPrice}
+              onChange={(v) => setSellPrice(v.replace(/\D/g, ""))}
+              inputMode="numeric"
+            />
+          </Field>
             {hasOptions && product && (
               <OptionPriceEditor
                 options={product.options}
@@ -265,7 +234,7 @@ export function ReleaseForm({
                 onChange={setOptionRows}
                 onFillAll={() =>
                   setOptionRows((prev) =>
-                    prev.map((r) => ({ ...r, sell: sellPrice, cost: costPrice })),
+                    prev.map((r) => ({ ...r, sell: sellPrice, cost: "0" })),
                   )
                 }
               />
