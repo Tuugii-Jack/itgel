@@ -524,6 +524,11 @@ function ChipEditor({
             value={draft}
             onChange={setDraft}
             placeholder={placeholder}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+              e.preventDefault();
+              add();
+            }}
           />
         </div>
         <Button variant="outline" onClick={add} disabled={!draft.trim()}>

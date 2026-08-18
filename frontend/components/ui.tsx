@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { KeyboardEventHandler, ReactNode } from "react";
 
 /*
  * Дизайн системийн үндсэн элементүүд.
@@ -196,6 +196,7 @@ export function Input({
   disabled,
   className = "",
   autoFocus,
+  onKeyDown,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -206,6 +207,7 @@ export function Input({
   disabled?: boolean;
   className?: string;
   autoFocus?: boolean;
+  onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
 }) {
   return (
     <input
@@ -217,6 +219,7 @@ export function Input({
       maxLength={maxLength}
       disabled={disabled}
       autoFocus={autoFocus}
+      onKeyDown={onKeyDown}
       className={`h-11 w-full rounded-[8px] border border-line bg-bg px-3 text-[15px]
         placeholder:text-muted disabled:bg-surface ${className}`}
     />
