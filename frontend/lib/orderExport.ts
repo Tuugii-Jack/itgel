@@ -47,6 +47,91 @@ export type OrderExportLine = {
   cancelReason: string;
 };
 
+export type OrderExportColumnKey = keyof OrderExportLine;
+export type OrderExportGroup = "order" | "customer" | "item" | "money";
+
+export type OrderExportColumn = {
+  key: OrderExportColumnKey;
+  label: string;
+  group: OrderExportGroup;
+};
+
+export type OrderExportSelection = Record<OrderExportColumnKey, boolean>;
+
+export const ORDER_EXPORT_GROUPS: { id: OrderExportGroup; label: string }[] = [
+  { id: "order", label: "Захиалга" },
+  { id: "customer", label: "Хэрэглэгч" },
+  { id: "item", label: "Бараа" },
+  { id: "money", label: "Дүн" },
+];
+
+export const ORDER_EXPORT_COLUMNS: OrderExportColumn[] = [
+  { key: "orderCode", label: "Захиалгын код", group: "order" },
+  { key: "createdAt", label: "Огноо", group: "order" },
+  { key: "statusLabel", label: "Төлөв", group: "order" },
+  { key: "paymentLabel", label: "Төлбөр", group: "order" },
+  { key: "batchName", label: "Багц", group: "order" },
+  { key: "note", label: "Тэмдэглэл", group: "order" },
+  { key: "customerName", label: "Нэр", group: "customer" },
+  { key: "customerPhone", label: "Утас", group: "customer" },
+  { key: "customerEmail", label: "И-мэйл", group: "customer" },
+  { key: "fulfilment", label: "Авах арга", group: "customer" },
+  { key: "deliveryAddress", label: "Хаяг", group: "customer" },
+  { key: "productName", label: "Бараа", group: "item" },
+  { key: "selections", label: "Сонголт (төрөл/хэмжээ г.м.)", group: "item" },
+  { key: "size", label: "Хэмжээ", group: "item" },
+  { key: "color", label: "Өнгө", group: "item" },
+  { key: "qty", label: "Тоо", group: "item" },
+  { key: "unitPrice", label: "Нэгж үнэ", group: "item" },
+  { key: "lineTotal", label: "Мөрийн дүн", group: "item" },
+  { key: "itemStatus", label: "Мөрийн төлөв", group: "item" },
+  { key: "arriveWindow", label: "Ирэх хугацаа", group: "item" },
+  { key: "cancelReason", label: "Цуцлалтын шалтгаан", group: "item" },
+  { key: "subtotal", label: "Нийт бараа", group: "money" },
+  { key: "deliveryFee", label: "Хүргэлт", group: "money" },
+  { key: "storageFee", label: "Агуулахын хураамж", group: "money" },
+  { key: "cargoFee", label: "Карго", group: "money" },
+  { key: "paidAmount", label: "Төлсөн", group: "money" },
+  { key: "dueAmount", label: "Үлдэгдэл", group: "money" },
+];
+
+export const DEFAULT_ORDER_EXPORT_SELECTION: OrderExportSelection = Object.fromEntries(
+  ORDER_EXPORT_COLUMNS.map((c) => [c.key, true]),
+) as OrderExportSelection;
+
+const STORAGE_KEY = "itgel.admin.orderExportColumns";
+
+export function loadOrderExportSelection(): OrderExportSelection {
+  const base = { ...DEFAULT_ORDER_EXPORT_SELECTION };
+  if (typeof window === "undefined") return base;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return base;
+    const parsed = JSON.parse(raw) as Partial<Record<string, unknown>>;
+    for (const col of ORDER_EXPORT_COLUMNS) {
+      if (typeof parsed[col.key] === "boolean") base[col.key] = parsed[col.key];
+    }
+    return base;
+  } catch {
+    return base;
+  }
+}
+
+export function saveOrderExportSelection(sel: OrderExportSelection) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(sel));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+export function selectedOrderExportColumns(
+  sel: OrderExportSelection,
+): OrderExportColumn[] {
+  return ORDER_EXPORT_COLUMNS.filter((c) => sel[c.key]);
+}
+
 function deliveryAddress(order: AdminOrderDetail): string {
   const d = order.delivery;
   if (!d) return "";
@@ -71,7 +156,7 @@ export function flattenOrdersForExport(orders: AdminOrderDetail[]): OrderExportL
       dueAmount: order.dueAmount,
       paidAmount: order.paidAmount,
       subtotal: order.subtotal,
-      deliveryFee: order.deliveryFee,
+      deliveryFee: order.deliveryFee ?? 0,
       storageFee: order.storageFee ?? 0,
       cargoFee: order.cargoFee ?? 0,
       fulfilment: order.fulfilment ? FULFILMENT_LABEL[order.fulfilment] ?? order.fulfilment : "",
@@ -119,35 +204,6 @@ export function flattenOrdersForExport(orders: AdminOrderDetail[]): OrderExportL
   return rows;
 }
 
-const CSV_HEADERS: { key: keyof OrderExportLine; label: string }[] = [
-  { key: "orderCode", label: "Захиалгын код" },
-  { key: "createdAt", label: "Огноо" },
-  { key: "statusLabel", label: "Төлөв" },
-  { key: "paymentLabel", label: "Төлбөр" },
-  { key: "customerName", label: "Нэр" },
-  { key: "customerPhone", label: "Утас" },
-  { key: "customerEmail", label: "И-мэйл" },
-  { key: "productName", label: "Бараа" },
-  { key: "selections", label: "Сонголт (төрөл/хэмжээ г.м.)" },
-  { key: "size", label: "Хэмжээ" },
-  { key: "color", label: "Өнгө" },
-  { key: "qty", label: "Тоо" },
-  { key: "unitPrice", label: "Нэгж үнэ" },
-  { key: "lineTotal", label: "Мөрийн дүн" },
-  { key: "itemStatus", label: "Мөрийн төлөв" },
-  { key: "arriveWindow", label: "Ирэх хугацаа" },
-  { key: "subtotal", label: "Нийт бараа" },
-  { key: "storageFee", label: "Агуулахын хураамж" },
-  { key: "cargoFee", label: "Карго" },
-  { key: "paidAmount", label: "Төлсөн" },
-  { key: "dueAmount", label: "Үлдэгдэл" },
-  { key: "fulfilment", label: "Авах арга" },
-  { key: "batchName", label: "Багц" },
-  { key: "deliveryAddress", label: "Хаяг" },
-  { key: "note", label: "Тэмдэглэл" },
-  { key: "cancelReason", label: "Цуцлалтын шалтгаан" },
-];
-
 function csvEscape(value: string | number): string {
   const s = String(value ?? "");
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
@@ -155,11 +211,19 @@ function csvEscape(value: string | number): string {
 }
 
 /** Excel-д нээгдэх UTF-8 BOM CSV. */
-export function downloadOrdersExcel(orders: AdminOrderDetail[], filename?: string) {
+export function downloadOrdersExcel(
+  orders: AdminOrderDetail[],
+  filename?: string,
+  columns: OrderExportSelection = DEFAULT_ORDER_EXPORT_SELECTION,
+) {
+  const headers = selectedOrderExportColumns(columns);
+  if (headers.length === 0) {
+    throw new Error("Наад зах нь нэг талбар сонгоно уу.");
+  }
   const rows = flattenOrdersForExport(orders);
-  const header = CSV_HEADERS.map((h) => csvEscape(h.label)).join(",");
+  const header = headers.map((h) => csvEscape(h.label)).join(",");
   const body = rows
-    .map((row) => CSV_HEADERS.map((h) => csvEscape(row[h.key])).join(","))
+    .map((row) => headers.map((h) => csvEscape(row[h.key])).join(","))
     .join("\n");
   const bom = "\uFEFF";
   const blob = new Blob([bom + header + "\n" + body], {
@@ -191,61 +255,158 @@ function escHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+const PRINT_ITEM_KEYS: OrderExportColumnKey[] = [
+  "productName",
+  "selections",
+  "size",
+  "color",
+  "qty",
+  "unitPrice",
+  "lineTotal",
+  "itemStatus",
+  "arriveWindow",
+  "cancelReason",
+];
+
+const MONEY_KEYS: OrderExportColumnKey[] = [
+  "unitPrice",
+  "lineTotal",
+  "subtotal",
+  "deliveryFee",
+  "storageFee",
+  "cargoFee",
+  "paidAmount",
+  "dueAmount",
+];
+
+function printItemCell(item: OrderItem, key: OrderExportColumnKey): string {
+  const values: Partial<Record<OrderExportColumnKey, string | number>> = {
+    productName: item.name,
+    selections: formatSelections(item.selections, item.size, item.color),
+    size: item.size ?? item.selections?.["Хэмжээ"] ?? "",
+    color: item.color ?? item.selections?.["Өнгө"] ?? "",
+    qty: item.qty,
+    unitPrice: item.unitPrice,
+    lineTotal: item.total,
+    itemStatus: ITEM_STATUS_LABEL[item.itemStatus] ?? item.itemStatus,
+    arriveWindow: arriveWindow(item),
+    cancelReason: item.cancelReason ?? "",
+  };
+  const value = values[key];
+  if (MONEY_KEYS.includes(key) && typeof value === "number") return escHtml(money(value));
+  if (value === "" || value == null) return "—";
+  return escHtml(String(value));
+}
+
 /** Шинэ цонхонд дэлгэрэнгүй захиалга хэвлэнэ. */
-export function printOrders(orders: AdminOrderDetail[]) {
+export function printOrders(
+  orders: AdminOrderDetail[],
+  columns: OrderExportSelection = DEFAULT_ORDER_EXPORT_SELECTION,
+) {
+  if (!ORDER_EXPORT_COLUMNS.some((c) => columns[c.key])) {
+    throw new Error("Наад зах нь нэг талбар сонгоно уу.");
+  }
+  const on = (key: OrderExportColumnKey) => columns[key];
+  const itemCols = ORDER_EXPORT_COLUMNS.filter(
+    (c) => PRINT_ITEM_KEYS.includes(c.key) && on(c.key),
+  );
+  const moneyCols = ORDER_EXPORT_COLUMNS.filter(
+    (c) => c.group === "money" && on(c.key),
+  );
+
   const blocks = orders
     .map((order) => {
-      const items = order.items
-        .map((item) => {
-          const sel = formatSelections(item.selections, item.size, item.color);
-          return `<tr>
-            <td>${escHtml(item.name)}</td>
-            <td>${escHtml(sel || "—")}</td>
-            <td class="tnum">${item.qty}</td>
-            <td class="tnum">${escHtml(money(item.unitPrice))}</td>
-            <td class="tnum">${escHtml(money(item.total))}</td>
-            <td>${escHtml(ITEM_STATUS_LABEL[item.itemStatus] ?? item.itemStatus)}</td>
-            <td>${escHtml(arriveWindow(item) || "—")}</td>
-          </tr>`;
-        })
-        .join("");
+      const items =
+        itemCols.length === 0
+          ? ""
+          : order.items
+              .map((item) => {
+                const tds = itemCols
+                  .map((col) => {
+                    const num = MONEY_KEYS.includes(col.key) || col.key === "qty";
+                    return `<td${num ? ' class="tnum"' : ""}>${printItemCell(item, col.key)}</td>`;
+                  })
+                  .join("");
+                return `<tr>${tds}</tr>`;
+              })
+              .join("");
 
+      const meta = [
+        on("createdAt") ? dayTimeLabel(order.createdAt) : "",
+        on("statusLabel") ? order.statusLabel : "",
+        on("paymentLabel")
+          ? (order.paymentStateLabel ?? PAYMENT_LABEL[order.paymentState])
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      const customerBits: string[] = [];
+      if (on("customerName")) {
+        customerBits.push(
+          `<div><strong>${escHtml(order.customer.name ?? "Нэргүй")}</strong></div>`,
+        );
+      }
+      if (on("customerPhone")) {
+        customerBits.push(`<div>Утас: ${escHtml(phoneLabel(order.customer.phone))}</div>`);
+      }
+      if (on("customerEmail") && order.customer.email) {
+        customerBits.push(`<div>И-мэйл: ${escHtml(order.customer.email)}</div>`);
+      }
+      if (on("fulfilment") && order.fulfilment) {
+        customerBits.push(
+          `<div>Авах арга: ${escHtml(FULFILMENT_LABEL[order.fulfilment] ?? order.fulfilment)}</div>`,
+        );
+      }
+      if (on("batchName") && order.batch) {
+        customerBits.push(`<div>Багц: ${escHtml(order.batch.name)}</div>`);
+      }
       const addr = deliveryAddress(order);
+      if (on("deliveryAddress") && addr) {
+        customerBits.push(`<div>Хаяг: ${escHtml(addr)}</div>`);
+      }
+      if (on("note") && order.note) {
+        customerBits.push(`<div>Тэмдэглэл: ${escHtml(order.note)}</div>`);
+      }
+
+      const totals = moneyCols
+        .map((col) => {
+          const amount =
+            col.key === "subtotal"
+              ? order.subtotal
+              : col.key === "deliveryFee"
+                ? (order.deliveryFee ?? 0)
+                : col.key === "storageFee"
+                  ? (order.storageFee ?? 0)
+                  : col.key === "cargoFee"
+                    ? (order.cargoFee ?? 0)
+                    : col.key === "paidAmount"
+                      ? order.paidAmount
+                      : order.dueAmount;
+          return `${escHtml(col.label)}: ${escHtml(money(amount))}`;
+        })
+        .join(" · ");
+
+      const table =
+        itemCols.length === 0
+          ? ""
+          : `<table>
+          <thead>
+            <tr>${itemCols.map((c) => `<th>${escHtml(c.label)}</th>`).join("")}</tr>
+          </thead>
+          <tbody>${items || `<tr><td colspan="${itemCols.length}">Бараа алга.</td></tr>`}</tbody>
+        </table>`;
+
+      const title = on("orderCode") ? escHtml(order.code) : "Захиалга";
+
       return `<section class="order">
         <header>
-          <div class="code">${escHtml(order.code)}</div>
-          <div class="meta">${escHtml(dayTimeLabel(order.createdAt))} · ${escHtml(order.statusLabel)} · ${escHtml(order.paymentStateLabel ?? PAYMENT_LABEL[order.paymentState])}</div>
+          <div class="code">${title}</div>
+          ${meta ? `<div class="meta">${escHtml(meta)}</div>` : ""}
         </header>
-        <div class="customer">
-          <div><strong>${escHtml(order.customer.name ?? "Нэргүй")}</strong></div>
-          <div>Утас: ${escHtml(phoneLabel(order.customer.phone))}</div>
-          ${order.customer.email ? `<div>И-мэйл: ${escHtml(order.customer.email)}</div>` : ""}
-          ${order.fulfilment ? `<div>Авах арга: ${escHtml(FULFILMENT_LABEL[order.fulfilment] ?? order.fulfilment)}</div>` : ""}
-          ${order.batch ? `<div>Багц: ${escHtml(order.batch.name)}</div>` : ""}
-          ${addr ? `<div>Хаяг: ${escHtml(addr)}</div>` : ""}
-          ${order.note ? `<div>Тэмдэглэл: ${escHtml(order.note)}</div>` : ""}
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Бараа</th>
-              <th>Сонголт (төрөл/хэмжээ…)</th>
-              <th>Тоо</th>
-              <th>Үнэ</th>
-              <th>Дүн</th>
-              <th>Төлөв</th>
-              <th>Ирэх</th>
-            </tr>
-          </thead>
-          <tbody>${items}</tbody>
-        </table>
-        <div class="totals">
-          Бараа: ${escHtml(money(order.subtotal))}
-          ${order.storageFee > 0 ? ` · Агуулах: ${escHtml(money(order.storageFee))}` : ""}
-          ${(order.cargoFee ?? 0) > 0 ? ` · Карго: ${escHtml(money(order.cargoFee ?? 0))}` : ""}
-          · Төлсөн: ${escHtml(money(order.paidAmount))}
-          · Үлдэгдэл: ${escHtml(money(order.dueAmount))}
-        </div>
+        ${customerBits.length ? `<div class="customer">${customerBits.join("")}</div>` : ""}
+        ${table}
+        ${totals ? `<div class="totals">${totals}</div>` : ""}
       </section>`;
     })
     .join("");

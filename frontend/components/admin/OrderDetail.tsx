@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ORDER_STATUS_LABEL, OrderBadge, PageHead, Select } from "@/components/admin/shared";
 import { OrderQpayCard } from "@/components/admin/OrderQpay";
+import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
 import {
   Badge,
   Button,
@@ -19,7 +20,7 @@ import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
-import { downloadOrdersExcel, printOrders } from "@/lib/orderExport";
+import { downloadOrdersExcel, printOrders, type OrderExportSelection } from "@/lib/orderExport";
 import { PAYMENT_TONE } from "@/lib/payment";
 import { useToast } from "@/lib/toast";
 import type {
@@ -92,6 +93,8 @@ export function OrderDetail({
   const [shortfall, setShortfall] = useState<{ status: OrderStatus; missing: number } | null>(
     null,
   );
+  const [exportOpen, setExportOpen] = useState<"print" | "excel" | null>(null);
+  const [exportBusy, setExportBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -193,6 +196,22 @@ export function OrderDetail({
 
   const { totals } = ledger;
 
+  const runLocalExport = (mode: "print" | "excel", columns: OrderExportSelection) => {
+    try {
+      setExportBusy(true);
+      if (mode === "excel") {
+        downloadOrdersExcel([order], `${order.code}.csv`, columns);
+        toast.success("Excel татагдлаа.");
+      } else {
+        printOrders([order], columns);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Экспорт хийж чадсангүй.");
+    } finally {
+      setExportBusy(false);
+    }
+  };
+
   return (
     <div className="max-w-[860px]">
       <PageHead
@@ -225,24 +244,15 @@ export function OrderDetail({
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              variant="outline"
-              onClick={() => {
-                try {
-                  printOrders([order]);
-                } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
-                }
-              }}
+              variant={exportOpen === "print" ? "primary" : "outline"}
+              onClick={() => setExportOpen((v) => (v === "print" ? null : "print"))}
             >
               Хэвлэх
             </Button>
             <Button
               size="sm"
-              variant="outline"
-              onClick={() => {
-                downloadOrdersExcel([order], `${order.code}.csv`);
-                toast.success("Excel татагдлаа.");
-              }}
+              variant={exportOpen === "excel" ? "primary" : "outline"}
+              onClick={() => setExportOpen((v) => (v === "excel" ? null : "excel"))}
             >
               Excel
             </Button>
@@ -252,6 +262,14 @@ export function OrderDetail({
           </div>
         }
       />
+
+      {exportOpen && (
+        <OrderExportPanel
+          busy={exportBusy}
+          confirmLabel={exportOpen === "excel" ? "Excel татах" : "Хэвлэх"}
+          onConfirm={(columns) => runLocalExport(exportOpen, columns)}
+        />
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <OrderBadge status={order.status} />

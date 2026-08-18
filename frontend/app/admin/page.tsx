@@ -15,12 +15,17 @@ import {
 } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
+import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
 import { adminApi, ApiError } from "@/lib/api";
 import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { useToast } from "@/lib/toast";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
-import { downloadOrdersExcel, printOrders } from "@/lib/orderExport";
+import {
+  downloadOrdersExcel,
+  printOrders,
+  type OrderExportSelection,
+} from "@/lib/orderExport";
 import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import type { AdminBatch, AdminOrderRow, AdminSummary, OrderStatus } from "@/lib/types";
 
@@ -58,6 +63,7 @@ export default function AdminOrdersPage() {
   const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exportBusy, setExportBusy] = useState<"print" | "excel" | null>(null);
+  const [exportOpen, setExportOpen] = useState<"print" | "excel" | null>(null);
   const busy = busyAction !== null;
 
   useEffect(() => {
@@ -181,7 +187,7 @@ export default function AdminOrdersPage() {
   };
 
   /** Сонгосон эсвэл одоогийн шүүлтийн захиалгыг дэлгэрэнгүйгээр авч хэвлэх/Excel. */
-  const runExport = async (mode: "print" | "excel") => {
+  const runExport = async (mode: "print" | "excel", columns: OrderExportSelection) => {
     setExportBusy(mode);
     setError(null);
     try {
@@ -201,10 +207,10 @@ export default function AdminOrdersPage() {
         return;
       }
       if (mode === "excel") {
-        downloadOrdersExcel(res.data);
+        downloadOrdersExcel(res.data, undefined, columns);
         toast.success(`${res.data.length} захиалга Excel-д татагдлаа.`);
       } else {
-        printOrders(res.data);
+        printOrders(res.data, columns);
         toast.success(`${res.data.length} захиалга хэвлэхэд бэлэн.`);
       }
     } catch (e) {
@@ -248,19 +254,17 @@ export default function AdminOrdersPage() {
           <div className="flex flex-wrap items-center gap-2">
             <Button
               size="sm"
-              variant="outline"
+              variant={exportOpen === "print" ? "primary" : "outline"}
               disabled={exportBusy !== null}
-              loading={exportBusy === "print"}
-              onClick={() => void runExport("print")}
+              onClick={() => setExportOpen((v) => (v === "print" ? null : "print"))}
             >
               {selected.size > 0 ? `Хэвлэх (${selected.size})` : "Хэвлэх"}
             </Button>
             <Button
               size="sm"
-              variant="outline"
+              variant={exportOpen === "excel" ? "primary" : "outline"}
               disabled={exportBusy !== null}
-              loading={exportBusy === "excel"}
-              onClick={() => void runExport("excel")}
+              onClick={() => setExportOpen((v) => (v === "excel" ? null : "excel"))}
             >
               {selected.size > 0 ? `Excel (${selected.size})` : "Excel"}
             </Button>
@@ -287,6 +291,22 @@ export default function AdminOrdersPage() {
           </div>
         }
       />
+
+      {exportOpen && (
+        <OrderExportPanel
+          busy={exportBusy === exportOpen}
+          confirmLabel={
+            exportOpen === "excel"
+              ? selected.size > 0
+                ? `Excel татах (${selected.size})`
+                : "Excel татах"
+              : selected.size > 0
+                ? `Хэвлэх (${selected.size})`
+                : "Хэвлэх"
+          }
+          onConfirm={(columns) => void runExport(exportOpen, columns)}
+        />
+      )}
 
       {!showDeleted && (
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
