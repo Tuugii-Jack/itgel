@@ -176,7 +176,7 @@ export default function ProductPage({
                 {product.name}
               </h1>
               <div className='tnum text-[26px] font-medium leading-none lg:text-[28px]'>
-                <ShopPrice noteClassName='text-[15px] font-normal text-muted lg:text-[16px]'>
+                <ShopPrice noteClassName='text-[18px] font-medium text-ink-2 lg:text-[20px]'>
                   {missingOpt
                     ? priceLabel(product.price, product.priceMax)
                     : money(unitPrice)}

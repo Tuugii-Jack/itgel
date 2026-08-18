@@ -48,7 +48,9 @@ export function ProductCard({ product }: { product: Product }) {
         </Link>
 
         <div className='tnum text-[18px] font-medium'>
-          <ShopPrice>{priceLabel(product.price, product.priceMax)}</ShopPrice>
+          <ShopPrice noteClassName='text-[15px] font-medium text-ink-2'>
+            {priceLabel(product.price, product.priceMax)}
+          </ShopPrice>
         </div>
 
         {!isOrder && (

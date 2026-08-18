@@ -92,7 +92,9 @@ export function StorefrontCard({
 
         <div className="flex items-baseline gap-2">
           <span className="tnum text-[18px] font-medium">
-            <ShopPrice>{priceLabel(round.price, round.priceMax)}</ShopPrice>
+            <ShopPrice noteClassName="text-[15px] font-medium text-ink-2">
+              {priceLabel(round.price, round.priceMax)}
+            </ShopPrice>
           </span>
         </div>
 
