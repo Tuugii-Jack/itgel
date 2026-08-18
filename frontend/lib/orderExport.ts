@@ -107,9 +107,10 @@ export function loadOrderExportSelection(): OrderExportSelection {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return base;
-    const parsed = JSON.parse(raw) as Partial<Record<string, unknown>>;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
     for (const col of ORDER_EXPORT_COLUMNS) {
-      if (typeof parsed[col.key] === "boolean") base[col.key] = parsed[col.key];
+      const flag = parsed[col.key];
+      if (typeof flag === "boolean") base[col.key] = flag;
     }
     return base;
   } catch {
@@ -279,7 +280,10 @@ const MONEY_KEYS: OrderExportColumnKey[] = [
   "dueAmount",
 ];
 
-function printItemCell(item: OrderItem, key: OrderExportColumnKey): string {
+function printItemCell(
+  item: AdminOrderDetail["items"][number],
+  key: OrderExportColumnKey,
+): string {
   const values: Partial<Record<OrderExportColumnKey, string | number>> = {
     productName: item.name,
     selections: formatSelections(item.selections, item.size, item.color),
