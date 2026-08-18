@@ -231,19 +231,25 @@ export function Textarea({
   onChange,
   placeholder,
   rows = 3,
+  resize = "none",
+  className = "",
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   rows?: number;
+  resize?: "none" | "y" | "both";
+  className?: string;
 }) {
+  const resizeClass =
+    resize === "y" ? "resize-y" : resize === "both" ? "resize" : "resize-none";
   return (
     <textarea
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       rows={rows}
-      className='w-full resize-none rounded-[8px] border border-line bg-bg p-3 text-[15px] leading-[1.6] placeholder:text-muted'
+      className={`w-full rounded-[8px] border border-line bg-bg p-3 text-[15px] leading-[1.6] placeholder:text-muted ${resizeClass} ${className}`}
     />
   );
 }

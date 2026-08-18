@@ -351,7 +351,13 @@ export function RoundForm({
               />
             </Field>
             <Field label="Дотоод тэмдэглэл" hint="Зөвхөн админд харагдана (нийлүүлэгч гэх мэт)">
-              <Textarea value={note} onChange={setNote} rows={2} />
+              <Textarea
+                value={note}
+                onChange={setNote}
+                rows={4}
+                resize="y"
+                className="min-h-[120px] max-h-[70vh]"
+              />
             </Field>
           </Card>
 

@@ -221,7 +221,13 @@ export function ProductForm({
             <Input value={name} onChange={setName} placeholder="Барааны нэр" />
           </Field>
           <Field label="Тайлбар">
-            <Textarea value={description} onChange={setDescription} rows={3} />
+            <Textarea
+              value={description}
+              onChange={setDescription}
+              rows={5}
+              resize="y"
+              className="min-h-[140px] max-h-[70vh]"
+            />
           </Field>
           <Field label="Ангилал">
             <Select

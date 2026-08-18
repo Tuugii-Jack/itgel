@@ -121,7 +121,9 @@ export default function SettingsPage() {
             <Textarea
               value={settings.address}
               onChange={(v) => patch({ address: v })}
-              rows={2}
+              rows={4}
+              resize="y"
+              className="min-h-[120px] max-h-[70vh]"
             />
           </Field>
           <Field label="Ажлын цаг">
@@ -165,7 +167,9 @@ export default function SettingsPage() {
             <Textarea
               value={settings.paymentNote}
               onChange={(v) => patch({ paymentNote: v })}
-              rows={2}
+              rows={4}
+              resize="y"
+              className="min-h-[120px] max-h-[70vh]"
             />
           </Field>
           <Field
