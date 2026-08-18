@@ -18,7 +18,7 @@ import { adminRound } from '../../services/serialize.js';
 import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
 import { replaceRoundSkuStocks, skuStockSum } from '../../lib/skuStock.js';
 import { selectionsOf, sizeColorFromSelections, tallyVariants } from '../../lib/options.js';
-import { computeArrival, diffUbDays } from '../../lib/date.js';
+import { diffUbDays } from '../../lib/date.js';
 import { productStatus, roundFields } from './products.js';
 
 /**
@@ -255,35 +255,8 @@ adminRoundsRouter.patch(
         }
       }
 
-      // Огноо/хүлээх хоног солигдвол захиалсан хүмүүсийн ирэх огноог дагана.
-      const closeChanged = body.closeAt !== undefined;
-      const leadChanged = body.leadMinDays !== undefined || body.leadMaxDays !== undefined;
-      if ((closeChanged || leadChanged) && updated.closeAt) {
-        const { arriveFrom, arriveTo } = computeArrival(
-          updated.closeAt,
-          updated.leadMinDays,
-          updated.leadMaxDays,
-        );
-        await tx.orderItem.updateMany({
-          where: {
-            roundId: updated.id,
-            cancelledAt: null,
-            order: {
-              deletedAt: null,
-              status: { notIn: ['CANCELLED', 'HANDED_OVER'] },
-            },
-          },
-          data: { arriveFrom, arriveTo },
-        });
-      } else if (batchId && updated.closeAt) {
-        await resyncArrivalsForBatch(tx, { id: batchId }, [
-          {
-            id: updated.id,
-            closeAt: updated.closeAt,
-            leadMinDays: updated.leadMinDays,
-            leadMaxDays: updated.leadMaxDays,
-          },
-        ]);
+      if (batchId) {
+        await resyncArrivalsForBatch(tx, { id: batchId });
       }
 
       return tx.productRound.findUniqueOrThrow({

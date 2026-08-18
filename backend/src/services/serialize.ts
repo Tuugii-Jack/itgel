@@ -50,7 +50,7 @@ export type RoundWithProduct = ProductRound & {
  */
 export function publicProduct(round: RoundWithProduct, now = new Date()) {
   const { product } = round;
-  const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
+  const arrival = round.closeAt === null ? computeArrival(null, 0, 0, now) : null;
   const options = optionsFromVariants(product.variants);
   const range = displayPriceRange(round.sellPrice, round.optionPrices);
   return {
@@ -71,8 +71,8 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     closeAt: toIso(round.closeAt),
     leadMinDays: round.leadMinDays,
     leadMaxDays: round.leadMaxDays,
-    arriveFrom: arrival.arriveFrom.toISOString(),
-    arriveTo: arrival.arriveTo.toISOString(),
+    arriveFrom: arrival?.arriveFrom.toISOString() ?? '',
+    arriveTo: arrival?.arriveTo.toISOString() ?? '',
     images: product.images,
     options,
     ...sizeColorCompat(options),

@@ -81,8 +81,6 @@ export function RoundForm({
   const [closeAt, setCloseAt] = useState(
     round?.closeAt ? datetimeLocalKey(round.closeAt) : "",
   );
-  const [leadMin, setLeadMin] = useState(String(base?.leadMinDays ?? 7));
-  const [leadMax, setLeadMax] = useState(String(base?.leadMaxDays ?? 14));
   const [status, setStatus] = useState<ProductStatus>(round?.status ?? "ACTIVE");
   const [note, setNote] = useState(round?.note ?? "");
   const [batchId, setBatchId] = useState(round?.batchId ?? "");
@@ -155,8 +153,6 @@ export function RoundForm({
         sellPrice: derivedSell,
         stock: isOrder ? 0 : hasOptions ? skuStockSum(skuStocks) ?? 0 : Number(stock) || 0,
         closeAt: isOrder && closeAt ? fromDatetimeLocal(closeAt) : null,
-        leadMinDays: Number(leadMin) || 0,
-        leadMaxDays: Number(leadMax) || 0,
         status,
         note: note.trim() || null,
         optionPrices: hasOptions ? optionPrices : [],
@@ -219,7 +215,7 @@ export function RoundForm({
         }
         hint={
           round
-            ? "Үнэ, огноо, багц. Багцад холбоход захиалгууд дагана; огноо солигдвол ирэх өдөр шинэчлэгдэнэ."
+            ? "Үнэ, огноо, багц. Багцад холбоход захиалгууд дагана."
             : `#${nextNo} гаргалт үүснэ. Өмнөх гаргалт болон түүний захиалгууд хэвээрээ үлдэнэ.`
         }
         actions={
@@ -313,22 +309,6 @@ export function RoundForm({
                         </option>
                       ))}
                     </select>
-                  </Field>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Хамгийн бага хоног">
-                    <Input
-                      value={leadMin}
-                      onChange={(v) => setLeadMin(v.replace(/\D/g, ""))}
-                      inputMode="numeric"
-                    />
-                  </Field>
-                  <Field label="Хамгийн их хоног">
-                    <Input
-                      value={leadMax}
-                      onChange={(v) => setLeadMax(v.replace(/\D/g, ""))}
-                      inputMode="numeric"
-                    />
                   </Field>
                 </div>
                 <Field

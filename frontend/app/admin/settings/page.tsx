@@ -74,8 +74,6 @@ export default function SettingsPage() {
         address: settings.address,
         workHours: settings.workHours,
         facebookUrl: settings.facebookUrl,
-        defaultLeadMinDays: settings.defaultLeadMinDays,
-        defaultLeadMaxDays: settings.defaultLeadMaxDays,
         smsOnArrival: settings.smsOnArrival,
         autoCloseOnDeadline: settings.autoCloseOnDeadline,
         deliveryDailyLimit: settings.deliveryDailyLimit,
@@ -132,36 +130,6 @@ export default function SettingsPage() {
           <Field label="Facebook">
             <Input value={settings.facebookUrl} onChange={(v) => patch({ facebookUrl: v })} />
           </Field>
-        </Card>
-
-        <Card className="flex flex-col gap-3 p-4">
-          <div className="text-[15px] font-medium">Хугацаа</div>
-          <p className="m-0 text-[13px] text-ink-2">
-            Төлбөр үргэлж 100% — захиалга өгөхөд барааны дүнг бүтнээр шилжүүлнэ.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Хамгийн бага хоног">
-              <Input
-                value={String(settings.defaultLeadMinDays)}
-                onChange={(v) =>
-                  patch({ defaultLeadMinDays: Number(v.replace(/\D/g, "")) || 0 })
-                }
-                inputMode="numeric"
-              />
-            </Field>
-            <Field label="Хамгийн их хоног">
-              <Input
-                value={String(settings.defaultLeadMaxDays)}
-                onChange={(v) =>
-                  patch({ defaultLeadMaxDays: Number(v.replace(/\D/g, "")) || 0 })
-                }
-                inputMode="numeric"
-              />
-            </Field>
-          </div>
-          <p className="m-0 text-[12px] text-muted">
-            Шинэ бараа үүсгэхэд эдгээр утга анхдагчаар орно.
-          </p>
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">

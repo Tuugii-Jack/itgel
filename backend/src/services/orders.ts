@@ -8,7 +8,7 @@ import type {
 } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
-import { addDays, computeArrival, toIso } from '../lib/date.js';
+import { addDays, toIso } from '../lib/date.js';
 import { conflict } from '../lib/errors.js';
 import { canTransition, ORDER_STATUS_LABEL, previousInFlow, stepsToStatus } from '../lib/orderStatus.js';
 import { mailTemplates, sendMail } from './mail.js';
@@ -785,28 +785,14 @@ export async function notifyArrival(order: Order): Promise<boolean> {
 }
 
 /**
- * Хүлээгдэж буй ирэх огноо.
- * Багцын ETA байвал түүнийг, эс бөгөөс барааны хамгийн сүүлийн `arriveTo`-г авна.
+ * Хүлээгдэж буй ирэх огноо — зөвхөн багцын ETA.
+ * Хаагдах өдөр + хоногоор таамаг бодохгүй.
  */
-export function estimatedArrival(order: OrderWithItems, now = new Date()): { from: Date | null; to: Date | null } {
+export function estimatedArrival(order: OrderWithItems): { from: Date | null; to: Date | null } {
   if (order.batch?.etaFrom || order.batch?.etaTo) {
     return { from: order.batch.etaFrom ?? null, to: order.batch.etaTo ?? null };
   }
-
-  let from: Date | null = null;
-  let to: Date | null = null;
-  for (const item of order.items) {
-    // Захиалах үед амласан огноог мөрөнд нь царцаасан байдаг. Тойрог дахин
-    // гарсан ч эдгээр хөдлөхгүй — өмнө нь тойргоос шууд уншиж байсан тул
-    // барааг дахин гаргахад хуучин захиалгын огноо чимээгүй хойшилдог байв.
-    const arriveFrom =
-      item.arriveFrom ?? computeArrival(null, 0, 0, now).arriveFrom;
-    const arriveTo = item.arriveTo ?? computeArrival(null, 0, 0, now).arriveTo;
-
-    if (!from || arriveFrom > from) from = arriveFrom;
-    if (!to || arriveTo > to) to = arriveTo;
-  }
-  return { from, to };
+  return { from: null, to: null };
 }
 
 export interface TimelineStep {
@@ -838,7 +824,7 @@ const TIMELINE_ORDER: OrderStatus[] = [
 
 /** Дизайн дээрх timeline — алхам бүр `at` эсвэл `estimatedAt`-тай. */
 export function buildTimeline(order: OrderWithItems, now = new Date()): TimelineStep[] {
-  const eta = estimatedArrival(order, now);
+  const eta = estimatedArrival(order);
   const currentIndex = TIMELINE_ORDER.indexOf(order.status);
 
   // Ирээдүйн алхам бүрд огноо ЗААВАЛ байх ёстой — огноогүй бол хэрэглэгч санддаг.

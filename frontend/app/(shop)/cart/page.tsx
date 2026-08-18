@@ -16,7 +16,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useCart, type CartLine } from "@/lib/cart";
 import { useSession } from "@/lib/session";
-import { money, rangeLabel, relativeDay } from "@/lib/format";
+import { money, relativeDay } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 
@@ -433,7 +433,7 @@ function SumRow({ label, value }: { label: string; value: string }) {
 function etaOf(line: CartLine): string {
   return line.type === "ready"
     ? `${relativeDay(line.arriveFrom)} бэлэн`
-    : `${rangeLabel(line.arriveFrom, line.arriveTo)}-нд ирнэ`;
+    : "багцаар ирнэ";
 }
 
 /**

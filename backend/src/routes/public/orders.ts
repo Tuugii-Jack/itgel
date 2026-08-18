@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { generateOrderCode } from '../../lib/code.js';
-import { computeArrival, startOfUbDay } from '../../lib/date.js';
+import { startOfUbDay } from '../../lib/date.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
@@ -112,7 +112,6 @@ publicOrdersRouter.post(
 
     const items = body.items.map((item) => {
       const round = byId.get(item.productId)!;
-      const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
       const options = optionsFromVariants(round.product.variants);
       const raw = normalizeSelections({
         selections: item.selections,
@@ -134,8 +133,8 @@ publicOrdersRouter.post(
         qty: item.qty,
         unitPrice: priced.sellPrice,
         costPriceSnapshot: priced.costPrice,
-        arriveFrom: round.closeAt === null ? null : arrival.arriveFrom,
-        arriveTo: round.closeAt === null ? null : arrival.arriveTo,
+        arriveFrom: null,
+        arriveTo: null,
       };
     });
 

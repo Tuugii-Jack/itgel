@@ -75,9 +75,8 @@ export function ubMonthKey(date: Date): string {
 }
 
 /**
- * Гарт очих огноо. Захиалгын бараа (`closeAt` байгаа) дээр
- * `arriveFrom = closeAt + leadMinDays`, `arriveTo = closeAt + leadMaxDays`.
- * Бэлэн бараа (`closeAt = null`) маргааш авна.
+ * Гарт очих огноо. Бэлэн бараа (`closeAt = null`) маргааш авна.
+ * Урьдчилсан захиалгад энэ функцийг ашиглахгүй — ирэх огноо багцын ETA.
  */
 export function computeArrival(
   closeAt: Date | null,

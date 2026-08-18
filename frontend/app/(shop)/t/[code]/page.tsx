@@ -382,9 +382,7 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                       ? "Авсан"
                       : item.itemStatus === "arrived"
                         ? "Авах боломжтой"
-                        : !item.cancelled && item.arriveFrom && item.arriveTo
-                          ? `${rangeLabel(item.arriveFrom, item.arriveTo)}-нд ирнэ`
-                          : ""}
+                        : ""}
                 </span>
                 <div
                   className={`tnum text-[14px] lg:text-right ${
@@ -401,14 +399,6 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                   className={`text-[13px] lg:hidden ${item.refundPaid ? "text-ok" : "text-ink-2"}`}
                 >
                   {refundPayoutLabel(item.refundPayoutOn, item.refundPaid)}
-                </div>
-              )}
-              {!item.cancelled &&
-                item.itemStatus === "waiting" &&
-                item.arriveFrom &&
-                item.arriveTo && (
-                <div className="tnum text-[13px] text-ink-2 lg:hidden">
-                  {rangeLabel(item.arriveFrom, item.arriveTo)}-нд ирнэ
                 </div>
               )}
               {item.itemStatus === "arrived" && (

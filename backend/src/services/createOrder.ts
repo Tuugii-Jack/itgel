@@ -2,7 +2,6 @@ import { Prisma, type Order } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { generateOrderCode } from '../lib/code.js';
-import { computeArrival } from '../lib/date.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { subtotalOf } from '../lib/money.js';
 import { resolveOptionPrice } from '../lib/optionPrices.js';
@@ -97,7 +96,6 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const items = input.items.map((item) => {
     const round = byId.get(item.productId)!;
-    const arrival = computeArrival(round.closeAt, round.leadMinDays, round.leadMaxDays, now);
     const options = optionsFromVariants(round.product.variants);
     const raw = normalizeSelections({
       selections: item.selections,
@@ -117,8 +115,8 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       qty: item.qty,
       unitPrice: priced.sellPrice,
       costPriceSnapshot: priced.costPrice,
-      arriveFrom: round.closeAt === null ? null : arrival.arriveFrom,
-      arriveTo: round.closeAt === null ? null : arrival.arriveTo,
+      arriveFrom: null,
+      arriveTo: null,
     };
   });
 

@@ -11,7 +11,6 @@ import { replaceRoundSkuStocks, skuStockSum, type SkuStockRow } from '../../lib/
 import { selectionsOf, variantRowsFromOptions, type ProductOption } from '../../lib/options.js';
 import { roundStats } from '../../services/roundStats.js';
 import { adminProduct } from '../../services/serialize.js';
-import { getSettings } from '../../services/settings.js';
 import { presignProductImage, uploadProductImage } from '../../services/storage.js';
 
 export const adminProductsRouter = Router();
@@ -328,17 +327,12 @@ adminProductsRouter.post(
     if (!product) throw notFound('Бараа олдсонгүй.');
 
     const last = product.rounds[0];
-    const settings = await getSettings();
 
     const costPrice = body.costPrice ?? last?.costPrice ?? 0;
     const sellPrice = body.sellPrice ?? last?.sellPrice;
     if (sellPrice === undefined) {
       throw badRequest('Өмнөх гаргалт байхгүй тул үнийг заавал өгнө үү.');
     }
-
-    const leadMinDays = body.leadMinDays ?? last?.leadMinDays ?? settings.defaultLeadMinDays;
-    const leadMaxDays = body.leadMaxDays ?? last?.leadMaxDays ?? settings.defaultLeadMaxDays;
-    if (leadMinDays > leadMaxDays) throw badRequest('leadMinDays нь leadMaxDays-с их байж болохгүй.');
 
     let batchId: string | null = body.batchId === undefined ? null : body.batchId;
     if (batchId) {
@@ -371,8 +365,6 @@ adminProductsRouter.post(
           sellPrice,
           stock: skuStockSum(skuRows) ?? body.stock ?? 0,
           closeAt: body.closeAt === undefined ? null : body.closeAt,
-          leadMinDays,
-          leadMaxDays,
           status: body.status ?? 'DRAFT',
           note: body.note ?? null,
         },

@@ -101,22 +101,24 @@ export function StorefrontCard({
         <Divider className="my-0.5" />
 
         <div className="flex flex-col gap-1.5">
-          <Fact
-            label="Гарт очих"
-            value={arrivalLabel(round)}
-            tone={closed ? "danger" : "neutral"}
-          />
           {isOrder ? (
             <Fact
               label="Захиалга"
               value={`${round.orderedQty} ш · ${round.customerCount} хүн`}
             />
           ) : (
-            <Fact
-              label="Үлдэгдэл"
-              value={soldOut ? "Дууссан" : `${round.stock} ширхэг`}
-              tone={soldOut ? "danger" : "ok"}
-            />
+            <>
+              <Fact
+                label="Гарт очих"
+                value={arrivalLabel(round)}
+                tone={closed ? "danger" : "neutral"}
+              />
+              <Fact
+                label="Үлдэгдэл"
+                value={soldOut ? "Дууссан" : `${round.stock} ширхэг`}
+                tone={soldOut ? "danger" : "ok"}
+              />
+            </>
           )}
         </div>
 

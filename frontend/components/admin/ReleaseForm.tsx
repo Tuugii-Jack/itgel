@@ -51,8 +51,6 @@ export function ReleaseForm({
   );
   const [stock, setStock] = useState("0");
   const [closeAt, setCloseAt] = useState("");
-  const [leadMin, setLeadMin] = useState("7");
-  const [leadMax, setLeadMax] = useState("14");
   const [status, setStatus] = useState<ProductStatus>("ACTIVE");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -92,8 +90,6 @@ export function ReleaseForm({
     const next = product.currentRound;
     if (next) {
       setSellPrice(String(next.sellPrice));
-      setLeadMin(String(next.leadMinDays));
-      setLeadMax(String(next.leadMaxDays));
       setOptionRows(
         seedOptionPriceDrafts(product.options, next.optionPrices, {
           sell: String(next.sellPrice),
@@ -143,8 +139,6 @@ export function ReleaseForm({
     const next = picked?.currentRound;
     if (next) {
       setSellPrice(String(next.sellPrice));
-      setLeadMin(String(next.leadMinDays));
-      setLeadMax(String(next.leadMaxDays));
       setOptionRows(
         seedOptionPriceDrafts(picked?.options, next.optionPrices, {
           sell: String(next.sellPrice),
@@ -153,8 +147,6 @@ export function ReleaseForm({
       setSkuRows(seedSkuStockDrafts(picked?.options, next.skuStocks));
     } else {
       setSellPrice("");
-      setLeadMin("7");
-      setLeadMax("14");
       setOptionRows(seedOptionPriceDrafts(picked?.options, undefined, { sell: "" }));
       setSkuRows(seedSkuStockDrafts(picked?.options, undefined));
     }
@@ -181,8 +173,6 @@ export function ReleaseForm({
           : 0,
         closeAt:
           kind === "preorder" && closeAt ? fromDatetimeLocal(closeAt) : null,
-        leadMinDays: Number(leadMin) || 0,
-        leadMaxDays: Number(leadMax) || 0,
         status,
         note: note.trim() || undefined,
         optionPrices: hasOptions ? optionPrices : [],
@@ -273,26 +263,6 @@ export function ReleaseForm({
                   className="h-11 w-full rounded-[8px] border border-line bg-bg px-3 text-[15px]"
                 />
               </Field>
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Хамгийн бага хоног">
-                  <Input
-                    value={leadMin}
-                    onChange={(v) => setLeadMin(v.replace(/\D/g, ""))}
-                    inputMode="numeric"
-                  />
-                </Field>
-                <Field label="Хамгийн их хоног">
-                  <Input
-                    value={leadMax}
-                    onChange={(v) => setLeadMax(v.replace(/\D/g, ""))}
-                    inputMode="numeric"
-                  />
-                </Field>
-              </div>
-              <p className="m-0 text-[12px] text-muted">
-                Гарт очих огноо = хаагдах өдөр + эдгээр хоног. Багцтай холбохыг дараа
-                багцын хуудаснаас хийнэ.
-              </p>
             </>
           ) : hasOptions && product ? (
             <SkuStockEditor

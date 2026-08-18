@@ -1,7 +1,6 @@
-import type { Batch, OrderStatus, Prisma, ProductRound } from '@prisma/client';
+import type { Batch, OrderStatus, Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
-import { computeArrival } from '../lib/date.js';
 import { conflict, notFound } from '../lib/errors.js';
 import {
   BATCH_STAGE_LABEL,
@@ -264,29 +263,34 @@ export async function detachOrdersForRound(
 }
 
 /**
- * Багцын тойргуудын closeAt + lead-ээс захиалгын мөрүүдийн ирэх огноог дахин тооцно.
- * Цуцлагдсан мөр / гартаа өгсөн захиалгыг хөндөхгүй.
+ * Багцын ETA-г холбоотой захиалгын мөрүүдийн ирэх огноонд хуулна.
+ * ETA байхгүй бол хөндөхгүй — хаагдах өдөр + хоногоор таамаг бодохгүй.
  */
 export async function resyncArrivalsForBatch(
   tx: Tx,
-  batch: Pick<Batch, 'id'> & { deadline?: Date | null },
-  rounds?: Pick<ProductRound, 'id' | 'closeAt' | 'leadMinDays' | 'leadMaxDays'>[],
+  batch: Pick<Batch, 'id'> & { etaFrom?: Date | null; etaTo?: Date | null },
 ): Promise<number> {
-  const list =
-    rounds ??
-    (await tx.productRound.findMany({
-      where: { batchId: batch.id, deletedAt: null, closeAt: { not: null } },
-      select: { id: true, closeAt: true, leadMinDays: true, leadMaxDays: true },
-    }));
+  let etaFrom = batch.etaFrom ?? null;
+  let etaTo = batch.etaTo ?? null;
+  if (batch.etaFrom === undefined && batch.etaTo === undefined) {
+    const row = await tx.batch.findUnique({
+      where: { id: batch.id },
+      select: { etaFrom: true, etaTo: true },
+    });
+    etaFrom = row?.etaFrom ?? null;
+    etaTo = row?.etaTo ?? null;
+  }
+  if (!etaFrom && !etaTo) return 0;
+
+  const from = etaFrom ?? etaTo!;
+  const to = etaTo ?? etaFrom!;
+  const rounds = await tx.productRound.findMany({
+    where: { batchId: batch.id, deletedAt: null },
+    select: { id: true },
+  });
 
   let updated = 0;
-  for (const round of list) {
-    if (!round.closeAt) continue;
-    const { arriveFrom, arriveTo } = computeArrival(
-      round.closeAt,
-      round.leadMinDays,
-      round.leadMaxDays,
-    );
+  for (const round of rounds) {
     const result = await tx.orderItem.updateMany({
       where: {
         roundId: round.id,
@@ -296,7 +300,7 @@ export async function resyncArrivalsForBatch(
           status: { notIn: FROZEN_ORDER_STATUSES },
         },
       },
-      data: { arriveFrom, arriveTo },
+      data: { arriveFrom: from, arriveTo: to },
     });
     updated += result.count;
   }

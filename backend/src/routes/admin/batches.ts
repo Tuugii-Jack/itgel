@@ -373,7 +373,11 @@ adminBatchesRouter.patch(
     }),
   }),
   asyncHandler(async (req, res) => {
-    const body = req.body as { deadline?: Date | null };
+    const body = req.body as {
+      deadline?: Date | null;
+      etaFrom?: Date | null;
+      etaTo?: Date | null;
+    };
 
     const before = await prisma.batch.findFirst({
       where: { id: req.params.id, deletedAt: null },
@@ -383,18 +387,15 @@ adminBatchesRouter.patch(
     const after = await prisma.$transaction(async (tx) => {
       const updated = await tx.batch.update({ where: { id: before.id }, data: req.body });
 
-      // Багцын хугацаа солигдвол холбогдсон бүх урьдчилсан тойргийн closeAt
-      // болон захиалсан хүмүүсийн ирэх огноог дагаж шинэчилнэ.
       if (body.deadline !== undefined && body.deadline !== null) {
         await tx.productRound.updateMany({
           where: { batchId: before.id, deletedAt: null, closeAt: { not: null } },
           data: { closeAt: body.deadline },
         });
-        const rounds = await tx.productRound.findMany({
-          where: { batchId: before.id, deletedAt: null, closeAt: { not: null } },
-          select: { id: true, closeAt: true, leadMinDays: true, leadMaxDays: true },
-        });
-        await resyncArrivalsForBatch(tx, updated, rounds);
+      }
+      const etaChanged = body.etaFrom !== undefined || body.etaTo !== undefined;
+      if (etaChanged || (body.deadline !== undefined && body.deadline !== null)) {
+        await resyncArrivalsForBatch(tx, updated);
       }
       return updated;
     });
