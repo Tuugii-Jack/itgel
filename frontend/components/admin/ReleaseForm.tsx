@@ -55,8 +55,24 @@ export function ReleaseForm({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [seeded, setSeeded] = useState(false);
   const toast = useToast();
+
+  const applyProduct = (picked: AdminProduct | null | undefined) => {
+    if (!picked) {
+      setSellPrice("");
+      setOptionRows([]);
+      setSkuRows([]);
+      return;
+    }
+    const next = picked.currentRound;
+    setSellPrice(next ? String(next.sellPrice) : "");
+    setOptionRows(
+      seedOptionPriceDrafts(picked.options, next?.optionPrices, {
+        sell: next ? String(next.sellPrice) : "",
+      }),
+    );
+    setSkuRows(seedSkuStockDrafts(picked.options, next?.skuStocks));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +86,7 @@ export function ReleaseForm({
             ? initialProductId
             : list.data[0]?.id) ?? "";
         setProductId(pick);
+        applyProduct(list.data.find((p) => p.id === pick) ?? list.data[0] ?? null);
       } catch (e) {
         if (!cancelled) {
           const message = e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.";
@@ -84,23 +101,6 @@ export function ReleaseForm({
       cancelled = true;
     };
   }, [initialProductId, toast]);
-
-  useEffect(() => {
-    if (!product || seeded) return;
-    const next = product.currentRound;
-    if (next) {
-      setSellPrice(String(next.sellPrice));
-      setOptionRows(
-        seedOptionPriceDrafts(product.options, next.optionPrices, {
-          sell: String(next.sellPrice),
-        }),
-      );
-      setSkuRows(seedSkuStockDrafts(product.options, next.skuStocks));
-    } else {
-      setSkuRows(seedSkuStockDrafts(product.options, undefined));
-    }
-    setSeeded(true);
-  }, [product, seeded]);
 
   const sell = Number(sellPrice) || 0;
   const hasOptions = (product?.options?.length ?? 0) > 0;
@@ -135,21 +135,7 @@ export function ReleaseForm({
 
   const onProductChange = (id: string) => {
     setProductId(id);
-    const picked = products.find((p) => p.id === id);
-    const next = picked?.currentRound;
-    if (next) {
-      setSellPrice(String(next.sellPrice));
-      setOptionRows(
-        seedOptionPriceDrafts(picked?.options, next.optionPrices, {
-          sell: String(next.sellPrice),
-        }),
-      );
-      setSkuRows(seedSkuStockDrafts(picked?.options, next.skuStocks));
-    } else {
-      setSellPrice("");
-      setOptionRows(seedOptionPriceDrafts(picked?.options, undefined, { sell: "" }));
-      setSkuRows(seedSkuStockDrafts(picked?.options, undefined));
-    }
+    applyProduct(products.find((p) => p.id === id) ?? null);
   };
 
   const save = async () => {
