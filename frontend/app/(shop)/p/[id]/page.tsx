@@ -16,7 +16,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { useCart } from "@/lib/cart";
 import { money } from "@/lib/format";
-import { optionValueSoldOut, priceForSelections, priceLabel, productSoldOut, selectedSkuStock } from "@/lib/options";
+import { optionValueSoldOut, priceForSelections, priceLabel, productClosed, productSoldOut, selectedSkuStock } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { Product, Store } from "@/lib/types";
 
@@ -88,7 +88,7 @@ export default function ProductPage({
 
   const isOrder = product.type === "order";
   const soldOut = productSoldOut(product);
-  const closed = product.status === "CLOSED";
+  const closed = productClosed(product) || closeLabel === "Хаагдсан";
   const blocked = soldOut || closed;
   const options = product.options ?? [];
   const missingOpt = options.find((o) => !selections[o.name]);
@@ -105,6 +105,12 @@ export default function ProductPage({
   const total = unitPrice * qty;
 
   const addToCart = () => {
+    if (closed) {
+      const message = "Энэ барааны захиалга хаагдсан.";
+      setNotice(message);
+      toast.error(message);
+      return;
+    }
     if (missingOpt) {
       const message = `${missingOpt.name}-г сонгоно уу.`;
       setNotice(message);

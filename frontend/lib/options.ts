@@ -130,6 +130,16 @@ export function productSoldOut(product: {
   return product.stock <= 0;
 }
 
+/** Хаах цаг хүрсэн эсвэл CLOSED — дэлгүүрт захиалах боломжгүй. */
+export function productClosed(
+  product: { status?: string; closeAt?: string | null },
+  now: Date = new Date(),
+): boolean {
+  if (product.status === "CLOSED") return true;
+  if (!product.closeAt) return false;
+  return new Date(product.closeAt).getTime() <= now.getTime();
+}
+
 export function hasPriceRange(price: number, priceMax?: number): boolean {
   return priceMax != null && priceMax > price;
 }

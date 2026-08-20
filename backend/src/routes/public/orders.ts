@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
+import { scheduleCloseExpired } from '../../cron/index.js';
 import { audit } from '../../lib/audit.js';
 import { generateOrderCode } from '../../lib/code.js';
 import { startOfUbDay } from '../../lib/date.js';
@@ -53,6 +54,7 @@ publicOrdersRouter.post(
     const body = req.body as z.infer<typeof createBody>;
     const customerId = req.auth!.sub;
     const now = new Date();
+    scheduleCloseExpired();
 
     const customer = await prisma.customer.findUnique({ where: { id: customerId } });
     if (!customer) throw notFound('Хэрэглэгч олдсонгүй.');

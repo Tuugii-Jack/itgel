@@ -7,7 +7,7 @@ import { ShopPrice } from "@/components/ShopPrice";
 import { Badge, Button, Divider } from "@/components/ui";
 import { useCart } from "@/lib/cart";
 import { countdown } from "@/lib/format";
-import { priceLabel, productSoldOut } from "@/lib/options";
+import { priceLabel, productClosed, productSoldOut } from "@/lib/options";
 import type { Product } from "@/lib/types";
 
 /** Дэлгүүрийн барааны карт. */
@@ -15,11 +15,14 @@ export function ProductCard({ product }: { product: Product }) {
   const cart = useCart();
   const isOrder = product.type === "order";
   const soldOut = productSoldOut(product);
-  const closed = product.status === "CLOSED";
+  const closeLabel = useCountdown(isOrder ? product.closeAt : null);
+  const closed = productClosed(product) || closeLabel === "Хаагдсан";
   const needsChoice =
     (product.options?.length ?? 0) > 0 ||
     product.sizes.length > 0 ||
     product.colors.length > 0;
+
+  if (closed) return null;
 
   return (
     <div className='flex flex-col overflow-hidden rounded-[12px] border border-line bg-bg'>
@@ -30,7 +33,7 @@ export function ProductCard({ product }: { product: Product }) {
             alt={product.name}
             className='h-full w-full'
           />
-          {isOrder && product.closeAt && !closed && (
+          {isOrder && product.closeAt && (
             <CloseCountdown closeAt={product.closeAt} />
           )}
         </div>

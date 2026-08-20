@@ -9,7 +9,7 @@ import {
 } from "@/components/admin/shared";
 import { Badge, Button, Divider } from "@/components/ui";
 import { arrivalLabel, countdown } from "@/lib/format";
-import { priceLabel } from "@/lib/options";
+import { priceLabel, productClosed } from "@/lib/options";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
 /** Дэлгүүрт харагдах нэгж — тойрог, эцэг бараагаа дагуулсан. */
@@ -45,10 +45,10 @@ export function StorefrontCard({
   const { round, product } = item;
   const isOrder = round.type === "order";
   const soldOut = round.status === "SOLD_OUT" || (!isOrder && round.stock <= 0);
-  const closed = round.status === "CLOSED";
-  const live = PUBLIC.includes(round.status);
+  const closed = productClosed(round);
+  const live = PUBLIC.includes(round.status) && !closed;
   /** Хугацаа нь дууссан — дахин нээхийн оронд шинэ багцад гаргах ёстой. */
-  const expired = round.status === "CLOSED" || round.status === "SOLD_OUT";
+  const expired = closed || round.status === "SOLD_OUT";
 
   return (
     <div
@@ -68,7 +68,7 @@ export function StorefrontCard({
           </div>
         )}
 
-        {isOrder && round.closeAt && round.status === "ACTIVE" && (
+        {isOrder && round.closeAt && round.status === "ACTIVE" && !closed && (
           <div className="absolute inset-x-2 bottom-2 flex h-[26px] items-center justify-center rounded-[6px] border border-line bg-bg">
             <span className="tnum text-[12px] text-warn">{countdown(round.closeAt)}</span>
           </div>

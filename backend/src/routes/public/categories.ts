@@ -19,7 +19,16 @@ publicCategoriesRouter.get(
         _count: {
           select: {
             products: {
-              where: { deletedAt: null, rounds: { some: { status: 'ACTIVE', deletedAt: null } } },
+              where: {
+                deletedAt: null,
+                rounds: {
+                  some: {
+                    deletedAt: null,
+                    status: 'ACTIVE',
+                    OR: [{ closeAt: null }, { closeAt: { gt: new Date() } }],
+                  },
+                },
+              },
             },
           },
         },

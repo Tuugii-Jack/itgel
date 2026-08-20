@@ -52,6 +52,26 @@ export async function closeExpiredProducts(now = new Date()): Promise<number> {
   return expired.length;
 }
 
+let closeInFlight = false;
+let lastCloseAt = 0;
+
+/**
+ * Serverless дээр node-cron ажиллахгүй тул дэлгүүрийн хүсэлт дээр
+ * хаагдах цаг хүрсэн тойргийг арын ажил болгож хаана.
+ * 30 секунд тутамд нэг удаа — жагсаалтыг удаашруулахгүй.
+ */
+export function scheduleCloseExpired(): void {
+  const now = Date.now();
+  if (closeInFlight || now - lastCloseAt < 30_000) return;
+  lastCloseAt = now;
+  closeInFlight = true;
+  void closeExpiredProducts()
+    .catch((err) => console.error('[cron] closeExpiredProducts:', err))
+    .finally(() => {
+      closeInFlight = false;
+    });
+}
+
 /**
  * 2. SMS мэдэгдэл — ARRIVED болсон ч мэдэгдэл очоогүй захиалгуудыг барина.
  * Ердийн урсгалд төлөв солигдох үед шууд илгээгддэг; энэ нь аюулгүйн тор.

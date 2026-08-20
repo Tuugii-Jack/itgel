@@ -1,8 +1,10 @@
 import { Router } from 'express';
-import type { Prisma, ProductStatus } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
+import { scheduleCloseExpired } from '../../cron/index.js';
 import { notFound } from '../../lib/errors.js';
+import { shopRoundWhere, roundDeadlinePassed } from '../../lib/roundShop.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { publicProduct } from '../../services/serialize.js';
 
@@ -13,12 +15,6 @@ export const publicProductsRouter = Router();
  * Нэг бараа хэд хэдэн удаа гарсан бол тухай бүрд нь тусдаа мөр харагдана,
  * учир нь үнэ, хаах огноо, ирэх огноо нь өөр өөр.
  */
-
-/**
- * Дэлгүүрт зөвхөн идэвхтэй / дууссан (SOLD_OUT) тойрог.
- * CLOSED — багц эсвэл гараар хаасны дараа нүүрэнд гарахгүй.
- */
-const VISIBLE_STATUSES: ProductStatus[] = ['ACTIVE', 'SOLD_OUT'];
 
 const listQuery = z.object({
   category: z.string().min(1).optional(),
@@ -61,10 +57,11 @@ publicProductsRouter.get(
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
+    scheduleCloseExpired();
+    const now = new Date();
 
     const where: Prisma.ProductRoundWhereInput = {
-      deletedAt: null,
-      status: { in: VISIBLE_STATUSES },
+      ...shopRoundWhere(now),
       product: {
         deletedAt: null,
         ...(q.category ? { categoryId: q.category } : {}),
@@ -92,7 +89,7 @@ publicProductsRouter.get(
       }),
     ]);
 
-    res.setHeader('Cache-Control', 'public, s-maxage=15, stale-while-revalidate=60');
+    res.setHeader('Cache-Control', 'public, s-maxage=5, stale-while-revalidate=15');
     res.json({
       data: rounds.map((r) => publicProduct(r)),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
@@ -104,17 +101,22 @@ publicProductsRouter.get(
   '/:id',
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
+    scheduleCloseExpired();
     const round = await prisma.productRound.findFirst({
       where: {
         id: req.params.id,
         deletedAt: null,
-        status: { in: VISIBLE_STATUSES },
+        status: { in: ['ACTIVE', 'SOLD_OUT', 'CLOSED'] },
         product: { deletedAt: null },
       },
       include: roundInclude,
     });
 
     if (!round) throw notFound('Бараа олдсонгүй.');
+    if (roundDeadlinePassed(round.closeAt) && round.status === 'ACTIVE') {
+      res.json({ data: { ...publicProduct(round), status: 'CLOSED' as const } });
+      return;
+    }
     res.json({ data: publicProduct(round) });
   }),
 );
