@@ -18,7 +18,7 @@ import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { countdown, dayTimeLabel } from "@/lib/format";
-import { priceLabel } from "@/lib/options";
+import { priceLabel, productClosed } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -31,6 +31,10 @@ type ReleaseRow = {
 };
 
 const OPEN_STATUSES: ProductStatus[] = ["ACTIVE", "HIDDEN", "DRAFT"];
+
+function releaseFinished(round: AdminRound, now?: Date) {
+  return round.status === "SOLD_OUT" || productClosed(round, now);
+}
 
 const COPY: Record<
   ReleaseKind,
@@ -74,6 +78,13 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
   const [creating, setCreating] = useState(false);
   const [buyersFor, setBuyersFor] = useState<string | null>(null);
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const now = useMemo(() => new Date(nowMs), [nowMs]);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 300);
@@ -123,25 +134,23 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
     let archived = 0;
     for (const row of allRows) {
       if (row.round.status === "ARCHIVED") archived += 1;
-      else if (row.round.status === "CLOSED" || row.round.status === "SOLD_OUT") closed += 1;
+      else if (releaseFinished(row.round, now)) closed += 1;
       else if (OPEN_STATUSES.includes(row.round.status)) open += 1;
     }
     return { open, closed, archived };
-  }, [allRows]);
+  }, [allRows, now]);
 
   const rows = useMemo(() => {
     return allRows.filter(({ round }) => {
       if (tab === "archived") return round.status === "ARCHIVED";
-      if (tab === "closed")
-        return round.status === "CLOSED" || round.status === "SOLD_OUT";
-      return OPEN_STATUSES.includes(round.status);
+      if (tab === "closed") return releaseFinished(round, now);
+      return OPEN_STATUSES.includes(round.status) && !productClosed(round, now);
     });
-  }, [allRows, tab]);
+  }, [allRows, tab, now]);
 
   const canArchive = (round: AdminRound) =>
     round.status !== "ARCHIVED" &&
-    (round.status === "CLOSED" ||
-      round.status === "SOLD_OUT" ||
+    (releaseFinished(round, now) ||
       round.orderedQty > 0 ||
       (kind === "ready" && round.stock === 0 && round.status === "ACTIVE"));
 
@@ -330,8 +339,8 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                       {kind === "order" ? (
                         <>
                           {round.closeAt ? dayTimeLabel(round.closeAt) : "—"}
-                          {round.closeAt && round.status === "ACTIVE" && (
-                            <div className="text-warn">{countdown(round.closeAt)}</div>
+                          {round.closeAt && !productClosed(round, now) && round.status === "ACTIVE" && (
+                            <div className="text-warn">{countdown(round.closeAt, now)}</div>
                           )}
                         </>
                       ) : (
@@ -363,7 +372,9 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                       </Td>
                     )}
                     <Td>
-                      <ProductStatusBadge status={round.status} />
+                      <ProductStatusBadge
+                        status={productClosed(round, now) ? "CLOSED" : round.status}
+                      />
                     </Td>
                     <Td className="whitespace-nowrap">
                       <div className="flex flex-wrap gap-1.5">
@@ -414,7 +425,9 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="text-[15px] leading-[1.4]">{product.name}</div>
-                      <ProductStatusBadge status={round.status} />
+                      <ProductStatusBadge
+                        status={productClosed(round, now) ? "CLOSED" : round.status}
+                      />
                     </div>
                     <div className="mt-1 tnum text-[13px] text-muted">
                       #{round.roundNo} · {priceLabel(round.price, round.priceMax)}

@@ -18,9 +18,6 @@ const tasks: ScheduledTask[] = [];
  * `autoCloseOnDeadline` унтраалттай бол алгасна.
  */
 export async function closeExpiredProducts(now = new Date()): Promise<number> {
-  const settings = await getSettings();
-  if (!settings.autoCloseOnDeadline) return 0;
-
   const expired = await prisma.productRound.findMany({
     where: { deletedAt: null, status: 'ACTIVE', closeAt: { not: null, lte: now } },
     select: { id: true, roundNo: true, product: { select: { name: true } } },
@@ -33,8 +30,11 @@ export async function closeExpiredProducts(now = new Date()): Promise<number> {
   });
 
   // Төлөгдөөгүйг цуцлаад, төлснийг «Зам дээр» болгоно.
-  for (const round of expired) {
-    await finalizeRoundClose(round.id, 'system');
+  const settings = await getSettings();
+  if (settings.autoCloseOnDeadline) {
+    for (const round of expired) {
+      await finalizeRoundClose(round.id, 'system');
+    }
   }
 
   await audit({
@@ -45,6 +45,7 @@ export async function closeExpiredProducts(now = new Date()): Promise<number> {
     after: {
       count: expired.length,
       rounds: expired.map((r) => `${r.product.name} #${r.roundNo}`),
+      finalized: settings.autoCloseOnDeadline,
     },
   });
 

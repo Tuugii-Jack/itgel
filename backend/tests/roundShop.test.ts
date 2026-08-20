@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { roundDeadlinePassed, shopRoundWhere } from '../src/lib/roundShop.js';
+import { effectiveRoundStatus, roundDeadlinePassed, shopRoundWhere } from '../src/lib/roundShop.js';
 
 describe('дэлгүүрийн харагдах тойрог', () => {
   const now = new Date('2026-08-20T12:00:00.000Z');
@@ -15,5 +15,17 @@ describe('дэлгүүрийн харагдах тойрог', () => {
     const where = shopRoundWhere(now);
     expect(where.status).toEqual({ in: ['ACTIVE', 'SOLD_OUT'] });
     expect(where.OR).toEqual([{ closeAt: null }, { closeAt: { gt: now } }]);
+  });
+
+  it('ACTIVE + хүрсэн closeAt → CLOSED', () => {
+    expect(
+      effectiveRoundStatus('ACTIVE', new Date('2026-08-20T11:00:00.000Z'), now),
+    ).toBe('CLOSED');
+    expect(
+      effectiveRoundStatus('ACTIVE', new Date('2026-08-20T13:00:00.000Z'), now),
+    ).toBe('ACTIVE');
+    expect(effectiveRoundStatus('HIDDEN', new Date('2026-08-20T11:00:00.000Z'), now)).toBe(
+      'HIDDEN',
+    );
   });
 });

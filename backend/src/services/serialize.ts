@@ -12,6 +12,7 @@ import type {
   SizeChartRow,
 } from '@prisma/client';
 import { computeArrival, payoutDateForReturn, toIso } from '../lib/date.js';
+import { effectiveRoundStatus } from '../lib/roundShop.js';
 import { marginPercent } from '../lib/money.js';
 import {
   adminOptionPrices,
@@ -67,7 +68,7 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     skuStocks: publicSkuStocks(round.skuStocks),
     stock: round.stock,
     type: round.closeAt === null ? ('ready' as const) : ('order' as const),
-    status: round.status,
+    status: effectiveRoundStatus(round.status, round.closeAt, now),
     closeAt: toIso(round.closeAt),
     leadMinDays: round.leadMinDays,
     leadMaxDays: round.leadMaxDays,
@@ -161,7 +162,10 @@ export function adminProduct(
     rounds,
     roundCount: rounds.length,
     /** Одоо зарагдаж буй тойрог — жагсаалтад үнэ, төлвийг харуулахад. */
-    currentRound: rounds.find((r) => r.status === 'ACTIVE') ?? rounds[0] ?? null,
+    currentRound:
+      rounds.find((r) => r.status === 'ACTIVE') ??
+      rounds[0] ??
+      null,
     createdAt: product.createdAt.toISOString(),
     updatedAt: product.updatedAt.toISOString(),
     deletedAt: toIso(product.deletedAt),

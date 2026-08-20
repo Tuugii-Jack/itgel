@@ -135,6 +135,7 @@ export function productClosed(
   product: { status?: string; closeAt?: string | null },
   now: Date = new Date(),
 ): boolean {
+  if (product.status === "ARCHIVED") return false;
   if (product.status === "CLOSED") return true;
   if (!product.closeAt) return false;
   return new Date(product.closeAt).getTime() <= now.getTime();

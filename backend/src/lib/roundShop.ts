@@ -7,6 +7,16 @@ export function roundDeadlinePassed(closeAt: Date | null, now = new Date()): boo
   return closeAt !== null && closeAt.getTime() <= now.getTime();
 }
 
+/** Хаах цаг хүрсэн ACTIVE тойрог — UI/API дээр CLOSED. */
+export function effectiveRoundStatus(
+  status: ProductStatus,
+  closeAt: Date | null,
+  now = new Date(),
+): ProductStatus {
+  if (status === 'ACTIVE' && roundDeadlinePassed(closeAt, now)) return 'CLOSED';
+  return status;
+}
+
 /**
  * Дэлгүүрт харагдах тойрог: идэвхтэй/дууссан, хаах цаг нь хараахан болоогүй.
  * CLOSED болон `closeAt` хүрсэн урьдчилсан гаргалт нүүрэнд гарахгүй.

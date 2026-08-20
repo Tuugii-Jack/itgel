@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { scheduleCloseExpired } from '../../cron/index.js';
 import { notFound } from '../../lib/errors.js';
-import { shopRoundWhere, roundDeadlinePassed } from '../../lib/roundShop.js';
+import { shopRoundWhere } from '../../lib/roundShop.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { publicProduct } from '../../services/serialize.js';
 
@@ -113,10 +113,6 @@ publicProductsRouter.get(
     });
 
     if (!round) throw notFound('Бараа олдсонгүй.');
-    if (roundDeadlinePassed(round.closeAt) && round.status === 'ACTIVE') {
-      res.json({ data: { ...publicProduct(round), status: 'CLOSED' as const } });
-      return;
-    }
     res.json({ data: publicProduct(round) });
   }),
 );

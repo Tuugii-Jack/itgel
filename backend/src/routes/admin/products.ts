@@ -2,6 +2,7 @@ import { Router, raw as rawBody } from 'express';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
+import { closeExpiredProducts } from '../../cron/index.js';
 import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
@@ -118,6 +119,7 @@ adminProductsRouter.get(
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
+    await closeExpiredProducts();
 
     const roundFilter: Prisma.ProductRoundWhereInput = {
       deletedAt: null,
