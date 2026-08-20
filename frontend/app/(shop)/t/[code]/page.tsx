@@ -1,28 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { use, useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 import { FulfilmentChooser } from "@/components/FulfilmentChooser";
 import { PaymentPanel } from "@/components/PaymentPanel";
-import { Badge, Button, ErrorNote, Skeleton, type Tone } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
+import { Badge, Button, ErrorNote } from "@/components/ui";
+import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
-import { useSession } from "@/lib/session";
 import { awaitingPayment } from "@/lib/payment";
 import { orderHasPickup, ITEM_FULFILMENT_LABEL } from "@/lib/fulfilment";
 import { usePolling } from "@/lib/usePolling";
-import type { MyOrder, OrderStatus, PublicOrder, Store } from "@/lib/types";
-
-const STATUS_TONE: Record<OrderStatus, Tone> = {
-  NEW: "neutral",
-  CONFIRMED: "info",
-  IN_BATCH: "info",
-  IN_TRANSIT: "info",
-  ARRIVED: "ok",
-  HANDED_OVER: "ok",
-  CANCELLED: "danger",
-};
+import type { OrderStatus, PublicOrder } from "@/lib/types";
+import {
+  STATUS_TONE,
+  TrackDetailSkeleton,
+  fetchTrackedOrder,
+  peekTrackedOrder,
+  useTrackShell,
+} from "../TrackShell";
 
 /**
  * 05 Захиалга хянах — дизайны бүтэц.
@@ -30,45 +27,57 @@ const STATUS_TONE: Record<OrderStatus, Tone> = {
  * 6 төлвийг гурван шатны зурвас болгож хураангуйлж, доор нь ирэх огнооны
  * карт тавина. Дизайны хэмжээ: код 22px, зурвас 4px, ETA 20px.
  */
-export default function TrackPage({ params }: { params: Promise<{ code: string }> }) {
-  const { code } = use(params);
-  const session = useSession();
-  const [order, setOrder] = useState<PublicOrder | null>(null);
-  const [store, setStore] = useState<Store | null>(null);
-  const [myOrders, setMyOrders] = useState<MyOrder[]>([]);
+export default function TrackPage() {
+  const code = String(useParams<{ code: string }>().code ?? "").toUpperCase();
+  const { store, setChromeHidden } = useTrackShell();
+  const [order, setOrder] = useState<PublicOrder | null>(() => peekTrackedOrder(code));
   /** Дизайны 06 дэлгэц — «Ирсэн барааг авах» дарсны дараа нээгдэнэ. */
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (!code) return;
     try {
-      const [o, s] = await Promise.all([api.order(code), api.store()]);
-      setOrder(o);
-      setStore(s);
+      const next = await fetchTrackedOrder(code);
+      setOrder(next);
+      setError(null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
+      if (!peekTrackedOrder(code)) {
+        setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
+      }
     }
   }, [code]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (!code) return;
+    const cached = peekTrackedOrder(code);
+    if (cached) setOrder(cached);
+    else setOrder((prev) => (prev?.code === code ? prev : null));
+    setCollecting(false);
+    setError(null);
 
-  // Нэвтэрсэн бол бусад захиалгыг нь жагсаалтад харуулна.
-  useEffect(() => {
-    if (!session.me) {
-      setMyOrders([]);
-      return;
-    }
     let alive = true;
-    api
-      .myOrders()
-      .then((r) => alive && setMyOrders(r.data))
-      .catch(() => undefined);
+    fetchTrackedOrder(code)
+      .then((next) => {
+        if (!alive) return;
+        setOrder(next);
+        setError(null);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        if (peekTrackedOrder(code)) return;
+        setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
+      });
     return () => {
       alive = false;
     };
-  }, [session.me]);
+  }, [code]);
+
+  useEffect(() => {
+    const hide = collecting && Boolean(store);
+    setChromeHidden(hide);
+    return () => setChromeHidden(false);
+  }, [collecting, store, setChromeHidden]);
 
   const unpaid = Boolean(
     order &&
@@ -90,9 +99,9 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
   // админ бүртгэмэгц «Төлөгдсөн» гэж харагдана.
   usePolling(load, 15_000, unpaid);
 
-  if (error) {
+  if (error && !order) {
     return (
-      <div className="p-4">
+      <div className="px-4 pt-5 lg:px-0 lg:pt-0">
         <ErrorNote>{error}</ErrorNote>
         <Link href="/t" className="mt-4 inline-block text-[13px]">
           Өөр код оруулах
@@ -101,57 +110,28 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
     );
   }
 
-  if (!order || !store) {
-    return (
-      <div className="screen pb-8">
-        <div className="px-4 pt-5 lg:px-10 lg:pt-8">
-          <Skeleton className="h-8 w-40" />
-          <Skeleton className="mt-2 h-4 w-28" />
-          <div className="mt-6 grid grid-cols-3 gap-2">
-            <Skeleton className="h-1 w-full rounded-full" />
-            <Skeleton className="h-1 w-full rounded-full" />
-            <Skeleton className="h-1 w-full rounded-full" />
-          </div>
-          <Skeleton className="mt-5 h-28 w-full rounded-[12px]" />
-          <Skeleton className="mt-6 h-40 w-full rounded-[12px]" />
-        </div>
-      </div>
-    );
+  if (!order) {
+    return <TrackDetailSkeleton />;
   }
 
   const stages = buildStages(order);
   const eta = etaOf(order);
 
+  if (order.canChooseFulfilment && collecting && store) {
+    return (
+      <FulfilmentChooser
+        order={order}
+        store={store}
+        onDone={(more) => {
+          if (!more) setCollecting(false);
+          void load();
+        }}
+      />
+    );
+  }
+
   return (
-    <div className="screen pb-8">
-      {/*
-        Дизайнд «Бараа ирсэн» нь тусдаа дэлгэц (06). Хянах дэлгэцийн дотор
-        оруулбал доод талын тогтмол товчны зай нь хуудсыг тасалдуулна.
-      */}
-      {order.canChooseFulfilment && collecting ? (
-        <FulfilmentChooser
-          order={order}
-          store={store}
-          onDone={(more) => {
-            if (!more) setCollecting(false);
-            void load();
-          }}
-        />
-      ) : (
-        <>
-      {/* Laptop-ийн хуудасны гарчиг */}
-      <div className="hidden px-10 pt-8 lg:block">
-        <div className="text-[24px] font-medium">Захиалга хянах</div>
-      </div>
-
-      <div className="lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:items-start lg:gap-8 lg:px-10 lg:pt-6">
-        {/* Дизайны захиалгын жагсаалт — laptop дээр зүүн багана */}
-        <OrderList orders={myOrders} current={order.code} />
-
-        <div className="lg:flex lg:flex-col lg:gap-6 lg:min-w-0">
-      {/* Мобайл — захиалгууд хэвтээ чип болно */}
-      <OrderChips orders={myOrders} current={order.code} />
-
+    <>
       {/* Код ба төлөв */}
       <div className="flex items-start justify-between gap-3 px-4 pt-5 lg:px-0 lg:pt-0">
         <div>
@@ -256,7 +236,7 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
         )}
 
       {/* Мөнгө хүлээж байгаа бол QPay */}
-      {unpaid && (
+      {unpaid && store && (
         <div className="px-4 pt-6 lg:px-0 lg:pt-0">
           <PaymentPanel order={order} store={store} onClaimed={load} />
         </div>
@@ -321,8 +301,12 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
               </div>
             </div>
             <div className="flex flex-col gap-1.5 border-t border-line bg-surface px-4 py-3.5 text-[14px] text-ink-2">
-              <div>{store.address}</div>
-              <div>{store.workHours}</div>
+              {store ? (
+                <>
+                  <div>{store.address}</div>
+                  <div>{store.workHours}</div>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
@@ -348,7 +332,7 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
           {order.items.map((item) => (
             <div
               key={item.id}
-              className="flex flex-col gap-1.5 lg:grid lg:grid-cols-[minmax(220px,1fr)_110px_190px_120px] lg:items-center lg:gap-x-5 lg:gap-y-0 lg:border-b lg:border-line lg:px-5 lg:py-3.5"
+              className="flex min-w-0 flex-col gap-1.5 lg:grid lg:grid-cols-[minmax(0,1fr)_110px_minmax(0,190px)_120px] lg:items-center lg:gap-x-5 lg:gap-y-0 lg:border-b lg:border-line lg:px-5 lg:py-3.5"
             >
               <div className="flex items-start gap-3 lg:contents">
                 <div className="min-w-0 flex-1">
@@ -468,6 +452,7 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
       </div>
 
       {/* Холбоо барих */}
+      {store && (
       <div className="mx-4 mb-8 mt-6 flex flex-col gap-3 rounded-[12px] border border-line bg-surface p-4 lg:mx-0 lg:mb-0 lg:mt-0 lg:p-5">
         <div>
           <div className="text-[15px] font-medium">Асуух зүйл байна уу?</div>
@@ -499,67 +484,8 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
           )}
         </div>
       </div>
-        </div>
-      </div>
-        </>
       )}
-    </div>
-  );
-}
-
-/**
- * Дизайны захиалгын жагсаалт — laptop дээр зүүн 300px багана.
- * Нэвтэрсэн, нэгээс олон захиалгатай үед л утга учиртай.
- */
-function OrderList({ orders, current }: { orders: MyOrder[]; current: string }) {
-  if (orders.length < 2) return null;
-
-  return (
-    <div className="hidden lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-2.5">
-      {orders.map((o) => {
-        const active = o.code === current;
-        return (
-          <Link
-            key={o.code}
-            href={`/t/${o.code}`}
-            className={`flex flex-col gap-2 rounded-[12px] border p-4 no-underline
-              ${active ? "border-ink bg-surface" : "border-line bg-bg hover:bg-surface"}`}
-          >
-            <span className="flex w-full items-start justify-between gap-3">
-              <span className="tnum text-[15px]">{o.code}</span>
-              <Badge tone={STATUS_TONE[o.status]}>{o.statusLabel}</Badge>
-            </span>
-            <span className="flex w-full items-center justify-between gap-3 text-[13px] text-muted">
-              <span className="tnum">{dayLabel(o.createdAt)}</span>
-              <span className="tnum">{money(o.subtotal)}</span>
-            </span>
-          </Link>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Мобайл дээрх ижил жагсаалт — хэвтээ гүйдэг чипүүд. */
-function OrderChips({ orders, current }: { orders: MyOrder[]; current: string }) {
-  if (orders.length < 2) return null;
-
-  return (
-    <div className="no-scrollbar flex gap-2 overflow-x-auto px-4 pt-3 lg:hidden">
-      {orders.map((o) => {
-        const active = o.code === current;
-        return (
-          <Link
-            key={o.code}
-            href={`/t/${o.code}`}
-            className={`tnum flex h-9 shrink-0 items-center rounded-[8px] border px-3 text-[13px] whitespace-nowrap no-underline
-              ${active ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"}`}
-          >
-            {o.code}
-          </Link>
-        );
-      })}
-    </div>
+    </>
   );
 }
 

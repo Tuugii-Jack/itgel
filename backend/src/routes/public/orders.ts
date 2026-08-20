@@ -244,6 +244,19 @@ async function createWithUniqueCode(tx: TxClient, data: NewOrderData) {
   throw conflict('Захиалгын код үүсгэж чадсангүй. Дахин оролдоно уу.');
 }
 
+/** Карго/хадгалалтыг GET-ийн хариуны дараа ард нь бичнэ. */
+async function persistPublicOrderFees(
+  orderId: string,
+  flags: { storage: boolean; cargo: boolean },
+): Promise<void> {
+  try {
+    if (flags.storage) await syncOrderStorageFee(orderId);
+    if (flags.cargo) await syncOrderCargoFee(prisma, orderId);
+  } catch (err) {
+    console.error('[public.order.get] persist failed', err);
+  }
+}
+
 /** GET /api/orders/:code — публик хяналт, timeline-тай. */
 publicOrdersRouter.get(
   '/:code',
@@ -263,50 +276,35 @@ publicOrdersRouter.get(
 
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
-    // Унших үед DB-д бичихгүй — задаргааг одоогийн мөрөөс бодно.
-    // Хураамж өөрчлөгдсөн бол нэг удаа sync (давхар full include fetch хийхгүй).
+    // Хариуг одоогийн мөрөөс бодно — GET дээр карго/хадгалалт sync хүлээлгэхгүй.
+    // Бохир бол ард нь нэг удаа бичнэ (хэрэглэгчийн хариу хойшлохгүй).
     const settings = await getSettingsCached();
-    let storage = peekStorageFee(order, settings);
-    let storageFee = order.storageFee;
-    let cargoFee = order.cargoFee;
-    let dueAmount = order.dueAmount;
-    let paidAmount = order.paidAmount;
-    let refundedAmount = order.refundedAmount;
-    let subtotal = order.subtotal;
-
+    const storage = peekStorageFee(order, settings);
     const expectedCargo = order.items
       .filter((item) => item.cancelledAt == null)
       .reduce((sum, item) => sum + item.qty * (item.round?.cargoFee ?? 0), 0);
-    const moneyDirty =
-      storage.fee !== order.storageFee ||
-      (expectedCargo !== order.cargoFee &&
-        order.status !== 'HANDED_OVER' &&
-        order.status !== 'CANCELLED');
+    const frozen = order.status === 'HANDED_OVER' || order.status === 'CANCELLED';
+    const cargoFee = frozen ? order.cargoFee : expectedCargo;
+    const storageFee = storage.fee;
+    const paidAmount = order.paidAmount;
+    const refundedAmount = order.refundedAmount;
+    const subtotal = order.subtotal;
+    const totals = computeTotals({
+      subtotal,
+      storageFee,
+      cargoFee,
+      paidAmount,
+      refundedAmount,
+    });
+    const dueAmount = totals.dueAmount;
 
-    if (moneyDirty) {
-      if (storage.fee !== order.storageFee) {
-        storage = await syncOrderStorageFee(order.id);
-      }
-      if (expectedCargo !== order.cargoFee) {
-        await syncOrderCargoFee(prisma, order.id);
-      }
-      const moneyRow = await prisma.order.findUniqueOrThrow({
-        where: { id: order.id },
-        select: {
-          storageFee: true,
-          cargoFee: true,
-          dueAmount: true,
-          paidAmount: true,
-          refundedAmount: true,
-          subtotal: true,
-        },
+    const persistStorage = storageFee !== order.storageFee;
+    const persistCargo = !frozen && expectedCargo !== order.cargoFee;
+    if (persistStorage || persistCargo) {
+      void persistPublicOrderFees(order.id, {
+        storage: persistStorage,
+        cargo: persistCargo,
       });
-      storageFee = moneyRow.storageFee;
-      cargoFee = moneyRow.cargoFee;
-      dueAmount = moneyRow.dueAmount;
-      paidAmount = moneyRow.paidAmount;
-      refundedAmount = moneyRow.refundedAmount;
-      subtotal = moneyRow.subtotal;
     }
 
     const dates = refundPayoutDatesFor({ items: order.items, refunds: order.payments });
@@ -335,15 +333,7 @@ publicOrdersRouter.get(
         paidAmount,
         refundedAmount,
         dueAmount,
-        paymentState: paymentState(
-          computeTotals({
-            subtotal,
-            storageFee,
-            cargoFee,
-            paidAmount,
-            refundedAmount,
-          }),
-        ),
+        paymentState: paymentState(totals),
         paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         fulfilment: order.fulfilment,
         createdAt: order.createdAt.toISOString(),

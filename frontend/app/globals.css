@@ -121,10 +121,15 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+html {
+  overflow-x: clip;
+}
+
 html,
 body {
   background: var(--color-surface-2);
   color: var(--color-ink);
+  max-width: 100%;
 }
 
 body {
