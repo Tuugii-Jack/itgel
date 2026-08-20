@@ -16,6 +16,7 @@ import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
 import { paidPayoutDaySet } from '../../services/returns.js';
 import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
+import { syncOrderCargoFee } from '../../services/cargoFee.js';
 import { getSettings, getSettingsCached, districtNames } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
@@ -252,7 +253,7 @@ publicOrdersRouter.get(
     const order = await prisma.order.findFirst({
       where: { code, deletedAt: null },
       include: {
-        items: { include: { product: true } },
+        items: { include: { product: true, round: true } },
         batch: true,
         delivery: true,
         customer: true,
@@ -401,7 +402,7 @@ const fulfilmentBody = z
     district: z.string().trim().min(1).max(60).optional(),
     khoroo: z.string().trim().min(1).max(60).optional(),
     address: z.string().trim().min(5).max(300).optional(),
-    itemIds: z.array(z.string().min(1)).min(1).max(100).optional(),
+    itemIds: z.array(z.string().min(1)).min(1).max(100),
   })
   .refine((v) => v.type === 'PICKUP' || (v.district && v.khoroo && v.address), {
     message: 'Хүргэлтэд байршил, хороо/сум, хаяг заавал шаардлагатай.',
@@ -417,7 +418,10 @@ publicOrdersRouter.post(
 
     const order = await prisma.order.findFirst({
       where: { code, deletedAt: null },
-      include: { delivery: true, items: true },
+      include: {
+        delivery: true,
+        items: { include: { round: true } },
+      },
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
@@ -425,17 +429,12 @@ publicOrdersRouter.post(
       throw conflict('Бараа агуулахад ирсний дараа авах хэлбэрээ сонгоно.');
     }
 
-    const pending = order.items.filter(itemNeedsFulfilment);
-    const requested = body.itemIds
-      ? order.items.filter((item) => body.itemIds!.includes(item.id))
-      : pending;
-
-    if (body.itemIds) {
-      const known = new Set(order.items.map((item) => item.id));
-      if (body.itemIds.some((id) => !known.has(id))) {
-        throw badRequest('Сонгосон бараа энэ захиалгад байхгүй.');
-      }
+    const known = new Set(order.items.map((item) => item.id));
+    if (body.itemIds.some((id) => !known.has(id))) {
+      throw badRequest('Сонгосон бараа энэ захиалгад байхгүй.');
     }
+
+    const requested = order.items.filter((item) => body.itemIds.includes(item.id));
     if (requested.length === 0) {
       throw conflict('Авах арга сонгох ирсэн бараа алга.');
     }
@@ -447,7 +446,16 @@ publicOrdersRouter.post(
       }
     }
 
-    const cargoDue = unpaidCargoFee(order);
+    const itemIds = requested.map((item) => item.id);
+    const deliveryCargo = order.items
+      .filter(
+        (item) =>
+          item.cancelledAt == null &&
+          (item.fulfilment === 'DELIVERY' ||
+            (body.type === 'DELIVERY' && itemIds.includes(item.id))),
+      )
+      .reduce((sum, item) => sum + item.qty * item.round.cargoFee, 0);
+    const cargoDue = unpaidCargoFee({ ...order, cargoFee: deliveryCargo });
     if (body.type === 'DELIVERY' && cargoDue > 0 && body.payMethod !== 'QPAY') {
       throw badRequest('Хүргэлтээр авахад каргог зөвхөн QPay-ээр төлнө.');
     }
@@ -460,8 +468,6 @@ publicOrdersRouter.post(
     if (body.type === 'DELIVERY' && !place) {
       throw badRequest('Дүүрэг эсвэл аймаг буруу байна.');
     }
-
-    const itemIds = requested.map((item) => item.id);
 
     const updated = await prisma.$transaction(async (tx) => {
       await tx.orderItem.updateMany({
@@ -497,6 +503,7 @@ publicOrdersRouter.post(
       }
 
       await syncOrderFulfilment(tx, order.id);
+      await syncOrderCargoFee(tx, order.id);
 
       await tx.order.update({
         where: { id: order.id },
@@ -524,6 +531,7 @@ publicOrdersRouter.post(
         itemIds,
         payMethod: body.payMethod,
         district: place,
+        cargoDue,
       },
     });
 
@@ -534,6 +542,7 @@ publicOrdersRouter.post(
         cargoPayMethod: updated.cargoPayMethod,
         deliveryFee: updated.deliveryFee,
         dueAmount: updated.dueAmount,
+        cargoFee: updated.cargoFee,
         delivery: publicDelivery(updated.delivery),
         canChooseFulfilment: orderCanChooseFulfilment(updated),
       },

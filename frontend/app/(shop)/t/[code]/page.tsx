@@ -272,6 +272,14 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                   <div className="text-[15px] font-medium">
                     {orderHasPickup(order) ? "Зарим бараа хүргэлтээр" : "Хүргэлтээр авна"}
                   </div>
+                  {order.items.some((item) => item.fulfilment === "DELIVERY") && (
+                    <div className="mt-1 text-[13px] text-ink-2">
+                      {order.items
+                        .filter((item) => !item.cancelled && item.fulfilment === "DELIVERY")
+                        .map((item) => item.name)
+                        .join(" · ")}
+                    </div>
+                  )}
                 </div>
                 <Badge tone={order.delivery.status === "DELIVERED" ? "ok" : "info"}>
                   {order.delivery.status === "DELIVERED" ? "Хүргэсэн" : "Товлосон"}

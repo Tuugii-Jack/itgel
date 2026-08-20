@@ -5,10 +5,38 @@ export class AppError extends Error {
 
   constructor(status: number, code: string, message: string, details?: unknown) {
     super(message);
+    this.name = 'AppError';
     this.status = status;
     this.code = code;
     this.details = details;
+    Object.setPrototypeOf(this, new.target.prototype);
   }
+}
+
+export function isAppError(error: unknown): error is AppError {
+  if (error instanceof AppError) return true;
+  if (typeof error !== 'object' || error === null) return false;
+  const e = error as { status?: unknown; code?: unknown; message?: unknown };
+  return (
+    typeof e.status === 'number' &&
+    typeof e.code === 'string' &&
+    typeof e.message === 'string' &&
+    e.status >= 400 &&
+    e.status < 600 &&
+    !e.code.startsWith('P')
+  );
+}
+
+/** Prisma $transaction алдааг боож AppError-ийг нууж болно. */
+export function unwrapAppError(error: unknown): AppError | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    if (isAppError(current)) return current;
+    current = 'cause' in current ? (current as { cause: unknown }).cause : null;
+  }
+  return null;
 }
 
 export const badRequest = (message: string, details?: unknown) =>

@@ -13,8 +13,11 @@ import { ITEM_FULFILMENT_LABEL, itemNeedsFulfilment } from "@/lib/fulfilment";
 import { useToast } from "@/lib/toast";
 import type { PublicOrder, Store } from "@/lib/types";
 
-function unpaidCargoFee(order: PublicOrder): number {
-  const cargoFee = Math.max(0, order.cargoFee ?? 0);
+function lineCargo(item: PublicOrder["items"][number]): number {
+  return Math.max(0, item.cargoFee ?? 0);
+}
+
+function unpaidTowardCargo(order: PublicOrder, cargoFee: number): number {
   if (cargoFee <= 0) return 0;
   const netPaid = order.paidAmount - order.refundedAmount;
   const towardCargo = Math.max(0, netPaid - order.subtotal - (order.storageFee ?? 0));
@@ -47,15 +50,11 @@ export function FulfilmentChooser({
     null,
   );
 
-  const cargoFee = order.cargoFee ?? 0;
-  const cargoDue = unpaidCargoFee(order);
-  const needsCargoPay = type === "DELIVERY" && cargoDue > 0;
   const namedDistricts = store.deliveryDistricts ?? [];
   const districts =
     namedDistricts.length > 0
       ? namedDistricts
       : store.deliveryFees.map((d) => d.district);
-  const total = order.dueAmount;
 
   const liveItems = order.items.filter((i) => !i.cancelled);
   const pendingItems = liveItems.filter(itemNeedsFulfilment);
@@ -74,12 +73,17 @@ export function FulfilmentChooser({
   );
 
   const pendingKey = pendingItems.map((i) => i.id).sort().join(",");
-  const [selected, setSelected] = useState<Set<string>>(
-    () => new Set(pendingItems.map((i) => i.id)),
-  );
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    setSelected(new Set(pendingKey ? pendingKey.split(",") : []));
+    setSelected((prev) => {
+      const allowed = new Set(pendingKey ? pendingKey.split(",") : []);
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (allowed.has(id)) next.add(id);
+      }
+      return next;
+    });
   }, [pendingKey]);
 
   const choose = (next: "PICKUP" | "DELIVERY") => {
@@ -108,6 +112,23 @@ export function FulfilmentChooser({
     () => pendingItems.filter((i) => selected.has(i.id)).length,
     [pendingItems, selected],
   );
+
+  const alreadyDeliveryCargo = chosenItems
+    .filter((item) => item.fulfilment === "DELIVERY")
+    .reduce((sum, item) => sum + lineCargo(item), 0);
+  const selectedCargo = pendingItems
+    .filter((item) => selected.has(item.id))
+    .reduce((sum, item) => sum + lineCargo(item), 0);
+  const deliveryCargo =
+    alreadyDeliveryCargo + (type === "DELIVERY" ? selectedCargo : 0);
+  const cargoDue = unpaidTowardCargo(order, deliveryCargo);
+  const needsCargoPay = type === "DELIVERY" && cargoDue > 0;
+  const netPaid = order.paidAmount - order.refundedAmount;
+  const storageDue = Math.max(
+    0,
+    (order.storageFee ?? 0) - Math.max(0, netPaid - order.subtotal),
+  );
+  const payNow = cargoDue + (needsCargoPay ? storageDue : 0);
 
   const submit = async () => {
     setError(null);
@@ -210,7 +231,8 @@ export function FulfilmentChooser({
         <div className="tnum text-[13px] text-muted">{order.code}</div>
         <div className="mt-1 text-[24px] font-medium lg:text-[28px]">{title}</div>
         <div className="mt-1 text-[14px] leading-[1.5] text-ink-2 lg:text-[15px]">
-          Чек хийсэн барааг доорх аргаар авна. Нэгийг хүргүүлж, нөгөөг нь очиж авч болно.
+          Авах бараагаа чек хийнэ үү. Чек хийсэнд л доорх арга хамаарна — нэгийг
+          хүргүүлж, нөгөөг нь очиж авч болно.
           {waitingItems.length > 0 ? " Ирээгүй бараа дараа нь ирнэ." : ""}
         </div>
       </div>
@@ -219,7 +241,24 @@ export function FulfilmentChooser({
         <div className="lg:flex lg:flex-col lg:gap-6">
 
       <div className="flex flex-col gap-2 px-4 pt-5 lg:px-0 lg:pt-0">
-        <div className="text-[13px] text-ink-2">Ирсэн бараа</div>
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="text-[13px] text-ink-2">Ирсэн бараа — чек хийнэ үү</div>
+          {pendingItems.length > 1 && (
+            <button
+              type="button"
+              className="text-[13px] text-ink-2 underline-offset-2 hover:underline"
+              onClick={() =>
+                setSelected(
+                  selectedCount === pendingItems.length
+                    ? new Set()
+                    : new Set(pendingItems.map((item) => item.id)),
+                )
+              }
+            >
+              {selectedCount === pendingItems.length ? "Бүгдийг цэвэрлэх" : "Бүгдийг сонгох"}
+            </button>
+          )}
+        </div>
         <div className="overflow-hidden rounded-[12px] border border-line">
           {pendingItems.length === 0 && chosenItems.length === 0 ? (
             <div className="p-3.5 text-[14px] text-muted">Ирсэн бараа алга.</div>
@@ -279,8 +318,10 @@ export function FulfilmentChooser({
               <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
                 Карго {money(cargoDue)}
               </span>
-            ) : cargoFee > 0 ? (
+            ) : deliveryCargo > 0 ? (
               <span className="whitespace-nowrap text-[14px] text-ok">Карго төлсөн</span>
+            ) : selectedCount === 0 ? (
+              <span className="whitespace-nowrap text-[14px] text-ink-2">Чек хийсэн бараанд</span>
             ) : (
               <span className="whitespace-nowrap text-[14px] text-ink-2">Компани хүргэнэ</span>
             )
@@ -329,14 +370,12 @@ export function FulfilmentChooser({
               value={order.subtotal <= order.paidAmount - order.refundedAmount ? "Төлөгдсөн" : money(Math.max(0, order.subtotal - (order.paidAmount - order.refundedAmount)))}
               ok={order.subtotal <= order.paidAmount - order.refundedAmount}
             />
-            {cargoFee > 0 && (
+            {(type === "DELIVERY" ? selectedCargo + alreadyDeliveryCargo : alreadyDeliveryCargo) > 0 && (
               <Row
                 label="Карго"
                 value={
                   type === "PICKUP"
-                    ? cargoDue > 0
-                      ? "Одоо төлөхгүй"
-                      : "Төлсөн"
+                    ? "Одоо төлөхгүй"
                     : cargoDue > 0
                       ? money(cargoDue)
                       : "Төлсөн"
@@ -357,7 +396,7 @@ export function FulfilmentChooser({
                 <div className="h-px bg-line" />
                 <div className="flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]">
                   <span>QPay-ээр төлөх</span>
-                  <span>{money(total)}</span>
+                  <span>{money(payNow)}</span>
                 </div>
               </>
             )}
@@ -397,32 +436,26 @@ function ItemRow({
     arrived && (item.arrivedQty ?? item.qty) < item.qty
       ? `${item.arrivedQty}/${item.qty} ш`
       : `${item.qty} ш`;
-  const method =
-    item.fulfilment ? ITEM_FULFILMENT_LABEL[item.fulfilment] : null;
+  const cargo = lineCargo(item);
+  const method = item.fulfilment ? ITEM_FULFILMENT_LABEL[item.fulfilment] : null;
+  const extra =
+    mode === "waiting"
+      ? " · хүлээж байна"
+      : method
+        ? ` · ${method}`
+        : cargo > 0
+          ? ` · карго ${money(cargo)}`
+          : "";
 
   const body = (
     <>
       {mode === "check" ? (
-        <span
-          className={`flex size-5 shrink-0 items-center justify-center rounded-[4px] border ${
-            checked ? "border-ok bg-ok-bg" : "border-line bg-bg"
-          }`}
-        >
-          {checked ? (
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 12 12"
-              fill="none"
-              stroke="#15803D"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M2.5 6.2 L4.8 8.5 L9.5 3.5" />
-            </svg>
-          ) : null}
-        </span>
+        <input
+          type="checkbox"
+          className="size-5 shrink-0 accent-ink"
+          checked={Boolean(checked)}
+          onChange={onToggle}
+        />
       ) : mode === "locked" ? (
         <span className="flex size-5 shrink-0 items-center justify-center rounded-[4px] border border-line bg-surface">
           <svg
@@ -448,7 +481,7 @@ function ItemRow({
           {sel}
           {sel ? " · " : ""}
           {qtyLabel}
-          {mode === "waiting" ? " · хүлээж байна" : method ? ` · ${method}` : ""}
+          {extra}
         </span>
       </span>
       <span className="tnum shrink-0 text-[14px]">{money(item.total)}</span>
@@ -457,13 +490,9 @@ function ItemRow({
 
   if (mode === "check") {
     return (
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-3 border-b border-line p-3.5 text-left last:border-b-0"
-      >
+      <label className="flex w-full cursor-pointer items-center gap-3 border-b border-line p-3.5 text-left last:border-b-0">
         {body}
-      </button>
+      </label>
     );
   }
 

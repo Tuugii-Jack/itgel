@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import type { NextFunction, Request, Response } from 'express';
-import { AppError } from '../lib/errors.js';
+import { unwrapAppError } from '../lib/errors.js';
 import { isProd } from '../env.js';
 
 export function notFoundHandler(req: Request, res: Response): void {
@@ -15,9 +15,10 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  if (error instanceof AppError) {
-    res.status(error.status).json({
-      error: { code: error.code, message: error.message, details: error.details },
+  const appError = unwrapAppError(error);
+  if (appError) {
+    res.status(appError.status).json({
+      error: { code: appError.code, message: appError.message, details: appError.details },
     });
     return;
   }
@@ -48,6 +49,15 @@ export function errorHandler(
     if (error.code === 'P2003') {
       res.status(409).json({
         error: { code: 'CONFLICT', message: 'Холбоотой өгөгдөл байгаа тул гүйцэтгэх боломжгүй.' },
+      });
+      return;
+    }
+    if (error.code === 'P2028' || error.code === 'P2024') {
+      res.status(503).json({
+        error: {
+          code: 'TIMEOUT',
+          message: 'Хадгалалт хугацаа хэтэрлээ. Дахин оролдоно уу.',
+        },
       });
       return;
     }

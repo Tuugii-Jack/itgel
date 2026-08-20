@@ -434,9 +434,10 @@ adminBatchesRouter.post(
     }),
   }),
   asyncHandler(async (req, res) => {
+    const batchId = param(req, 'id');
     const { items } = req.body as { items: { roundId: string; cargoFee: number }[] };
     const batch = await prisma.batch.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: batchId, deletedAt: null },
     });
     if (!batch) throw notFound('Багц олдсонгүй.');
     if (!canEditBatchComposition(batch.stage)) {
@@ -454,12 +455,14 @@ adminBatchesRouter.post(
     }
 
     const feeByRound = new Map(items.map((i) => [i.roundId, i.cargoFee]));
-    const updatedCount = await prisma.$transaction(async (tx) => {
-      for (const [roundId, cargoFee] of feeByRound) {
-        await tx.productRound.update({ where: { id: roundId }, data: { cargoFee } });
-      }
-      return syncCargoFeesForRounds(tx, [...feeByRound.keys()]);
-    });
+    // Interactive $transaction + олон захиалга sync = pooler/timeout-оор 500 болдог.
+    // Тойргийн үнийг эхлээд хадгалаад, захиалгыг дараа нь тусад нь шинэчилнэ.
+    await prisma.$transaction(
+      [...feeByRound.entries()].map(([roundId, cargoFee]) =>
+        prisma.productRound.update({ where: { id: roundId }, data: { cargoFee } }),
+      ),
+    );
+    const updatedCount = await syncCargoFeesForRounds(prisma, [...feeByRound.keys()]);
 
     await audit({
       actor: actorOf(req),

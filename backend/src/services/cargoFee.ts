@@ -1,15 +1,16 @@
 import type { Prisma } from '@prisma/client';
+import { prisma } from '../prisma.js';
 import { recalcOrderTotals } from './money.js';
 
-type Tx = Prisma.TransactionClient;
+type Db = Prisma.TransactionClient | typeof prisma;
 
 const FROZEN = ['HANDED_OVER', 'CANCELLED'] as const;
 
 /**
- * Захиалгын карго = идэвхтэй мөрүүдийн (qty × тойргийн нэгж карго).
- * Хүлээлгэн өгсөн / цуцлагдсан захиалгын дүнг хөлдөөнө.
+ * Захиалгын карго = хүргэлтээр авах идэвхтэй мөрүүдийн (qty × тойргийн нэгж карго).
+ * Очиж авах болон авах арга сонгоогүй мөр каргонд орохгүй — хүргэлт сонгоход нэмэгдэнэ.
  */
-export async function syncOrderCargoFee(tx: Tx, orderId: string): Promise<number> {
+export async function syncOrderCargoFee(tx: Db, orderId: string): Promise<number> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
     select: { id: true, status: true, cargoFee: true },
@@ -19,9 +20,11 @@ export async function syncOrderCargoFee(tx: Tx, orderId: string): Promise<number
 
   const items = await tx.orderItem.findMany({
     where: { orderId, cancelledAt: null },
-    select: { qty: true, round: { select: { cargoFee: true } } },
+    select: { qty: true, fulfilment: true, round: { select: { cargoFee: true } } },
   });
-  const cargoFee = items.reduce((sum, item) => sum + item.qty * item.round.cargoFee, 0);
+  const cargoFee = items
+    .filter((item) => item.fulfilment === 'DELIVERY')
+    .reduce((sum, item) => sum + item.qty * item.round.cargoFee, 0);
   if (cargoFee === order.cargoFee) {
     await recalcOrderTotals(tx, orderId);
     return cargoFee;
@@ -33,7 +36,7 @@ export async function syncOrderCargoFee(tx: Tx, orderId: string): Promise<number
 }
 
 /** Тойргийн карго солигдсон үед холбоотой захиалгуудыг шинэчилнэ. */
-export async function syncCargoFeesForRounds(tx: Tx, roundIds: string[]): Promise<number> {
+export async function syncCargoFeesForRounds(tx: Db, roundIds: string[]): Promise<number> {
   if (roundIds.length === 0) return 0;
   const items = await tx.orderItem.findMany({
     where: {

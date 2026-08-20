@@ -15,7 +15,7 @@ import { conflict, notFound } from '../lib/errors.js';
  * тул `deliveryFee` нийт дүнд ордоггүй.
  */
 
-type Tx = Prisma.TransactionClient;
+type Tx = Pick<Prisma.TransactionClient, 'order' | 'orderItem' | 'payment'>;
 
 export interface OrderTotals {
   subtotal: number;

@@ -316,6 +316,8 @@ export interface OrderItem {
   arrivedQty?: number;
   unitPrice: number;
   total: number;
+  /** Мөрийн карго — тойргийн нэгж карго × ширхэг. Хүргэлтээр авахад төлнө. */
+  cargoFee?: number;
   /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
   arriveFrom: string | null;
   arriveTo: string | null;

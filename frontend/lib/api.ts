@@ -403,7 +403,7 @@ export const api = {
       district?: string;
       khoroo?: string;
       address?: string;
-      itemIds?: string[];
+      itemIds: string[];
     },
   ) =>
     request<{
@@ -412,6 +412,7 @@ export const api = {
       cargoPayMethod?: "CASH" | "QPAY" | null;
       deliveryFee: number;
       dueAmount: number;
+      cargoFee?: number;
       delivery: PublicOrder["delivery"];
       canChooseFulfilment: boolean;
     }>(`/orders/${code}/fulfilment`, { method: "POST", body }).then(

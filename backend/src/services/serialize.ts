@@ -172,7 +172,10 @@ export function adminProduct(
   };
 }
 
-export function publicOrderItem(item: OrderItem, paidDays?: ReadonlySet<string>) {
+export function publicOrderItem(
+  item: OrderItem & { round?: { cargoFee: number } | null },
+  paidDays?: ReadonlySet<string>,
+) {
   const selections = (() => {
     const fromJson = selectionsOf(item.selections);
     if (Object.keys(fromJson).length > 0) return fromJson;
@@ -202,6 +205,7 @@ export function publicOrderItem(item: OrderItem, paidDays?: ReadonlySet<string>)
     arrivedQty: item.arrivedQty,
     unitPrice: item.unitPrice,
     total: item.unitPrice * item.qty,
+    cargoFee: item.qty * (item.round?.cargoFee ?? 0),
     /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
     arriveFrom: toIso(item.arriveFrom),
     arriveTo: toIso(item.arriveTo),
