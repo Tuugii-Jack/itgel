@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { forbidden, unauthorized } from '../lib/errors.js';
-import { verifyToken, type TokenPayload } from '../lib/jwt.js';
+import { verifyToken, type AdminToken, type TokenPayload } from '../lib/jwt.js';
+import { prisma } from '../prisma.js';
 import { resolveSupabaseToken, supabaseAuthConfigured } from '../lib/supabaseAuth.js';
 
 declare global {
@@ -18,15 +19,35 @@ function readToken(req: Request): string | null {
   return header.slice('Bearer '.length).trim() || null;
 }
 
+/**
+ * JWT доторх эрх хуучирсан байж болно — идэвх, role-ийг DB-ээс авна.
+ * Хаасан/бууруулсан админы хуучин токен шууд хүчингүй.
+ */
+async function liveAdmin(payload: AdminToken): Promise<AdminToken | null> {
+  const user = await prisma.adminUser.findUnique({
+    where: { id: payload.sub },
+    select: { id: true, email: true, role: true, isActive: true },
+  });
+  if (!user?.isActive) return null;
+  return { sub: user.id, email: user.email, role: user.role };
+}
+
 /** Эхлээд манай JWT, дараа нь Supabase Auth-ийн token-ыг шалгана. */
 async function authenticate(req: Request): Promise<TokenPayload | null> {
   const token = readToken(req);
   if (!token) return null;
 
   const own = verifyToken(token);
-  if (own) return own;
+  if (own) {
+    if (own.role === 'ADMIN' || own.role === 'STAFF') return liveAdmin(own);
+    return own;
+  }
 
-  return supabaseAuthConfigured ? resolveSupabaseToken(token) : null;
+  const supabase = supabaseAuthConfigured ? await resolveSupabaseToken(token) : null;
+  if (supabase && (supabase.role === 'ADMIN' || supabase.role === 'STAFF')) {
+    return liveAdmin(supabase);
+  }
+  return supabase;
 }
 
 /** Токен байвал уншина, байхгүй бол ч алдаа заахгүй. */

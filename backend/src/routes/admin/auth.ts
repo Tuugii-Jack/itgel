@@ -43,7 +43,7 @@ adminAuthRouter.get(
   requireStaff,
   asyncHandler(async (req, res) => {
     const user = await prisma.adminUser.findUnique({ where: { id: req.auth!.sub } });
-    if (!user) throw unauthorized();
+    if (!user?.isActive) throw unauthorized();
     res.json({ data: { id: user.id, email: user.email, name: user.name, role: user.role } });
   }),
 );
