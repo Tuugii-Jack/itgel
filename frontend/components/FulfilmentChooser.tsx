@@ -27,7 +27,8 @@ function unpaidTowardCargo(order: PublicOrder, cargoFee: number): number {
 /**
  * 06 Бараа ирсэн — авах арга сонгох.
  *
- * Чек хийсэн бараанд доорх арга хамаарна. Хүргэлтээр: үлдсэн карго төлүүлнэ.
+ * Чек хийсэн бараанд доорх арга хамаарна. Карго ирж авахад ч тооцогдоно;
+ * хүргэлтээр үлдсэн каргог QPay-ээр төлнө.
  */
 export function FulfilmentChooser({
   order,
@@ -113,15 +114,11 @@ export function FulfilmentChooser({
     [pendingItems, selected],
   );
 
-  const alreadyDeliveryCargo = chosenItems
-    .filter((item) => item.fulfilment === "DELIVERY")
-    .reduce((sum, item) => sum + lineCargo(item), 0);
-  const selectedCargo = pendingItems
-    .filter((item) => selected.has(item.id))
-    .reduce((sum, item) => sum + lineCargo(item), 0);
-  const deliveryCargo =
-    alreadyDeliveryCargo + (type === "DELIVERY" ? selectedCargo : 0);
-  const cargoDue = unpaidTowardCargo(order, deliveryCargo);
+  const allCargo = Math.max(
+    order.cargoFee ?? 0,
+    liveItems.reduce((sum, item) => sum + lineCargo(item), 0),
+  );
+  const cargoDue = unpaidTowardCargo(order, allCargo);
   const needsCargoPay = type === "DELIVERY" && cargoDue > 0;
   const netPaid = order.paidAmount - order.refundedAmount;
   const storageDue = Math.max(
@@ -303,7 +300,17 @@ export function FulfilmentChooser({
           selected={type === "PICKUP"}
           onSelect={() => choose("PICKUP")}
           title="Өөрөө ирж авах"
-          right={<span className="whitespace-nowrap text-[14px] text-ok"></span>}
+          right={
+            cargoDue > 0 ? (
+              <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
+                Карго {money(cargoDue)}
+              </span>
+            ) : allCargo > 0 ? (
+              <span className="whitespace-nowrap text-[14px] text-ok">Карго төлсөн</span>
+            ) : (
+              <span className="whitespace-nowrap text-[14px] text-ok"></span>
+            )
+          }
         >
           <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">{store.address}</span>
           <span className="mt-0.5 block text-[14px] text-ink-2">{store.workHours}</span>
@@ -318,8 +325,8 @@ export function FulfilmentChooser({
               <span className="tnum whitespace-nowrap text-[14px] text-ink-2">
                 Карго {money(cargoDue)}
               </span>
-            ) : deliveryCargo > 0 ? (
-              <span className="whitespace-nowrap text-[14px] text-ok"></span>
+            ) : allCargo > 0 ? (
+              <span className="whitespace-nowrap text-[14px] text-ok">Карго төлсөн</span>
             ) : selectedCount === 0 ? (
               <span className="whitespace-nowrap text-[14px] text-ink-2">Чек хийсэн бараанд</span>
             ) : (
@@ -370,17 +377,19 @@ export function FulfilmentChooser({
               value={order.subtotal <= order.paidAmount - order.refundedAmount ? "Төлөгдсөн" : money(Math.max(0, order.subtotal - (order.paidAmount - order.refundedAmount)))}
               ok={order.subtotal <= order.paidAmount - order.refundedAmount}
             />
-            {(type === "DELIVERY" ? selectedCargo + alreadyDeliveryCargo : alreadyDeliveryCargo) > 0 && (
+            {allCargo > 0 && (
               <Row
                 label="Карго"
                 value={
                   type === "PICKUP"
-                    ? "Одоо төлөхгүй"
+                    ? cargoDue > 0
+                      ? `${money(cargoDue)} · дэлгүүрт`
+                      : "Төлсөн"
                     : cargoDue > 0
                       ? money(cargoDue)
                       : "Төлсөн"
                 }
-                ok={type === "PICKUP" || cargoDue <= 0}
+                ok={cargoDue <= 0}
               />
             )}
             {(order.storageFee ?? 0) > 0 && (

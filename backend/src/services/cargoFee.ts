@@ -7,8 +7,8 @@ type Db = Prisma.TransactionClient | typeof prisma;
 const FROZEN = ['HANDED_OVER', 'CANCELLED'] as const;
 
 /**
- * Захиалгын карго = хүргэлтээр авах идэвхтэй мөрүүдийн (qty × тойргийн нэгж карго).
- * Очиж авах болон авах арга сонгоогүй мөр каргонд орохгүй — хүргэлт сонгоход нэмэгдэнэ.
+ * Захиалгын карго = идэвхтэй мөр бүрийн (qty × тойргийн нэгж карго).
+ * Ирж авах, хүргэлт — аль ч аргаар карго тооцогдоно.
  */
 export async function syncOrderCargoFee(tx: Db, orderId: string): Promise<number> {
   const order = await tx.order.findUnique({
@@ -20,11 +20,9 @@ export async function syncOrderCargoFee(tx: Db, orderId: string): Promise<number
 
   const items = await tx.orderItem.findMany({
     where: { orderId, cancelledAt: null },
-    select: { qty: true, fulfilment: true, round: { select: { cargoFee: true } } },
+    select: { qty: true, round: { select: { cargoFee: true } } },
   });
-  const cargoFee = items
-    .filter((item) => item.fulfilment === 'DELIVERY')
-    .reduce((sum, item) => sum + item.qty * item.round.cargoFee, 0);
+  const cargoFee = items.reduce((sum, item) => sum + item.qty * (item.round?.cargoFee ?? 0), 0);
   if (cargoFee === order.cargoFee) {
     await recalcOrderTotals(tx, orderId);
     return cargoFee;
@@ -33,6 +31,14 @@ export async function syncOrderCargoFee(tx: Db, orderId: string): Promise<number
   await tx.order.update({ where: { id: orderId }, data: { cargoFee } });
   await recalcOrderTotals(tx, orderId);
   return cargoFee;
+}
+
+/** Олон захиалгын каргог нэг нэгээр шинэчилнэ. */
+export async function syncOrdersCargoFees(orderIds: string[]): Promise<void> {
+  const unique = [...new Set(orderIds)];
+  for (const orderId of unique) {
+    await syncOrderCargoFee(prisma, orderId);
+  }
 }
 
 /** Тойргийн карго солигдсон үед холбоотой захиалгуудыг шинэчилнэ. */

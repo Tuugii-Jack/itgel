@@ -663,8 +663,8 @@ export interface HandoverCustomer {
   items: HandoverCustomerItem[];
 }
 
-/** Хүлээлгэн өгөх үед авсан үлдэгдэл — карт/данс нэг сагс. */
-export type HandoverPayMethod = "CASH" | "CARD";
+/** Хүлээлгэн өгөх үед авсан үлдэгдэл. */
+export type HandoverPayMethod = "CASH" | "CARD" | "BANK_TRANSFER";
 
 export interface HandoverHistoryItem {
   name: string;
@@ -683,6 +683,7 @@ export interface HandoverHistoryRow {
   items: HandoverHistoryItem[];
   cash: number;
   card: number;
+  bank: number;
 }
 
 export interface HandoverHistoryDay {
@@ -691,6 +692,7 @@ export interface HandoverHistoryDay {
   customerCount: number;
   cash: number;
   card: number;
+  bank: number;
   rows: HandoverHistoryRow[];
 }
 
@@ -703,6 +705,7 @@ export interface HandoverHistory {
     customerCount: number;
     cash: number;
     card: number;
+    bank: number;
   };
 }
 

@@ -11,6 +11,7 @@ import { handOverItems } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
 import { HANDOVER_PAY_NOTE, handoverHistory } from '../../services/handoverHistory.js';
 import { adminOrderItem, publicOrderItem } from '../../services/serialize.js';
+import { syncOrderCargoFee, syncOrdersCargoFees } from '../../services/cargoFee.js';
 import { syncOrderStorageFee, syncOrdersStorageFees } from '../../services/storageFee.js';
 import { adminOrderDetail } from './orders.js';
 
@@ -22,7 +23,7 @@ const customerQuery = z.object({
   q: z.string().trim().min(2).max(120),
 });
 
-const payMethod = z.enum(['CASH', 'CARD']);
+const payMethod = z.enum(['CASH', 'CARD', 'BANK_TRANSFER']);
 
 /** GET /handover/history?year=&month= — өгсөн бараа, бэлэн/карт. */
 adminHandoverRouter.get(
@@ -58,11 +59,13 @@ adminHandoverRouter.get(
     if (!order) throw notFound('Ийм кодтой захиалга олдсонгүй.');
 
     await syncOrderStorageFee(order.id);
+    await syncOrderCargoFee(prisma, order.id);
     // Зөвхөн мөнгөний багана шинэчлэгдсэн байж болно — бүтэн include дахин татахгүй.
     const money = await prisma.order.findUniqueOrThrow({
       where: { id: order.id },
       select: {
         storageFee: true,
+        cargoFee: true,
         dueAmount: true,
         paidAmount: true,
         refundedAmount: true,
@@ -134,6 +137,7 @@ adminHandoverRouter.get(
       ...new Set(customers.flatMap((c) => c.orders.map((o) => o.id))),
     ];
     await syncOrdersStorageFees(orderIds);
+    await syncOrdersCargoFees(orderIds);
 
     const refreshed = await prisma.customer.findMany({
       where: { id: { in: customers.map((c) => c.id) } },
@@ -229,7 +233,7 @@ adminHandoverRouter.post(
     const body = req.body as {
       itemIds: string[];
       collectedAmount?: number;
-      method?: 'CASH' | 'CARD';
+      method?: 'CASH' | 'CARD' | 'BANK_TRANSFER';
       note?: string;
     };
     const actor = actorOf(req);
@@ -242,6 +246,7 @@ adminHandoverRouter.post(
 
     const uniqueOrderIds = [...new Set(items.map((i) => i.orderId))];
     await syncOrdersStorageFees(uniqueOrderIds);
+    await syncOrdersCargoFees(uniqueOrderIds);
 
     const dueByOrder = new Map<string, number>();
     for (const orderId of uniqueOrderIds) {
@@ -323,12 +328,13 @@ adminHandoverRouter.post(
   asyncHandler(async (req, res) => {
     const { collectedAmount, method, note } = req.body as {
       collectedAmount?: number;
-      method?: 'CASH' | 'CARD';
+      method?: 'CASH' | 'CARD' | 'BANK_TRANSFER';
       note?: string;
     };
     const orderId = param(req, 'orderId');
 
     await syncOrderStorageFee(orderId);
+    await syncOrderCargoFee(prisma, orderId);
 
     const order = await prisma.order.findFirst({
       where: { id: orderId, deletedAt: null },

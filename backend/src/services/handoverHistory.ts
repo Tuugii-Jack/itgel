@@ -21,6 +21,7 @@ export type HandoverHistoryRow = {
   items: HandoverHistoryItem[];
   cash: number;
   card: number;
+  bank: number;
 };
 
 export type HandoverHistoryDay = {
@@ -29,6 +30,7 @@ export type HandoverHistoryDay = {
   customerCount: number;
   cash: number;
   card: number;
+  bank: number;
   rows: HandoverHistoryRow[];
 };
 
@@ -39,12 +41,15 @@ type DayAcc = {
   customers: Set<string>;
   cash: number;
   card: number;
+  bank: number;
   seenPay: Set<string>;
   groups: Map<string, Group>;
 };
 
-function splitPay(method: string, amount: number): { cash: number; card: number } {
-  return method === 'CASH' ? { cash: amount, card: 0 } : { cash: 0, card: amount };
+function splitPay(method: string, amount: number): { cash: number; card: number; bank: number } {
+  if (method === 'CASH') return { cash: amount, card: 0, bank: 0 };
+  if (method === 'BANK_TRANSFER') return { cash: 0, card: 0, bank: amount };
+  return { cash: 0, card: amount, bank: 0 };
 }
 
 function emptyGroup(customer: {
@@ -61,6 +66,7 @@ function emptyGroup(customer: {
     items: [],
     cash: 0,
     card: 0,
+    bank: 0,
     codes: new Set<string>(),
     pay: new Set<string>(),
   };
@@ -71,7 +77,7 @@ export async function handoverHistory(year: number, month: number): Promise<{
   year: number;
   month: number;
   days: HandoverHistoryDay[];
-  summary: { itemCount: number; customerCount: number; cash: number; card: number };
+  summary: { itemCount: number; customerCount: number; cash: number; card: number; bank: number };
 }> {
   const from = startOfUbMonth(parseUbDay(`${year}-${String(month).padStart(2, '0')}-01`));
   const to = addUbMonths(from, 1);
@@ -125,6 +131,7 @@ export async function handoverHistory(year: number, month: number): Promise<{
       customers: new Set<string>(),
       cash: 0,
       card: 0,
+      bank: 0,
       seenPay: new Set<string>(),
       groups: new Map(),
     };
@@ -168,12 +175,14 @@ export async function handoverHistory(year: number, month: number): Promise<{
     const parts = splitPay(pay.method, pay.amount);
     day.cash += parts.cash;
     day.card += parts.card;
+    day.bank += parts.bank;
     const group = customerGroup(day, pay.order.customer, pay.createdAt.toISOString());
     group.codes.add(pay.order.code);
     if (!group.pay.has(pay.id)) {
       group.pay.add(pay.id);
       group.cash += parts.cash;
       group.card += parts.card;
+      group.bank += parts.bank;
     }
   }
 
@@ -185,6 +194,7 @@ export async function handoverHistory(year: number, month: number): Promise<{
       customerCount: v.customers.size,
       cash: v.cash,
       card: v.card,
+      bank: v.bank,
       rows: [...v.groups.values()]
         .map((g) => ({
           customerId: g.customerId,
@@ -194,6 +204,7 @@ export async function handoverHistory(year: number, month: number): Promise<{
           items: g.items,
           cash: g.cash,
           card: g.card,
+          bank: g.bank,
           orderCodes: [...g.codes].sort(),
         }))
         .sort((a, b) => b.at.localeCompare(a.at)),
@@ -213,6 +224,7 @@ export async function handoverHistory(year: number, month: number): Promise<{
       customerCount: allCustomers.size,
       cash: days.reduce((sum, d) => sum + d.cash, 0),
       card: days.reduce((sum, d) => sum + d.card, 0),
+      bank: days.reduce((sum, d) => sum + d.bank, 0),
     },
   };
 }

@@ -292,7 +292,7 @@ model Order {
   deliveryFee Int @default(0)
   /// Агуулахад үнэгүй хоногоос хэтэрсэн хадгалалтын хураамж (кэш — cron/sync-ээр шинэчлэгдэнэ).
   storageFee  Int @default(0)
-  /// Карго хураамж — багцын барааны нэгж үнэ × ширхэг (кэш — syncOrderCargoFee).
+  /// Карго хураамж — идэвхтэй мөр бүрийн нэгж үнэ × ширхэг (кэш — syncOrderCargoFee).
   cargoFee    Int @default(0)
   /// Дэвтрийн PAYMENT мөрүүдийн нийлбэр.
   paidAmount     Int @default(0)

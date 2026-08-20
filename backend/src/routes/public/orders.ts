@@ -268,17 +268,33 @@ publicOrdersRouter.get(
     const settings = await getSettingsCached();
     let storage = peekStorageFee(order, settings);
     let storageFee = order.storageFee;
+    let cargoFee = order.cargoFee;
     let dueAmount = order.dueAmount;
     let paidAmount = order.paidAmount;
     let refundedAmount = order.refundedAmount;
     let subtotal = order.subtotal;
 
-    if (storage.fee !== order.storageFee) {
-      storage = await syncOrderStorageFee(order.id);
+    const expectedCargo = order.items
+      .filter((item) => item.cancelledAt == null)
+      .reduce((sum, item) => sum + item.qty * (item.round?.cargoFee ?? 0), 0);
+    const moneyDirty =
+      storage.fee !== order.storageFee ||
+      (expectedCargo !== order.cargoFee &&
+        order.status !== 'HANDED_OVER' &&
+        order.status !== 'CANCELLED');
+
+    if (moneyDirty) {
+      if (storage.fee !== order.storageFee) {
+        storage = await syncOrderStorageFee(order.id);
+      }
+      if (expectedCargo !== order.cargoFee) {
+        await syncOrderCargoFee(prisma, order.id);
+      }
       const moneyRow = await prisma.order.findUniqueOrThrow({
         where: { id: order.id },
         select: {
           storageFee: true,
+          cargoFee: true,
           dueAmount: true,
           paidAmount: true,
           refundedAmount: true,
@@ -286,6 +302,7 @@ publicOrdersRouter.get(
         },
       });
       storageFee = moneyRow.storageFee;
+      cargoFee = moneyRow.cargoFee;
       dueAmount = moneyRow.dueAmount;
       paidAmount = moneyRow.paidAmount;
       refundedAmount = moneyRow.refundedAmount;
@@ -304,7 +321,7 @@ publicOrdersRouter.get(
         subtotal,
         deliveryFee: 0,
         storageFee,
-        cargoFee: order.cargoFee,
+        cargoFee,
         cargoPayMethod: order.cargoPayMethod === 'CASH' || order.cargoPayMethod === 'QPAY'
           ? order.cargoPayMethod
           : null,
@@ -322,7 +339,7 @@ publicOrdersRouter.get(
           computeTotals({
             subtotal,
             storageFee,
-            cargoFee: order.cargoFee,
+            cargoFee,
             paidAmount,
             refundedAmount,
           }),
@@ -447,15 +464,10 @@ publicOrdersRouter.post(
     }
 
     const itemIds = requested.map((item) => item.id);
-    const deliveryCargo = order.items
-      .filter(
-        (item) =>
-          item.cancelledAt == null &&
-          (item.fulfilment === 'DELIVERY' ||
-            (body.type === 'DELIVERY' && itemIds.includes(item.id))),
-      )
+    const allCargo = order.items
+      .filter((item) => item.cancelledAt == null)
       .reduce((sum, item) => sum + item.qty * item.round.cargoFee, 0);
-    const cargoDue = unpaidCargoFee({ ...order, cargoFee: deliveryCargo });
+    const cargoDue = unpaidCargoFee({ ...order, cargoFee: allCargo });
     if (body.type === 'DELIVERY' && cargoDue > 0 && body.payMethod !== 'QPAY') {
       throw badRequest('Хүргэлтээр авахад каргог зөвхөн QPay-ээр төлнө.');
     }

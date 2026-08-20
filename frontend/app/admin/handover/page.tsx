@@ -27,6 +27,19 @@ type Found = AdminOrderDetail & {
 
 type Tab = "give" | "done";
 
+const PAY_METHOD_KEY = "itgel.handover.payMethod";
+
+function readPayMethod(): HandoverPayMethod | null {
+  if (typeof window === "undefined") return null;
+  const v = window.sessionStorage.getItem(PAY_METHOD_KEY);
+  if (v === "CASH" || v === "CARD" || v === "BANK_TRANSFER") return v;
+  return null;
+}
+
+function writePayMethod(value: HandoverPayMethod) {
+  window.sessionStorage.setItem(PAY_METHOD_KEY, value);
+}
+
 const MONTHS = [
   "1-р сар", "2-р сар", "3-р сар", "4-р сар", "5-р сар", "6-р сар",
   "7-р сар", "8-р сар", "9-р сар", "10-р сар", "11-р сар", "12-р сар",
@@ -94,7 +107,8 @@ function SumLine({
 }
 
 function paySub(method: HandoverPayMethod | null): string {
-  if (method === "CARD") return "карт/дансаар авч, хүлээлгэн өгөх";
+  if (method === "CARD") return "картаар авч, хүлээлгэн өгөх";
+  if (method === "BANK_TRANSFER") return "дансаар авч, хүлээлгэн өгөх";
   if (method === "CASH") return "бэлэн авч, хүлээлгэн өгөх";
   return "авч, хүлээлгэн өгөх";
 }
@@ -179,11 +193,12 @@ function PayMethodPicker({
       <div className="mb-2 text-[13px] text-ink-2">
         <span className="tnum font-medium text-ink">{money(amount)}</span>-ийг яаж авсан бэ
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         {(
           [
             { id: "CASH", label: "Бэлэн" },
-            { id: "CARD", label: "Карт / данс" },
+            { id: "CARD", label: "Карт" },
+            { id: "BANK_TRANSFER", label: "Данс" },
           ] as const
         ).map((opt) => {
           const on = value === opt.id;
@@ -352,9 +367,10 @@ function HistoryPanel({
         <Empty>Энэ сард хүлээлгэн өгсөн бараа алга.</Empty>
       ) : (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-3">
+          <div className="mb-4 grid grid-cols-3 gap-3">
             <Metric label="Бэлэн" value={money(history.summary.cash)} tone="ok" />
-            <Metric label="Карт / данс" value={money(history.summary.card)} />
+            <Metric label="Карт" value={money(history.summary.card)} />
+            <Metric label="Данс" value={money(history.summary.bank)} />
             <Metric label="Хүн" value={history.summary.customerCount} tone="info" />
             <Metric label="Бараа" value={history.summary.itemCount} />
           </div>
@@ -409,6 +425,7 @@ function printHistoryRow(
     })),
     cashTaken: row.cash,
     cardTaken: row.card,
+    bankTaken: row.bank,
     store,
     issuedAt: row.at,
   });
@@ -424,9 +441,10 @@ function HistoryDayDetail({
   const toast = useToast();
   return (
     <div>
-      <div className="mb-3 grid grid-cols-2 gap-3">
+      <div className="mb-3 grid grid-cols-3 gap-3">
         <Metric label="Энэ өдрийн бэлэн" value={money(day.cash)} tone="ok" />
-        <Metric label="Карт / данс" value={money(day.card)} />
+        <Metric label="Карт" value={money(day.card)} />
+        <Metric label="Данс" value={money(day.bank)} />
       </div>
       <div className="flex flex-col gap-3">
         {day.rows.map((row) => (
@@ -446,13 +464,16 @@ function HistoryDayDetail({
                   <span className="tnum">{dayTimeLabel(row.at)}</span>
                 </div>
               </div>
-              {(row.cash > 0 || row.card > 0) && (
+              {(row.cash > 0 || row.card > 0 || row.bank > 0) && (
                 <div className="shrink-0 text-right text-[13px]">
                   {row.cash > 0 && (
                     <div className="tnum font-medium text-ok">{money(row.cash)} бэлэн</div>
                   )}
                   {row.card > 0 && (
                     <div className="tnum text-ink-2">{money(row.card)} карт</div>
+                  )}
+                  {row.bank > 0 && (
+                    <div className="tnum text-ink-2">{money(row.bank)} данс</div>
                   )}
                 </div>
               )}
@@ -522,7 +543,11 @@ export default function HandoverPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [openDate, setOpenDate] = useState<string | null>(todayKey);
-  const [todayTake, setTodayTake] = useState<{ cash: number; card: number } | null>(null);
+  const [todayTake, setTodayTake] = useState<{
+    cash: number;
+    card: number;
+    bank: number;
+  } | null>(null);
 
   const [pending, setPending] = useState<AdminOrderRow[]>([]);
   const [found, setFound] = useState<Found | null>(null);
@@ -537,6 +562,15 @@ export default function HandoverPage() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<HandoverPayMethod | null>(null);
+
+  useEffect(() => {
+    setPayMethod(readPayMethod());
+  }, []);
+
+  const choosePayMethod = (value: HandoverPayMethod) => {
+    setPayMethod(value);
+    writePayMethod(value);
+  };
   const [store, setStore] = useState<HandoverReceiptStore | undefined>();
 
   useEffect(() => {
@@ -575,7 +609,7 @@ export default function HandoverPage() {
       const now = new Date();
       if (y === now.getFullYear() && m === now.getMonth() + 1) {
         const day = data.days.find((d) => d.date === dayKey(now));
-        setTodayTake({ cash: day?.cash ?? 0, card: day?.card ?? 0 });
+        setTodayTake({ cash: day?.cash ?? 0, card: day?.card ?? 0, bank: day?.bank ?? 0 });
       }
     } catch (e) {
       setHistory(null);
@@ -601,7 +635,6 @@ export default function HandoverPage() {
 
   const resetSelection = () => {
     setSelected(new Set());
-    setPayMethod(null);
   };
 
   const goToDone = () => {
@@ -669,7 +702,6 @@ export default function HandoverPage() {
   const openCustomer = (c: HandoverCustomer) => {
     setActiveCustomer(c);
     setSelected(new Set(selectableItemIds(c.items)));
-    setPayMethod(null);
   };
 
   const dueForSelected = useMemo(() => {
@@ -809,7 +841,6 @@ export default function HandoverPage() {
       toast.success(`${result.code} хүлээлгэж өглөө.`);
       setFound(null);
       setCode("");
-      setPayMethod(null);
       await loadPending();
       goToDone();
     } catch (e) {
@@ -896,7 +927,7 @@ export default function HandoverPage() {
           }))}
           selectedDue={dueForSelected}
           payMethod={payMethod}
-          onPayMethod={setPayMethod}
+          onPayMethod={choosePayMethod}
         />
 
         <Card className="mb-3 divide-y divide-line">
@@ -1034,7 +1065,6 @@ export default function HandoverPage() {
             size="sm"
             onClick={() => {
               setFound(null);
-              setPayMethod(null);
             }}
           >
             Цуцлах
@@ -1063,7 +1093,7 @@ export default function HandoverPage() {
           cargoFee={found.cargoFee}
           paidAmount={found.paidAmount}
           payMethod={payMethod}
-          onPayMethod={setPayMethod}
+          onPayMethod={choosePayMethod}
         />
 
         <Card className="mb-3 divide-y divide-line">
@@ -1164,14 +1194,15 @@ export default function HandoverPage() {
       ) : (
         <>
           {todayTake && (
-            <div className="mb-4 grid grid-cols-2 gap-3">
+            <div className="mb-4 grid grid-cols-3 gap-3">
               <Metric
                 label="Өнөөдөр бэлэн"
                 value={money(todayTake.cash)}
                 tone="ok"
                 sub="дэлгүүрт орсон"
               />
-              <Metric label="Карт / данс" value={money(todayTake.card)} sub="өнөөдөр" />
+              <Metric label="Карт" value={money(todayTake.card)} sub="өнөөдөр" />
+              <Metric label="Данс" value={money(todayTake.bank)} sub="өнөөдөр" />
             </div>
           )}
 

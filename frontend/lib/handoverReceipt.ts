@@ -25,9 +25,10 @@ export type HandoverReceiptData = {
   orderCodes?: string[];
   /** Авсан үлдэгдэл — бэлэн эсвэл карт/данс. */
   collectedAmount?: number;
-  collectedMethod?: "CASH" | "CARD";
+  collectedMethod?: "CASH" | "CARD" | "BANK_TRANSFER";
   cashTaken?: number;
   cardTaken?: number;
+  bankTaken?: number;
   note?: string;
   store?: HandoverReceiptStore;
   /** Хүлээлгэсэн цаг — түүхээс хэвлэхэд. */
@@ -92,10 +93,13 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
   );
   const cash =
     data.cashTaken ??
-    (data.collectedMethod !== "CARD" ? data.collectedAmount ?? 0 : 0);
+    (data.collectedMethod === "CASH" ? data.collectedAmount ?? 0 : 0);
   const card =
     data.cardTaken ??
     (data.collectedMethod === "CARD" ? data.collectedAmount ?? 0 : 0);
+  const bank =
+    data.bankTaken ??
+    (data.collectedMethod === "BANK_TRANSFER" ? data.collectedAmount ?? 0 : 0);
 
   const lines = data.items
     .map((item) => {
@@ -240,7 +244,8 @@ export function printHandoverReceipt(data: HandoverReceiptData) {
   <div class="sum">Нийт: ${totalQty} ш · ${data.items.length} мөр</div>
   ${showPrice ? `<div class="sum">Дүн: ${esc(money(goodsTotal))}</div>` : ""}
   ${cash > 0 ? `<div class="sum">Бэлэн авсан: ${esc(money(cash))}</div>` : ""}
-  ${card > 0 ? `<div class="sum">Карт/дансаар авсан: ${esc(money(card))}</div>` : ""}
+  ${card > 0 ? `<div class="sum">Картаар авсан: ${esc(money(card))}</div>` : ""}
+  ${bank > 0 ? `<div class="sum">Дансаар авсан: ${esc(money(bank))}</div>` : ""}
   ${data.note ? `<div class="kv" style="margin-top:4px">Тэмдэглэл: ${esc(data.note)}</div>` : ""}
   <p class="legal">Барааг тоо, сонголтыг шалгаж хүлээн авснаа баталгаажуулна. Дараа илрэх дутуу, гэмтлийг хүлээн авагч хариуцна.</p>
   <div class="sign">
