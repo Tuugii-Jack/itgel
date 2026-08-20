@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
 import { ProductCard } from "@/components/ProductCard";
 import { Button, Divider, Empty, ErrorNote, Skeleton } from "@/components/ui";
@@ -36,6 +36,7 @@ export default function HomePage() {
   const [readyData, setReadyData] = useState<SectionData>(EMPTY_SECTION);
 
   const [category, setCategory] = useState<string | null>(null);
+  const [booting, setBooting] = useState(true);
   const [loading, setLoading] = useState(true);
   const [moreLoading, setMoreLoading] = useState<"order" | "ready" | null>(
     null,
@@ -43,14 +44,57 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.store(), api.categories(), api.ads()])
-      .then(([s, c, a]) => {
+    let alive = true;
+    (async () => {
+      setBooting(true);
+      setLoading(true);
+      setError(null);
+      try {
+        const [s, c, a, order, ready] = await Promise.all([
+          api.store(),
+          api.categories(),
+          api.ads(),
+          api.products({
+            type: "order",
+            page: 1,
+            pageSize: ORDER_PREVIEW,
+            sort: "closing",
+          }),
+          api.products({ type: "ready", page: 1, pageSize: PAGE_SIZE }),
+        ]);
+        if (!alive) return;
         setStore(s);
         setCategories(c);
         setAds(a);
-      })
-      .catch((e: ApiError) => setError(e.message));
+        setOrderData({
+          items: order.data,
+          total: order.meta?.total ?? order.data.length,
+          page: order.meta?.page ?? 1,
+          pages: order.meta?.pages ?? 1,
+        });
+        setReadyData({
+          items: ready.data,
+          total: ready.meta?.total ?? ready.data.length,
+          page: ready.meta?.page ?? 1,
+          pages: ready.meta?.pages ?? 1,
+        });
+      } catch (e) {
+        if (alive) {
+          setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+        }
+      } finally {
+        if (alive) {
+          setLoading(false);
+          setBooting(false);
+        }
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, []);
+
+  const skipCategoryReload = useRef(true);
 
   const fetchSection = useCallback(
     async (type: "order" | "ready", page: number, pageSize = PAGE_SIZE) => {
@@ -92,10 +136,13 @@ export default function HomePage() {
   }, [fetchSection]);
 
   useEffect(() => {
-    (async () => {
-      await load();
-    })();
-  }, [load]);
+    if (booting) return;
+    if (skipCategoryReload.current) {
+      skipCategoryReload.current = false;
+      return;
+    }
+    void load();
+  }, [booting, load]);
 
   const loadMore = async (type: "order" | "ready") => {
     const data = type === "order" ? orderData : readyData;
@@ -122,6 +169,10 @@ export default function HomePage() {
     !loading && orderData.items.length === 0 && readyData.items.length === 0;
 
   const filtering = category !== null;
+
+  if (booting) {
+    return <HomePageSkeleton />;
+  }
 
   return (
     <div className='page'>
@@ -159,7 +210,12 @@ export default function HomePage() {
       )}
 
       {/* Loading */}
-      {loading && <SectionSkeleton />}
+      {loading && (
+        <>
+          <ProductSectionSkeleton />
+          <ProductSectionSkeleton />
+        </>
+      )}
 
       {/* Empty */}
       {nothing && <Empty>Энэ ангилалд одоогоор бараа алга.</Empty>}
@@ -244,28 +300,109 @@ function Chip({
    SKELETON
 ========================================================= */
 
-function SectionSkeleton() {
+const CHIP_SKELETON_WIDTHS = [
+  "w-16",
+  "w-24",
+  "w-[4.5rem]",
+  "w-28",
+  "w-20",
+  "w-24",
+  "w-[5.5rem]",
+] as const;
+
+function HomePageSkeleton() {
   return (
-    <div className='pt-8 lg:pt-12'>
-      <div className={GUTTER}>
-        <Skeleton className='h-7 w-44' />
-        <Skeleton className='mt-2 h-4 w-64' />
+    <div className="page" aria-busy="true" aria-label="Ачаалж байна">
+      <div className={`${GUTTER} pt-4 lg:pt-6`}>
+        <Skeleton className="aspect-[2/1] w-full rounded-[12px] sm:aspect-[2.4/1] sm:rounded-[16px] lg:aspect-[3/1]" />
       </div>
 
       <div
-        className={`
-          grid grid-cols-2 gap-4
-          pt-5 sm:grid-cols-3 lg:grid-cols-4
-          ${GUTTER}
-        `}
+        className={`flex gap-2 overflow-hidden ${GUTTER} pt-4 lg:pt-6`}
+      >
+        {CHIP_SKELETON_WIDTHS.map((width, i) => (
+          <Skeleton
+            key={i}
+            className={`h-10 shrink-0 rounded-[8px] ${width}`}
+          />
+        ))}
+      </div>
+
+      <ProductSectionSkeleton />
+      <ProductSectionSkeleton />
+
+      <section className={`${GUTTER} mt-24 pt-10 sm:pt-12`}>
+        <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div
+              key={i}
+              className="flex min-h-[110px] items-center gap-5 rounded-[16px] border border-line bg-surface p-5 sm:min-h-[130px] sm:p-6 lg:min-h-[150px] lg:gap-7 lg:p-8"
+            >
+              <Skeleton className="h-16 w-16 shrink-0 rounded-[14px] sm:h-[72px] sm:w-[72px] lg:h-20 lg:w-20" />
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <Skeleton className="h-5 w-4/5 sm:h-6" />
+                <Skeleton className="h-5 w-2/5 sm:hidden" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className={`${GUTTER} pt-10 sm:pt-12`}>
+        <Skeleton className="mb-4 h-7 w-28 lg:h-8" />
+        <Skeleton className="h-[300px] w-full rounded-[12px] sm:h-[400px] lg:h-[450px]" />
+      </section>
+
+      <section className="mt-10 sm:mt-12">
+        <div className="border-t border-line bg-primary-soft/60 p-5 sm:p-6 lg:p-8">
+          <div className={GUTTER}>
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-6">
+              <Skeleton className="h-11 w-11 shrink-0 rounded-[8px] sm:h-12 sm:w-12" />
+              <div className="grid min-w-0 flex-1 gap-3.5 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-4">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="flex flex-col gap-1.5">
+                    <Skeleton className="h-3 w-16" />
+                    <Skeleton className="h-4 w-3/4" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <Skeleton className="mt-6 h-3 w-40" />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProductSectionSkeleton() {
+  return (
+    <div className="pt-8 lg:pt-12">
+      <div className={GUTTER}>
+        <Skeleton className="h-7 w-44 lg:h-8" />
+        <Skeleton className="mt-2 h-4 w-64" />
+      </div>
+
+      <div
+        className={`grid grid-cols-2 gap-4 pt-5 sm:grid-cols-3 lg:grid-cols-4 ${GUTTER}`}
       >
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className='flex flex-col gap-2.5'>
-            <Skeleton className='aspect-square w-full rounded-[12px]' />
-            <Skeleton className='h-4 w-4/5' />
-            <Skeleton className='h-5 w-2/5' />
-          </div>
+          <ProductCardSkeleton key={i} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductCardSkeleton() {
+  return (
+    <div className="flex flex-col overflow-hidden rounded-[12px] border border-line bg-bg">
+      <Skeleton className="aspect-square w-full rounded-none" />
+      <div className="flex flex-col gap-2.5 p-3.5">
+        <Skeleton className="h-4 w-4/5" />
+        <Skeleton className="h-4 w-3/5" />
+        <Skeleton className="h-5 w-2/5" />
+        <Skeleton className="mt-1 h-11 w-full rounded-[8px]" />
       </div>
     </div>
   );
