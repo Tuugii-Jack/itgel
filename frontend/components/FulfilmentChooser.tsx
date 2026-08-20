@@ -303,7 +303,7 @@ export function FulfilmentChooser({
           selected={type === "PICKUP"}
           onSelect={() => choose("PICKUP")}
           title="Өөрөө ирж авах"
-          right={<span className="whitespace-nowrap text-[14px] text-ok">Карго төлөхгүй</span>}
+          right={<span className="whitespace-nowrap text-[14px] text-ok"></span>}
         >
           <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">{store.address}</span>
           <span className="mt-0.5 block text-[14px] text-ink-2">{store.workHours}</span>
@@ -319,7 +319,7 @@ export function FulfilmentChooser({
                 Карго {money(cargoDue)}
               </span>
             ) : deliveryCargo > 0 ? (
-              <span className="whitespace-nowrap text-[14px] text-ok">Карго төлсөн</span>
+              <span className="whitespace-nowrap text-[14px] text-ok"></span>
             ) : selectedCount === 0 ? (
               <span className="whitespace-nowrap text-[14px] text-ink-2">Чек хийсэн бараанд</span>
             ) : (
