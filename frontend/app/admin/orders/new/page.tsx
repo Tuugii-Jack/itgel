@@ -339,7 +339,7 @@ export default function AdminCreateOrderPage() {
                 </div>
                 {line.options.map((opt) => {
                   const row = allRounds.find((r) => r.round.id === line.roundId);
-                  const priced = (row?.round.optionPrices ?? []).some((p) => p.kind === opt.name);
+                  const priced = (row?.round.optionPrices ?? []).length > 0;
                   return (
                   <label key={opt.name} className="mt-2 block text-[13px]">
                     <span className="text-ink-2">{opt.name}</span>
@@ -371,6 +371,7 @@ export default function AdminCreateOrderPage() {
                           opt.name,
                           v,
                           line.price,
+                          line.selections,
                         );
                         const gone =
                           row?.round.type === "ready" &&

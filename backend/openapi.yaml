@@ -1024,6 +1024,9 @@ components:
             properties:
               kind: { type: string }
               value: { type: string }
+              selections:
+                type: object
+                additionalProperties: { type: string }
               price: { type: integer }
         skuStocks:
           type: array

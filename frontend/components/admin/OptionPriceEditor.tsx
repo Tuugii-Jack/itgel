@@ -1,11 +1,21 @@
 "use client";
 
+import { ComboMatrix } from "@/components/admin/ComboMatrix";
 import { Button, Input } from "@/components/ui";
 import { money } from "@/lib/format";
-import { pricedOptionName } from "@/lib/options";
+import {
+  comboLabel,
+  optionCombinations,
+  priceForSelections,
+  skuKeyOf,
+} from "@/lib/options";
 import type { OptionPrice, ProductOption } from "@/lib/types";
 
+export const MAX_OPTION_COMBOS = 400;
+
 export type OptionPriceDraft = {
+  key: string;
+  selections: Record<string, string>;
   kind: string;
   value: string;
   cost: string;
@@ -17,18 +27,20 @@ export function seedOptionPriceDrafts(
   existing: OptionPrice[] | undefined,
   defaults: { sell: string; cost?: string },
 ): OptionPriceDraft[] {
-  const byKey = new Map(
-    (existing ?? []).map((p) => [`${p.kind}\0${p.value}`, p]),
-  );
-  const rows: OptionPriceDraft[] = [];
-  for (const opt of options ?? []) {
-    for (const value of opt.values) {
-      const prev = byKey.get(`${opt.name}\0${value}`);
-      const sell = prev ? String(prev.sellPrice ?? prev.price) : defaults.sell;
-      rows.push({ kind: opt.name, value, cost: "0", sell });
-    }
-  }
-  return rows;
+  const base = Number(defaults.sell) || 0;
+  return optionCombinations(options).map((selections) => {
+    const keys = Object.keys(selections);
+    const resolved = priceForSelections(base, existing, selections);
+    const sell = resolved > 0 ? String(resolved) : defaults.sell;
+    return {
+      key: skuKeyOf(selections),
+      selections,
+      kind: keys.length === 1 ? keys[0]! : "",
+      value: keys.length === 1 ? selections[keys[0]!]! : comboLabel(selections),
+      cost: "0",
+      sell,
+    };
+  });
 }
 
 export function OptionPriceEditor({
@@ -42,74 +54,56 @@ export function OptionPriceEditor({
   onChange: (rows: OptionPriceDraft[]) => void;
   onFillAll?: () => void;
 }) {
-  const primary = pricedOptionName(options);
-  if (!primary) return null;
+  if (options.length === 0) return null;
 
-  const groups = options.map((opt) => ({
-    name: opt.name,
-    required: opt.name === primary,
-    rows: rows.filter((r) => r.kind === opt.name),
-  }));
-
-  const patch = (kind: string, value: string, next: string) => {
+  const comboCount = optionCombinations(options).length;
+  const patch = (key: string, next: string) => {
     onChange(
       rows.map((r) =>
-        r.kind === kind && r.value === value
-          ? { ...r, sell: next.replace(/\D/g, ""), cost: "0" }
-          : r,
+        r.key === key ? { ...r, sell: next.replace(/\D/g, ""), cost: "0" } : r,
       ),
     );
   };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-[15px] font-medium">Сонголтын үнэ</div>
+          <div className="text-[15px] font-medium">Сонголтын үнэ — хослол бүр</div>
           <p className="mt-1 mb-0 text-[13px] text-ink-2">
-            Бараан дээр оруулсан {primary} бүрт энэ гаргалтын зарах үнийг тавина.
+            Материал, хэмжээ гэх мэт нийлээд нэг үнэ. Хоосон нүд дээрх үндсэн үнийг авна.
           </p>
         </div>
-        {onFillAll && (
+        {onFillAll && comboCount <= MAX_OPTION_COMBOS && (
           <Button size="sm" variant="outline" onClick={onFillAll}>
             Үндсэн үнийг бүгдэд
           </Button>
         )}
       </div>
 
-      {groups.map((group) => (
-        <div key={group.name}>
-          <div className="mb-2 text-[13px] text-ink-2">
-            {group.name}
-            {!group.required && (
-              <span className="text-muted"> — заавал биш, хоосон бол үндсэн үнэ</span>
-            )}
-          </div>
-          <div className="overflow-hidden rounded-[8px] border border-line">
-            <div className="grid grid-cols-[minmax(0,1fr)_120px] gap-2 border-b border-line bg-surface px-3 py-2 text-[12px] text-muted">
-              <span>Утга</span>
-              <span>Зарах үнэ</span>
-            </div>
-            {group.rows.map((row) => {
-              const sell = Number(row.sell) || 0;
-              return (
-                <div
-                  key={`${row.kind}-${row.value}`}
-                  className="grid grid-cols-[minmax(0,1fr)_120px] items-center gap-2 border-b border-line px-3 py-2 last:border-b-0"
-                >
-                  <div className="min-w-0 truncate text-[14px]">{row.value}</div>
-                  <Input
-                    value={row.sell}
-                    onChange={(v) => patch(row.kind, row.value, v)}
-                    inputMode="numeric"
-                    placeholder={sell > 0 ? money(sell) : "0"}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ))}
+      {comboCount > MAX_OPTION_COMBOS ? (
+        <p className="m-0 rounded-[8px] border border-warn bg-warn-bg px-3 py-2 text-[13px] text-ink-2">
+          Хослол хэт олон ({comboCount}). Бүлэг эсвэл утгыг цөөлөөд дахин оролдоно уу
+          (дээд тал {MAX_OPTION_COMBOS}).
+        </p>
+      ) : (
+        <ComboMatrix
+          options={options}
+          listHeader="Зарах үнэ"
+          renderCell={(key) => {
+            const draft = rows.find((r) => r.key === key);
+            const sell = Number(draft?.sell) || 0;
+            return (
+              <Input
+                value={draft?.sell ?? ""}
+                onChange={(v) => patch(key, v)}
+                inputMode="numeric"
+                placeholder={sell > 0 ? money(sell) : "0"}
+              />
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

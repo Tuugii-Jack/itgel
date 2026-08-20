@@ -101,8 +101,10 @@ export interface ProductOption {
 }
 
 export interface OptionPrice {
-  kind: string;
-  value: string;
+  kind?: string;
+  value?: string;
+  /** Хослол — ж: { Материал: "A", Хэмжээ: "2cm" }. */
+  selections?: Record<string, string>;
   price: number;
   sellPrice?: number;
   costPrice?: number;
@@ -134,7 +136,7 @@ export interface Product {
   price: number;
   /** Сонголтын үнэ ялгаатай бол хамгийн их. `price`-тай тэнцүү бол нэг үнэ. */
   priceMax?: number;
-  /** Гаргалт дээрх сонголтын үнэ — ж: Хэмжээ S = 10000. */
+  /** Гаргалт дээрх сонголтын үнэ — хослол бүрт өөр байж болно. */
   optionPrices?: OptionPrice[];
   /** Бэлэн барааны хослол бүрийн үлдэгдэл. */
   skuStocks?: SkuStock[];

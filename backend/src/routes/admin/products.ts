@@ -57,12 +57,22 @@ const templateFields = {
 };
 
 /** Тойргийн талбарууд — гаргалт бүрд өөр байж болно. */
-export const optionPriceRow = z.object({
-  kind: z.string().trim().min(1).max(40),
-  value: z.string().trim().min(1).max(40),
-  sellPrice: z.coerce.number().int().min(0).max(100_000_000),
-  costPrice: z.coerce.number().int().min(0).max(100_000_000).default(0),
-});
+export const optionPriceRow = z
+  .object({
+    kind: z.string().trim().max(40).optional().default(''),
+    value: z.string().trim().max(40).optional().default(''),
+    selections: z
+      .record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(40))
+      .optional(),
+    sellPrice: z.coerce.number().int().min(0).max(100_000_000),
+    costPrice: z.coerce.number().int().min(0).max(100_000_000).default(0),
+  })
+  .refine(
+    (row) =>
+      (row.selections && Object.keys(row.selections).length > 0) ||
+      (row.kind.trim().length > 0 && row.value.trim().length > 0),
+    { message: 'Сонголтын үнэ — selections эсвэл kind+value.' },
+  );
 
 export const skuStockRow = z.object({
   selections: z.record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(40)),
@@ -78,8 +88,8 @@ export const roundFields = {
   leadMaxDays: z.coerce.number().int().min(0).max(365).optional(),
   status: productStatus.default('DRAFT'),
   note: z.string().trim().max(300).optional(),
-  optionPrices: z.array(optionPriceRow).max(80).optional(),
-  skuStocks: z.array(skuStockRow).max(120).optional(),
+  optionPrices: z.array(optionPriceRow).max(400).optional(),
+  skuStocks: z.array(skuStockRow).max(400).optional(),
 };
 
 /** Бараа үүсгэх — зөвхөн загвар. Үнэ, огноо нь тусад нь «гаргалт»-аар нэмэгдэнэ. */

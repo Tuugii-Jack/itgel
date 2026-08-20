@@ -8,7 +8,7 @@ import { SkuStockEditor, seedSkuStockDrafts } from "@/components/admin/SkuStockE
 import { Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, datetimeLocalKey, fromDatetimeLocal } from "@/lib/format";
-import { pricedOptionName, skuStockSum } from "@/lib/options";
+import { skuStockSum } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminBatch, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
@@ -99,14 +99,10 @@ export function RoundForm({
 
   const sell = Number(sellPrice) || 0;
   const hasOptions = (product.options?.length ?? 0) > 0;
-  const primaryKind = pricedOptionName(product.options);
-  const primaryRows = optionRows.filter((r) => r.kind === primaryKind);
-  const primaryPriced = !primaryKind || primaryRows.every((r) => Number(r.sell) > 0);
   const optionPrices = optionRows
     .filter((r) => Number(r.sell) > 0)
     .map((r) => ({
-      kind: r.kind,
-      value: r.value,
+      selections: r.selections,
       sellPrice: Number(r.sell) || sell || 0,
       costPrice: 0,
     }));
@@ -114,7 +110,7 @@ export function RoundForm({
     selections: r.selections,
     stock: Number(r.stock) || 0,
   }));
-  const canSave = primaryPriced && (sell > 0 || optionPrices.length > 0);
+  const canSave = sell > 0 || optionPrices.length > 0;
 
   const { date: selectedDay, hour, minute } = useMemo(() => splitCloseAt(closeAt), [closeAt]);
 
@@ -238,7 +234,7 @@ export function RoundForm({
             <div className="text-[15px] font-medium">Үнэ</div>
             <p className="m-0 text-[13px] text-ink-2">
               {hasOptions
-                ? "Доорх хүснэгтэд хэмжээ/сонголт бүрийн зарах үнийг тавина."
+                ? "Доорх хүснэгтэд хослол бүрийн зарах үнийг тавина. Хоосон бол дээрх үндсэн үнэ."
                 : "Энэ гаргалтын зарах үнэ."}
             </p>
             <Field label="Зарах үнэ">

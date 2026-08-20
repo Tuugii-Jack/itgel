@@ -43,6 +43,67 @@ describe('Сонголтын үнэ', () => {
     expect(pricedOptionName([{ name: 'Өнгө' }])).toBe('Өнгө');
     expect(pricedOptionName([])).toBeNull();
   });
+
+  it('хослолын үнэ нэг бүлгийн үнээс өмнө', () => {
+    const combo = [
+      { kind: 'Хэмжээ', value: '2cm', sellPrice: 10_000, costPrice: 0 },
+      {
+        selections: { Материал: 'A', Хэмжээ: '2cm' },
+        sellPrice: 15_000,
+        costPrice: 0,
+      },
+      {
+        selections: { Материал: 'B', Хэмжээ: '2cm' },
+        sellPrice: 18_000,
+        costPrice: 0,
+      },
+    ];
+    expect(
+      resolveOptionPrice({ sellPrice: 9_000, costPrice: 0 }, combo, {
+        Материал: 'A',
+        Хэмжээ: '2cm',
+      }).sellPrice,
+    ).toBe(15_000);
+    expect(
+      resolveOptionPrice({ sellPrice: 9_000, costPrice: 0 }, combo, {
+        Материал: 'B',
+        Хэмжээ: '2cm',
+      }).sellPrice,
+    ).toBe(18_000);
+  });
+
+  it('3 бүлгийн хослол', () => {
+    const combo = [
+      {
+        selections: { Материал: 'A', Хэмжээ: '2cm', Өнгө: 'Хар' },
+        sellPrice: 22_000,
+        costPrice: 0,
+      },
+    ];
+    expect(
+      resolveOptionPrice({ sellPrice: 9_000, costPrice: 0 }, combo, {
+        Материал: 'A',
+        Хэмжээ: '2cm',
+        Өнгө: 'Хар',
+      }).sellPrice,
+    ).toBe(22_000);
+    expect(
+      resolveOptionPrice({ sellPrice: 9_000, costPrice: 0 }, combo, {
+        Материал: 'A',
+        Хэмжээ: '2cm',
+        Өнгө: 'Цагаан',
+      }).sellPrice,
+    ).toBe(9_000);
+  });
+
+  it('хослолын мин–макс', () => {
+    expect(
+      displayPriceRange(9_000, [
+        { selections: { Материал: 'A', Хэмжээ: '2cm' }, sellPrice: 11_000, costPrice: 0 },
+        { selections: { Материал: 'B', Хэмжээ: '3cm' }, sellPrice: 18_000, costPrice: 0 },
+      ]),
+    ).toEqual({ price: 11_000, priceMax: 18_000 });
+  });
 });
 
 describe('SKU хослол', () => {

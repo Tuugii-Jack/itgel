@@ -552,8 +552,9 @@ export const adminApi = {
       note?: string;
       batchId?: string | null;
       optionPrices?: {
-        kind: string;
-        value: string;
+        kind?: string;
+        value?: string;
+        selections?: Record<string, string>;
         sellPrice: number;
         costPrice?: number;
       }[];
@@ -582,8 +583,9 @@ export const adminApi = {
       note: string | null;
       batchId: string | null;
       optionPrices: {
-        kind: string;
-        value: string;
+        kind?: string;
+        value?: string;
+        selections?: Record<string, string>;
         sellPrice: number;
         costPrice?: number;
       }[];

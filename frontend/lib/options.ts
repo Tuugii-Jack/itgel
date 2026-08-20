@@ -28,20 +28,55 @@ export function pricedOptionName(options: { name: string }[] | undefined): strin
   return (preferred ?? options[0])!.name;
 }
 
+export function priceRowSelections(row: OptionPrice): Record<string, string> {
+  if (row.selections && Object.keys(row.selections).length > 0) return row.selections;
+  if (row.kind && row.value) return { [row.kind]: row.value };
+  return {};
+}
+
+function isSubsetOf(
+  rowSel: Record<string, string>,
+  selections: Record<string, string>,
+): boolean {
+  const keys = Object.keys(rowSel);
+  if (keys.length === 0) return false;
+  return keys.every((k) => selections[k] === rowSel[k]);
+}
+
+function kindRank(kind: string): number {
+  const i = PRICE_KIND_PRIORITY.indexOf(kind);
+  return i === -1 ? PRICE_KIND_PRIORITY.length : i;
+}
+
 export function priceForSelections(
   basePrice: number,
   optionPrices: OptionPrice[] | undefined,
   selections: Record<string, string>,
 ): number {
   if (!optionPrices?.length) return basePrice;
-  const hits = optionPrices.filter((row) => selections[row.kind] === row.value);
-  if (hits.length === 0) return basePrice;
-  const amount = (row: OptionPrice) => row.price ?? row.sellPrice ?? basePrice;
-  for (const kind of PRICE_KIND_PRIORITY) {
-    const hit = hits.find((h) => h.kind === kind);
-    if (hit) return amount(hit);
+  const amount = (row: OptionPrice) => row.price ?? row.sellPrice ?? 0;
+  const priced = optionPrices.filter((row) => amount(row) > 0);
+  if (priced.length === 0) return basePrice;
+
+  const exactKey = skuKeyOf(selections);
+  if (exactKey) {
+    const exact = priced.find((row) => skuKeyOf(priceRowSelections(row)) === exactKey);
+    if (exact) return amount(exact);
   }
-  return amount(hits[0]!);
+
+  const subsets = priced.filter((row) => isSubsetOf(priceRowSelections(row), selections));
+  if (subsets.length === 0) return basePrice;
+
+  subsets.sort((a, b) => {
+    const aSel = priceRowSelections(a);
+    const bSel = priceRowSelections(b);
+    const byKeys = Object.keys(bSel).length - Object.keys(aSel).length;
+    if (byKeys !== 0) return byKeys;
+    const aKind = Object.keys(aSel)[0] ?? "";
+    const bKind = Object.keys(bSel)[0] ?? "";
+    return kindRank(aKind) - kindRank(bKind);
+  });
+  return amount(subsets[0]!);
 }
 
 export function optionValuePrice(
@@ -49,9 +84,16 @@ export function optionValuePrice(
   kind: string,
   value: string,
   fallback: number,
+  selections?: Record<string, string>,
 ): number {
-  const row = optionPrices?.find((p) => p.kind === kind && p.value === value);
-  return row ? (row.price ?? row.sellPrice ?? fallback) : fallback;
+  return priceForSelections(fallback, optionPrices, {
+    ...(selections ?? {}),
+    [kind]: value,
+  });
+}
+
+export function comboLabel(selections: Record<string, string>): string {
+  return Object.values(selections).filter(Boolean).join(" · ");
 }
 
 export function skuKeyOf(selections: Record<string, string>): string {

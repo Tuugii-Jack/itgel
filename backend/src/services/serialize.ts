@@ -39,7 +39,10 @@ export type RoundWithProduct = ProductRound & {
   product: ProductWithRelations;
   /** Аль багцад зориулж гаргасан бэ — админ жагсаалтад холбоос болно. */
   batch?: Pick<Batch, 'id' | 'name' | 'stage'> | null;
-  optionPrices?: Pick<RoundOptionPrice, 'kind' | 'value' | 'sellPrice' | 'costPrice'>[];
+  optionPrices?: Pick<
+    RoundOptionPrice,
+    'kind' | 'value' | 'sellPrice' | 'costPrice' | 'selections'
+  >[];
   skuStocks?: Pick<RoundSkuStock, 'selections' | 'stock'>[];
 };
 

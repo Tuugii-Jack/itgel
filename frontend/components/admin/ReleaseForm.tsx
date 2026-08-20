@@ -8,7 +8,7 @@ import { Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import { fromDatetimeLocal } from "@/lib/format";
-import { pricedOptionName, skuStockSum } from "@/lib/options";
+import { skuStockSum } from "@/lib/options";
 import type { AdminProduct, ProductStatus } from "@/lib/types";
 
 const STATUSES: { value: ProductStatus; label: string }[] = [
@@ -104,12 +104,10 @@ export function ReleaseForm({
 
   const sell = Number(sellPrice) || 0;
   const hasOptions = (product?.options?.length ?? 0) > 0;
-  const primaryKind = pricedOptionName(product?.options);
   const optionPrices = optionRows
     .filter((r) => Number(r.sell) > 0)
     .map((r) => ({
-      kind: r.kind,
-      value: r.value,
+      selections: r.selections,
       sellPrice: Number(r.sell) || sell || 0,
       costPrice: 0,
     }));
@@ -117,9 +115,6 @@ export function ReleaseForm({
     selections: r.selections,
     stock: Number(r.stock) || 0,
   }));
-  const primaryOk =
-    !primaryKind ||
-    optionRows.filter((r) => r.kind === primaryKind).every((r) => Number(r.sell) > 0);
 
   const title = kind === "preorder" ? "Урьдчилсан захиалга үүсгэх" : "Бэлэн бараа гаргах";
   const hint =
@@ -129,7 +124,6 @@ export function ReleaseForm({
 
   const canSave =
     Boolean(productId) &&
-    primaryOk &&
     (sell > 0 || optionPrices.length > 0) &&
     (kind === "ready" || Boolean(closeAt));
 
