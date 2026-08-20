@@ -4,9 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Metric, OrderBadge, PageHead, Select } from "@/components/admin/shared";
 import { QrScanner } from "@/components/QrScanner";
 import { Badge, Button, Card, Divider, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
-import { adminApi, ApiError } from "@/lib/api";
+import { adminApi, api, ApiError } from "@/lib/api";
 import { dayKey, dayLabel, dayTimeLabel, money, phoneLabel } from "@/lib/format";
-import { printHandoverReceipt } from "@/lib/handoverReceipt";
+import { printHandoverReceipt, type HandoverReceiptStore } from "@/lib/handoverReceipt";
 import { formatSelections } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type {
@@ -307,6 +307,7 @@ function HistoryPanel({
   error,
   openDate,
   onOpenDate,
+  store,
 }: {
   year: number;
   month: number;
@@ -318,6 +319,7 @@ function HistoryPanel({
   error: string | null;
   openDate: string | null;
   onOpenDate: (date: string) => void;
+  store?: HandoverReceiptStore;
 }) {
   const open = history?.days.find((d) => d.date === openDate) ?? null;
 
@@ -379,14 +381,17 @@ function HistoryPanel({
             ))}
           </div>
 
-          {open && <HistoryDayDetail day={open} />}
+          {open && <HistoryDayDetail day={open} store={store} />}
         </>
       )}
     </div>
   );
 }
 
-function printHistoryRow(row: HandoverHistoryDay["rows"][number]) {
+function printHistoryRow(
+  row: HandoverHistoryDay["rows"][number],
+  store?: HandoverReceiptStore,
+) {
   if (row.items.length === 0) {
     throw new Error("Хэвлэх бараа байхгүй.");
   }
@@ -404,10 +409,18 @@ function printHistoryRow(row: HandoverHistoryDay["rows"][number]) {
     })),
     cashTaken: row.cash,
     cardTaken: row.card,
+    store,
+    issuedAt: row.at,
   });
 }
 
-function HistoryDayDetail({ day }: { day: HandoverHistoryDay }) {
+function HistoryDayDetail({
+  day,
+  store,
+}: {
+  day: HandoverHistoryDay;
+  store?: HandoverReceiptStore;
+}) {
   const toast = useToast();
   return (
     <div>
@@ -476,7 +489,7 @@ function HistoryDayDetail({ day }: { day: HandoverHistoryDay }) {
               disabled={row.items.length === 0}
               onClick={() => {
                 try {
-                  printHistoryRow(row);
+                  printHistoryRow(row, store);
                 } catch (e) {
                   toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
                 }
@@ -524,6 +537,20 @@ export default function HandoverPage() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [payMethod, setPayMethod] = useState<HandoverPayMethod | null>(null);
+  const [store, setStore] = useState<HandoverReceiptStore | undefined>();
+
+  useEffect(() => {
+    void api
+      .store()
+      .then((s) =>
+        setStore({
+          name: s.storeName,
+          phone: s.phone,
+          address: s.address,
+        }),
+      )
+      .catch(() => undefined);
+  }, []);
 
   const loadPending = useCallback(async () => {
     setLoading(true);
@@ -702,6 +729,7 @@ export default function HandoverPage() {
         })),
         collectedAmount: dueForSelected > 0 ? dueForSelected : 0,
         collectedMethod: payMethod ?? undefined,
+        store,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
@@ -730,6 +758,7 @@ export default function HandoverPage() {
         })),
         collectedAmount: found.dueAmount > 0 ? found.dueAmount : 0,
         collectedMethod: payMethod ?? undefined,
+        store,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Хэвлэж чадсангүй.");
@@ -1130,6 +1159,7 @@ export default function HandoverPage() {
           error={historyError}
           openDate={openDate}
           onOpenDate={setOpenDate}
+          store={store}
         />
       ) : (
         <>
