@@ -4,7 +4,7 @@ import { asyncHandler } from '../../middleware/validate.js';
 
 export const publicCategoriesRouter = Router();
 
-/** GET /api/categories — зөвхөн идэвхтэй ангилал. */
+/** GET /api/categories — идэвхтэй, дэлгүүрт бараатай ангилал. */
 publicCategoriesRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
@@ -36,13 +36,16 @@ publicCategoriesRouter.get(
     });
 
     res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
+    res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
     res.json({
-      data: categories.map((c) => ({
-        id: c.id,
-        name: c.name,
-        sortOrder: c.sortOrder,
-        productCount: c._count.products,
-      })),
+      data: categories
+        .map((c) => ({
+          id: c.id,
+          name: c.name,
+          sortOrder: c.sortOrder,
+          productCount: c._count.products,
+        }))
+        .filter((c) => c.productCount > 0),
     });
   }),
 );
