@@ -10,6 +10,7 @@ import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useSession } from "@/lib/session";
 import { awaitingPayment } from "@/lib/payment";
+import { orderHasPickup, ITEM_FULFILMENT_LABEL } from "@/lib/fulfilment";
 import { usePolling } from "@/lib/usePolling";
 import type { MyOrder, OrderStatus, PublicOrder, Store } from "@/lib/types";
 
@@ -131,8 +132,8 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
         <FulfilmentChooser
           order={order}
           store={store}
-          onDone={() => {
-            setCollecting(false);
+          onDone={(more) => {
+            if (!more) setCollecting(false);
             void load();
           }}
         />
@@ -191,7 +192,9 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
               onClick={() => setCollecting(true)}
               className="mt-4 w-full lg:mt-0 lg:w-auto lg:shrink-0"
             >
-              Ирсэн барааг авах
+              {order.items.some((i) => i.fulfilment)
+                ? "Үлдсэн барааг авах"
+                : "Ирсэн барааг авах"}
             </Button>
           )}
         </div>
@@ -266,7 +269,9 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
             <div className="flex flex-col gap-3 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-[15px] font-medium">Хүргэлтээр авна</div>
+                  <div className="text-[15px] font-medium">
+                    {orderHasPickup(order) ? "Зарим бараа хүргэлтээр" : "Хүргэлтээр авна"}
+                  </div>
                 </div>
                 <Badge tone={order.delivery.status === "DELIVERED" ? "ok" : "info"}>
                   {order.delivery.status === "DELIVERED" ? "Хүргэсэн" : "Товлосон"}
@@ -296,11 +301,13 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
         </div>
       )}
 
-      {order.fulfilment === "PICKUP" && (
+      {orderHasPickup(order) && (
         <div className="px-4 pt-6 lg:px-0 lg:pt-0">
           <div className="overflow-hidden rounded-[12px] border border-line">
             <div className="p-4">
-              <div className="text-[15px] font-medium">Өөрөө ирж авах</div>
+              <div className="text-[15px] font-medium">
+                {order.delivery ? "Зарим бараагаа өөрөө авна" : "Өөрөө ирж авах"}
+              </div>
               <div className="mt-1 text-[13px] text-ink-2">
                 Захиалгын кодоо үзүүлнэ үү — <span className="tnum">{order.code}</span>
               </div>
@@ -380,9 +387,11 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                       : ""
                     : item.itemStatus === "handed_over"
                       ? "Авсан"
-                      : item.itemStatus === "arrived"
-                        ? "Авах боломжтой"
-                        : ""}
+                    : item.itemStatus === "arrived"
+                      ? item.fulfilment
+                        ? ITEM_FULFILMENT_LABEL[item.fulfilment]
+                        : "Авах боломжтой"
+                      : ""}
                 </span>
                 <div
                   className={`tnum text-[14px] lg:text-right ${
@@ -402,7 +411,11 @@ export default function TrackPage({ params }: { params: Promise<{ code: string }
                 </div>
               )}
               {item.itemStatus === "arrived" && (
-                <div className="text-[13px] text-ok lg:hidden">Авах боломжтой</div>
+                <div className="text-[13px] text-ok lg:hidden">
+                  {item.fulfilment
+                    ? ITEM_FULFILMENT_LABEL[item.fulfilment]
+                    : "Авах боломжтой"}
+                </div>
               )}
               {item.itemStatus === "handed_over" && (
                 <div className="text-[13px] text-muted lg:hidden">Авсан</div>

@@ -208,6 +208,7 @@ export function publicOrderItem(item: OrderItem, paidDays?: ReadonlySet<string>)
     arrivedAt: toIso(item.arrivedAt),
     cancelledAt: toIso(item.cancelledAt),
     handedOverAt: toIso(item.handedOverAt),
+    fulfilment: item.fulfilment,
     /** waiting | arrived | handed_over | cancelled */
     itemStatus,
     /** Сар бүрийн 10/20/30 — цуцлагдсан мөрийн буцаалт аль өдөрт орох. */

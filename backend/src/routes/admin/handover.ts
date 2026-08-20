@@ -4,6 +4,7 @@ import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
+import { itemPickableAtStore } from '../../lib/itemFulfilment.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { handOverItems } from '../../services/orders.js';
@@ -70,8 +71,9 @@ adminHandoverRouter.get(
     });
     const fresh = { ...order, ...money };
 
-    const pickable = fresh.items.filter(
-      (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt,
+    const pickable = fresh.items.filter(itemPickableAtStore);
+    const deliveryHeld = fresh.items.filter(
+      (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt && i.fulfilment === 'DELIVERY',
     );
 
     res.json({
@@ -84,7 +86,9 @@ adminHandoverRouter.get(
             : fresh.status === 'HANDED_OVER'
               ? 'Энэ захиалгыг аль хэдийн хүлээлгэн өгсөн байна.'
               : pickable.length === 0
-                ? 'Авах боломжтой (ирсэн) бараа алга.'
+                ? deliveryHeld.length > 0
+                  ? 'Эдгээр бараа хүргэлтээр авахаар сонгогдсон.'
+                  : 'Авах боломжтой (ирсэн) бараа алга.'
                 : null,
         pickableItemIds: pickable.map((i) => i.id),
       },
@@ -176,7 +180,7 @@ adminHandoverRouter.get(
               deliveryFee: order.deliveryFee,
               paidAmount: order.paidAmount,
               subtotal: order.subtotal,
-              canPick: pub.itemStatus === 'arrived',
+              canPick: pub.itemStatus === 'arrived' && pub.fulfilment !== 'DELIVERY',
             };
           }),
         );
@@ -332,9 +336,7 @@ adminHandoverRouter.post(
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
-    const pickable = order.items.filter(
-      (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt,
-    );
+    const pickable = order.items.filter(itemPickableAtStore);
     if (pickable.length === 0) {
       throw conflict('Авах боломжтой (ирсэн) бараа алга.');
     }

@@ -125,9 +125,10 @@ export async function changeOrderStatus(
       return next;
     }
 
-    // Захиалга бүхэлдээ ирсэн/өгсөн гэж тэмдэглэхэд мөрүүдийг нийцүүлнэ.
+    // Захиалга ARRIVED болоход бэлэн барааг ирсэн гэж тэмдэглэнэ.
+    // Урьдчилсан мөрийг бүү бүгдийг нь ирсэн болго — ирсэн тоог багцаас бүртгэнэ.
     if (to === 'ARRIVED') {
-      await stampItemsFullyArrived(tx, { orderId, cancelledAt: null, arrivedAt: null }, now);
+      await markReadyItemsArrived(tx, orderId, now);
     }
     if (to === 'HANDED_OVER') {
       await stampItemsFullyArrived(tx, { orderId, cancelledAt: null, handedOverAt: null }, now);
@@ -634,6 +635,10 @@ export async function handOverItems(opts: {
     await tx.orderItem.updateMany({
       where: { id: { in: itemIds } },
       data: { handedOverAt: now },
+    });
+    await tx.orderItem.updateMany({
+      where: { id: { in: itemIds }, fulfilment: null },
+      data: { fulfilment: 'PICKUP' },
     });
 
     const orderIds = [...new Set(items.map((i) => i.orderId))];

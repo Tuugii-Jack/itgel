@@ -21,6 +21,7 @@ import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.j
 import { sms, smsTemplates } from '../../services/sms.js';
 import { resolveOptionPrice } from '../../lib/optionPrices.js';
 import { comboLabel, findSku } from '../../lib/skuStock.js';
+import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } from '../../lib/itemFulfilment.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
 
@@ -339,7 +340,7 @@ publicOrdersRouter.get(
         batch: batchSummary(order.batch),
         delivery: publicDelivery(order.delivery),
         timeline: buildTimeline(order),
-        canChooseFulfilment: order.status === 'ARRIVED' && order.fulfilment === null,
+        canChooseFulfilment: orderCanChooseFulfilment(order),
       },
     });
   }),
@@ -400,12 +401,13 @@ const fulfilmentBody = z
     district: z.string().trim().min(1).max(60).optional(),
     khoroo: z.string().trim().min(1).max(60).optional(),
     address: z.string().trim().min(5).max(300).optional(),
+    itemIds: z.array(z.string().min(1)).min(1).max(100).optional(),
   })
   .refine((v) => v.type === 'PICKUP' || (v.district && v.khoroo && v.address), {
     message: 'Хүргэлтэд байршил, хороо/сум, хаяг заавал шаардлагатай.',
   });
 
-/** POST /api/orders/:code/fulfilment — бараа ирсний дараа авах хэлбэрээ сонгоно. */
+/** POST /api/orders/:code/fulfilment — ирсэн барааг мөр бүрээр авах хэлбэрээ сонгоно. */
 publicOrdersRouter.post(
   '/:code/fulfilment',
   validate({ params: z.object({ code: z.string().min(3).max(20) }), body: fulfilmentBody }),
@@ -415,15 +417,34 @@ publicOrdersRouter.post(
 
     const order = await prisma.order.findFirst({
       where: { code, deletedAt: null },
-      include: { delivery: true },
+      include: { delivery: true, items: true },
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
     if (order.status !== 'ARRIVED') {
       throw conflict('Бараа агуулахад ирсний дараа авах хэлбэрээ сонгоно.');
     }
-    if (order.fulfilment !== null) {
-      throw conflict('Авах хэлбэр аль хэдийн сонгогдсон байна.');
+
+    const pending = order.items.filter(itemNeedsFulfilment);
+    const requested = body.itemIds
+      ? order.items.filter((item) => body.itemIds!.includes(item.id))
+      : pending;
+
+    if (body.itemIds) {
+      const known = new Set(order.items.map((item) => item.id));
+      if (body.itemIds.some((id) => !known.has(id))) {
+        throw badRequest('Сонгосон бараа энэ захиалгад байхгүй.');
+      }
+    }
+    if (requested.length === 0) {
+      throw conflict('Авах арга сонгох ирсэн бараа алга.');
+    }
+    for (const item of requested) {
+      if (!itemNeedsFulfilment(item)) {
+        throw conflict(
+          `"${item.nameSnapshot}" аль хэдийн авах аргатай эсвэл ирээгүй байна.`,
+        );
+      }
     }
 
     const cargoDue = unpaidCargoFee(order);
@@ -440,48 +461,56 @@ publicOrdersRouter.post(
       throw badRequest('Дүүрэг эсвэл аймаг буруу байна.');
     }
 
+    const itemIds = requested.map((item) => item.id);
+
     const updated = await prisma.$transaction(async (tx) => {
-      if (body.type === 'PICKUP') {
-        await tx.order.update({
-          where: { id: order.id },
-          data: {
-            fulfilment: 'PICKUP',
-            deliveryFee: 0,
-            cargoPayMethod: null,
-          },
-        });
-        // Хураамж өөрчлөгдсөн тул дүнг дахин бодуулна.
-        await recalcOrderTotals(tx, order.id);
-        return tx.order.findUniqueOrThrow({
-          where: { id: order.id },
-          include: { delivery: true },
-        });
+      await tx.orderItem.updateMany({
+        where: { id: { in: itemIds } },
+        data: { fulfilment: body.type },
+      });
+
+      if (body.type === 'DELIVERY') {
+        if (order.delivery) {
+          await tx.delivery.update({
+            where: { id: order.delivery.id },
+            data: {
+              district: place!,
+              khoroo: body.khoroo ?? null,
+              addressText: body.address ?? null,
+              ...(order.delivery.status === 'DELIVERED'
+                ? { status: 'PENDING', scheduledDay: startOfUbDay(new Date()) }
+                : {}),
+            },
+          });
+        } else {
+          await tx.delivery.create({
+            data: {
+              orderId: order.id,
+              scheduledDay: startOfUbDay(new Date()),
+              district: place!,
+              khoroo: body.khoroo ?? null,
+              addressText: body.address ?? null,
+              fee: 0,
+            },
+          });
+        }
       }
 
-      await tx.delivery.create({
-        data: {
-          orderId: order.id,
-          scheduledDay: startOfUbDay(new Date()),
-          district: place!,
-          khoroo: body.khoroo ?? null,
-          addressText: body.address ?? null,
-          fee: 0,
-        },
-      });
+      await syncOrderFulfilment(tx, order.id);
 
       await tx.order.update({
         where: { id: order.id },
         data: {
-          fulfilment: 'DELIVERY',
           deliveryFee: 0,
-          cargoPayMethod: cargoDue > 0 ? 'QPAY' : null,
+          cargoPayMethod:
+            body.type === 'DELIVERY' && cargoDue > 0 ? 'QPAY' : order.cargoPayMethod,
         },
       });
       await recalcOrderTotals(tx, order.id);
 
       return tx.order.findUniqueOrThrow({
         where: { id: order.id },
-        include: { delivery: true },
+        include: { delivery: true, items: true },
       });
     });
 
@@ -490,7 +519,12 @@ publicOrdersRouter.post(
       action: 'FULFILMENT',
       entity: 'Order',
       entityId: order.id,
-      after: { fulfilment: body.type, payMethod: body.payMethod, district: place },
+      after: {
+        fulfilment: body.type,
+        itemIds,
+        payMethod: body.payMethod,
+        district: place,
+      },
     });
 
     res.json({
@@ -501,6 +535,7 @@ publicOrdersRouter.post(
         deliveryFee: updated.deliveryFee,
         dueAmount: updated.dueAmount,
         delivery: publicDelivery(updated.delivery),
+        canChooseFulfilment: orderCanChooseFulfilment(updated),
       },
     });
   }),

@@ -396,6 +396,8 @@ model OrderItem {
   arrivedQty Int @default(0)
   /// Хэрэглэгчид хүлээлгэн өгсөн огноо (хэсэгчилсэн авах боломжтой).
   handedOverAt DateTime?
+  /// Ирсэн мөр бүрийн авах арга — захиалгад хольж болно.
+  fulfilment   Fulfilment?
 
   order   Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   round   ProductRound @relation(fields: [roundId], references: [id])

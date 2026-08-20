@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button, ErrorNote, Textarea } from "@/components/ui";
 import { PaymentPanel } from "@/components/PaymentPanel";
 import { LocationFields } from "@/components/LocationFields";
@@ -9,6 +9,7 @@ import { UB_DISTRICTS } from "@/lib/locations";
 import { useSession } from "@/lib/session";
 import { money } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
+import { ITEM_FULFILMENT_LABEL, itemNeedsFulfilment } from "@/lib/fulfilment";
 import { useToast } from "@/lib/toast";
 import type { PublicOrder, Store } from "@/lib/types";
 
@@ -23,7 +24,7 @@ function unpaidCargoFee(order: PublicOrder): number {
 /**
  * 06 Бараа ирсэн — авах арга сонгох.
  *
- * Хүргэлтээр: үлдсэн карго төлүүлнэ. Очиж авахад карго заавал төлөхгүй.
+ * Чек хийсэн бараанд доорх арга хамаарна. Хүргэлтээр: үлдсэн карго төлүүлнэ.
  */
 export function FulfilmentChooser({
   order,
@@ -32,7 +33,7 @@ export function FulfilmentChooser({
 }: {
   order: PublicOrder;
   store: Store;
-  onDone: () => void;
+  onDone: (more?: boolean) => void;
 }) {
   const session = useSession();
   const toast = useToast();
@@ -42,7 +43,9 @@ export function FulfilmentChooser({
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [awaitingQpay, setAwaitingQpay] = useState<PublicOrder | null>(null);
+  const [awaitingQpay, setAwaitingQpay] = useState<(PublicOrder & { stay?: boolean }) | null>(
+    null,
+  );
 
   const cargoFee = order.cargoFee ?? 0;
   const cargoDue = unpaidCargoFee(order);
@@ -53,6 +56,31 @@ export function FulfilmentChooser({
       ? namedDistricts
       : store.deliveryFees.map((d) => d.district);
   const total = order.dueAmount;
+
+  const liveItems = order.items.filter((i) => !i.cancelled);
+  const pendingItems = liveItems.filter(itemNeedsFulfilment);
+  const chosenItems = liveItems.filter(
+    (i) =>
+      i.fulfilment &&
+      (i.itemStatus === "arrived" ||
+        i.itemStatus === "handed_over" ||
+        (i.arrivedQty ?? 0) > 0),
+  );
+  const waitingItems = liveItems.filter(
+    (i) =>
+      i.itemStatus !== "arrived" &&
+      i.itemStatus !== "handed_over" &&
+      (i.arrivedQty ?? 0) <= 0,
+  );
+
+  const pendingKey = pendingItems.map((i) => i.id).sort().join(",");
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(pendingItems.map((i) => i.id)),
+  );
+
+  useEffect(() => {
+    setSelected(new Set(pendingKey ? pendingKey.split(",") : []));
+  }, [pendingKey]);
 
   const choose = (next: "PICKUP" | "DELIVERY") => {
     setType(next);
@@ -67,10 +95,29 @@ export function FulfilmentChooser({
     if (saved.addressText) setAddress(saved.addressText);
   }, [session.me]);
 
-  const liveItems = order.items.filter((i) => !i.cancelled);
+  const toggle = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectedCount = useMemo(
+    () => pendingItems.filter((i) => selected.has(i.id)).length,
+    [pendingItems, selected],
+  );
 
   const submit = async () => {
     setError(null);
+    const itemIds = pendingItems.filter((i) => selected.has(i.id)).map((i) => i.id);
+    if (itemIds.length === 0) {
+      const message = "Ирсэн бараанаасаа дор хаяж нэгийг чек хийнэ үү.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
     if (type === "DELIVERY" && (!district || !khoroo.trim() || !address.trim())) {
       const message = "Байршил, хороо/сум, хаягаа бөглөнө үү.";
       setError(message);
@@ -81,6 +128,7 @@ export function FulfilmentChooser({
     try {
       const result = await api.chooseFulfilment(order.code, {
         type,
+        itemIds,
         payMethod: needsCargoPay ? "QPAY" : undefined,
         district: district ?? undefined,
         khoroo: khoroo || undefined,
@@ -104,14 +152,22 @@ export function FulfilmentChooser({
           dueAmount: result.dueAmount,
           deliveryFee: result.deliveryFee,
           paymentState: "PARTIAL",
+          stay: result.canChooseFulfilment,
         });
         toast.success("QPay-ээр карго төлнө үү.");
         setBusy(false);
         return;
       }
 
-      toast.success(type === "DELIVERY" ? "Хүргэлт сонгогдлоо." : "Авах арга хадгалагдлаа.");
-      onDone();
+      toast.success(
+        result.canChooseFulfilment
+          ? "Сонгосон барааны авах арга хадгалагдлаа. Үлдсэнийг дахин сонгоно уу."
+          : type === "DELIVERY"
+            ? "Хүргэлт сонгогдлоо."
+            : "Авах арга хадгалагдлаа.",
+      );
+      setBusy(false);
+      onDone(result.canChooseFulfilment);
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
       setError(message);
@@ -133,7 +189,7 @@ export function FulfilmentChooser({
           store={store}
           onClaimed={() => {
             toast.success("Төлбөр орлоо.");
-            onDone();
+            onDone(awaitingQpay.stay);
           }}
         />
       </div>
@@ -141,16 +197,21 @@ export function FulfilmentChooser({
   }
 
   const submitLabel = needsCargoPay ? "QPay-ээр үргэлжлүүлэх" : "Баталгаажуулах";
+  const title =
+    pendingItems.length > 0
+      ? chosenItems.length > 0
+        ? `${pendingItems.length} барааны авах арга`
+        : `${pendingItems.length} бараа ирлээ`
+      : `${chosenItems.length} бараа ирлээ`;
 
   return (
     <div className="pb-24 lg:px-10 lg:pb-12 lg:pt-8">
       <div className="px-4 pt-6 lg:max-w-[1120px] lg:px-0 lg:pt-0">
         <div className="tnum text-[13px] text-muted">{order.code}</div>
-        <div className="mt-1 text-[24px] font-medium lg:text-[28px]">
-          {liveItems.length} бараа ирлээ
-        </div>
+        <div className="mt-1 text-[24px] font-medium lg:text-[28px]">{title}</div>
         <div className="mt-1 text-[14px] leading-[1.5] text-ink-2 lg:text-[15px]">
-          Хэрхэн авахаа сонгоно уу. Хүргэлтээр авахад үлдсэн каргог QPay-ээр төлнө.
+          Чек хийсэн барааг доорх аргаар авна. Нэгийг хүргүүлж, нөгөөг нь очиж авч болно.
+          {waitingItems.length > 0 ? " Ирээгүй бараа дараа нь ирнэ." : ""}
         </div>
       </div>
 
@@ -160,32 +221,42 @@ export function FulfilmentChooser({
       <div className="flex flex-col gap-2 px-4 pt-5 lg:px-0 lg:pt-0">
         <div className="text-[13px] text-ink-2">Ирсэн бараа</div>
         <div className="overflow-hidden rounded-[12px] border border-line">
-          {liveItems.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-3 border-b border-line p-3.5 last:border-b-0"
-            >
-              <span className="flex size-5 shrink-0 items-center justify-center rounded-[4px] border border-ok bg-ok-bg">
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#15803D" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M2.5 6.2 L4.8 8.5 L9.5 3.5" />
-                </svg>
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[14px]">{item.name}</span>
-                <span className="block text-[13px] text-muted">
-                  {formatSelections(item.selections, item.size, item.color)}
-                  {formatSelections(item.selections, item.size, item.color) ? " · " : ""}
-                  {item.qty} ш
-                </span>
-              </span>
-              <span className="tnum shrink-0 text-[14px]">{money(item.total)}</span>
-            </div>
-          ))}
+          {pendingItems.length === 0 && chosenItems.length === 0 ? (
+            <div className="p-3.5 text-[14px] text-muted">Ирсэн бараа алга.</div>
+          ) : (
+            <>
+              {pendingItems.map((item) => (
+                <ItemRow
+                  key={item.id}
+                  item={item}
+                  mode="check"
+                  checked={selected.has(item.id)}
+                  onToggle={() => toggle(item.id)}
+                />
+              ))}
+              {chosenItems.map((item) => (
+                <ItemRow key={item.id} item={item} mode="locked" />
+              ))}
+            </>
+          )}
         </div>
       </div>
 
+      {waitingItems.length > 0 && (
+        <div className="flex flex-col gap-2 px-4 pt-5 lg:px-0 lg:pt-0">
+          <div className="text-[13px] text-ink-2">Одоогоор ирээгүй</div>
+          <div className="overflow-hidden rounded-[12px] border border-line">
+            {waitingItems.map((item) => (
+              <ItemRow key={item.id} item={item} mode="waiting" />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="px-4 pt-6 lg:px-0 lg:pt-0">
-        <div className="text-[15px] font-medium lg:text-[17px]">Авах аргаа сонгоно уу</div>
+        <div className="text-[15px] font-medium lg:text-[17px]">
+          Сонгосон барааг хэрхэн авах вэ
+        </div>
       </div>
 
       <div className="flex flex-col gap-3 px-4 pt-6 lg:grid lg:grid-cols-2 lg:px-0 lg:pt-3">
@@ -252,7 +323,7 @@ export function FulfilmentChooser({
         <div className="px-4 pb-6 pt-6 lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-4 lg:rounded-[12px] lg:border lg:border-line lg:p-6">
           <div className="hidden text-[17px] font-medium lg:block">Хураангуй</div>
           <div className="tnum flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5 text-[14px] lg:rounded-none lg:border-0 lg:p-0">
-            <Row label="Одоо авах" value={`${liveItems.length} бараа`} />
+            <Row label="Одоо авах" value={`${selectedCount} бараа`} />
             <Row
               label="Барааны төлбөр"
               value={order.subtotal <= order.paidAmount - order.refundedAmount ? "Төлөгдсөн" : money(Math.max(0, order.subtotal - (order.paidAmount - order.refundedAmount)))}
@@ -293,7 +364,7 @@ export function FulfilmentChooser({
           </div>
 
           <div className="hidden lg:block">
-            <Button full size="bar" onClick={submit} loading={busy}>
+            <Button full size="bar" onClick={submit} loading={busy} disabled={selectedCount === 0}>
               {submitLabel}
             </Button>
           </div>
@@ -301,11 +372,103 @@ export function FulfilmentChooser({
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3 lg:hidden">
-        <Button full size="bar" onClick={submit} loading={busy}>
+        <Button full size="bar" onClick={submit} loading={busy} disabled={selectedCount === 0}>
           {submitLabel}
         </Button>
       </div>
     </div>
+  );
+}
+
+function ItemRow({
+  item,
+  mode,
+  checked,
+  onToggle,
+}: {
+  item: PublicOrder["items"][number];
+  mode: "check" | "locked" | "waiting";
+  checked?: boolean;
+  onToggle?: () => void;
+}) {
+  const sel = formatSelections(item.selections, item.size, item.color);
+  const arrived = mode !== "waiting";
+  const qtyLabel =
+    arrived && (item.arrivedQty ?? item.qty) < item.qty
+      ? `${item.arrivedQty}/${item.qty} ш`
+      : `${item.qty} ш`;
+  const method =
+    item.fulfilment ? ITEM_FULFILMENT_LABEL[item.fulfilment] : null;
+
+  const body = (
+    <>
+      {mode === "check" ? (
+        <span
+          className={`flex size-5 shrink-0 items-center justify-center rounded-[4px] border ${
+            checked ? "border-ok bg-ok-bg" : "border-line bg-bg"
+          }`}
+        >
+          {checked ? (
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="#15803D"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2.5 6.2 L4.8 8.5 L9.5 3.5" />
+            </svg>
+          ) : null}
+        </span>
+      ) : mode === "locked" ? (
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-[4px] border border-line bg-surface">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="text-muted"
+          >
+            <path d="M2.5 6.2 L4.8 8.5 L9.5 3.5" />
+          </svg>
+        </span>
+      ) : (
+        <span className="size-5 shrink-0 rounded-[4px] border border-line bg-surface" />
+      )}
+      <span className="min-w-0 flex-1">
+        <span className={`block text-[14px] ${arrived ? "" : "text-ink-2"}`}>{item.name}</span>
+        <span className="block text-[13px] text-muted">
+          {sel}
+          {sel ? " · " : ""}
+          {qtyLabel}
+          {mode === "waiting" ? " · хүлээж байна" : method ? ` · ${method}` : ""}
+        </span>
+      </span>
+      <span className="tnum shrink-0 text-[14px]">{money(item.total)}</span>
+    </>
+  );
+
+  if (mode === "check") {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center gap-3 border-b border-line p-3.5 text-left last:border-b-0"
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 border-b border-line p-3.5 last:border-b-0">{body}</div>
   );
 }
 

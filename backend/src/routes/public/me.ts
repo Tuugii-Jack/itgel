@@ -11,6 +11,7 @@ import {
   unauthorized,
 } from "../../lib/errors.js";
 import { toIso } from "../../lib/date.js";
+import { orderCanChooseFulfilment } from "../../lib/itemFulfilment.js";
 import { requireCustomer } from "../../middleware/auth.js";
 import { asyncHandler, query, validate } from "../../middleware/validate.js";
 import { computeTotals, paymentState } from "../../services/money.js";
@@ -311,8 +312,7 @@ publicMeRouter.get(
           dueAmount: order.dueAmount,
           paymentState: paymentState(computeTotals(order)),
           fulfilment: order.fulfilment,
-          canChooseFulfilment:
-            order.status === "ARRIVED" && order.fulfilment === null,
+          canChooseFulfilment: orderCanChooseFulfilment(order),
           itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
           items: order.items.map((item) => publicOrderItem(item, paidDays)),
           refundPayoutOn: refund.refundPayoutOn,

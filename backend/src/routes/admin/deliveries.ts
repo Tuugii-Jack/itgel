@@ -9,7 +9,7 @@ import { selectionsOf } from '../../lib/options.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { deliveryHistory } from '../../services/deliveryHistory.js';
-import { changeOrderStatus } from '../../services/orders.js';
+import { handOverItems } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
 
 export const adminDeliveriesRouter = Router();
@@ -32,6 +32,7 @@ const deliveryInclude = {
           selections: true,
           size: true,
           color: true,
+          fulfilment: true,
         },
       },
     },
@@ -39,6 +40,13 @@ const deliveryInclude = {
 } as const;
 
 type DeliveryWithOrder = Prisma.DeliveryGetPayload<{ include: typeof deliveryInclude }>;
+
+function slipItems(d: DeliveryWithOrder) {
+  const chosen = d.order.items.filter((item) => item.fulfilment === 'DELIVERY');
+  if (chosen.length > 0) return chosen;
+  const anyChosen = d.order.items.some((item) => item.fulfilment != null);
+  return anyChosen ? chosen : d.order.items;
+}
 
 function serializeDelivery(d: DeliveryWithOrder) {
   return {
@@ -57,7 +65,7 @@ function serializeDelivery(d: DeliveryWithOrder) {
       cargoFee: d.order.cargoFee,
       note: d.order.note,
       customer: { name: d.order.customer.name, phone: d.order.customer.phone },
-      items: d.order.items.map((item) => ({
+      items: slipItems(d).map((item) => ({
         name: item.nameSnapshot,
         qty: item.qty,
         selections: selectionsOf(item.selections),
@@ -173,7 +181,7 @@ adminDeliveriesRouter.patch(
 
     const before = await prisma.delivery.findUnique({
       where: { id: req.params.id },
-      include: { order: true },
+      include: { order: { include: { items: true } } },
     });
     if (!before) throw notFound('Хүргэлт олдсонгүй.');
 
@@ -191,14 +199,27 @@ adminDeliveriesRouter.patch(
       },
     });
 
-    // Хүргэгдсэн гэж тэмдэглэвэл захиалга хүлээлгэн өгсөнд тооцогдоно.
-    if (body.status === 'DELIVERED' && before.order.status === 'ARRIVED') {
+    // Хүргэгдсэн гэж тэмдэглэвэл зөвхөн хүргэлтийн мөрийг өгсөнд тооцно.
+    if (body.status === 'DELIVERED' && before.order.status !== 'CANCELLED' && before.order.status !== 'HANDED_OVER') {
       const actor = actorOf(req);
-      await changeOrderStatus(before.orderId, 'HANDED_OVER', {
-        actor,
-        reason: 'Хүргэлтээр хүлээлгэн өгсөн',
-      });
-      // Үлдсэн карго/агуулахын төлбөрийг бэлнээр авсанд тооцно.
+      const deliveryIds = before.order.items
+        .filter((item) => !item.cancelledAt && !item.handedOverAt && item.fulfilment === 'DELIVERY')
+        .map((item) => item.id);
+      const anyItemFulfilment = before.order.items.some((item) => item.fulfilment != null);
+      const legacyIds =
+        !anyItemFulfilment && before.order.fulfilment === 'DELIVERY'
+          ? before.order.items
+              .filter((item) => !item.cancelledAt && !item.handedOverAt)
+              .map((item) => item.id)
+          : [];
+      const toHand = deliveryIds.length > 0 ? deliveryIds : legacyIds;
+      if (toHand.length > 0) {
+        await handOverItems({
+          itemIds: toHand,
+          actor,
+          note: 'Хүргэлтээр хүлээлгэн өгсөн',
+        });
+      }
       if (before.order.dueAmount > 0) {
         await recordPayment({
           orderId: before.orderId,

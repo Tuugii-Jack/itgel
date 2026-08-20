@@ -322,6 +322,8 @@ export interface OrderItem {
   arrivedAt?: string | null;
   cancelledAt?: string | null;
   handedOverAt: string | null;
+  /** Ирсэн мөр бүрийн авах арга — захиалгад хольж болно. */
+  fulfilment?: Fulfilment | null;
   /** waiting | arrived | handed_over | cancelled */
   itemStatus: "waiting" | "arrived" | "handed_over" | "cancelled";
   /** Сар бүрийн 10/20/30 — YYYY-MM-DD. Цуцлаагүй бол null. */

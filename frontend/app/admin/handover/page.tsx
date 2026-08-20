@@ -42,9 +42,11 @@ const ITEM_STATUS_LABEL: Record<HandoverCustomerItem["itemStatus"], string> = {
 function isReceiptItem(item: {
   cancelled?: boolean;
   canPick?: boolean;
+  fulfilment?: "PICKUP" | "DELIVERY" | null;
   itemStatus: HandoverCustomerItem["itemStatus"] | AdminOrderDetail["items"][number]["itemStatus"];
 }): boolean {
   if (item.cancelled) return false;
+  if (item.fulfilment === "DELIVERY" && item.itemStatus !== "handed_over") return false;
   return item.canPick === true || item.itemStatus === "arrived" || item.itemStatus === "handed_over";
 }
 
@@ -903,6 +905,9 @@ export default function HandoverPage() {
                     >
                       {ITEM_STATUS_LABEL[item.itemStatus]}
                     </Badge>
+                    {item.fulfilment === "DELIVERY" && item.itemStatus === "arrived" ? (
+                      <Badge tone="info">Хүргэлт</Badge>
+                    ) : null}
                   </div>
                   <div
                     className={`mt-0.5 text-[16px] leading-[1.4] ${
@@ -1061,6 +1066,9 @@ export default function HandoverPage() {
                     >
                       {ITEM_STATUS_LABEL[item.itemStatus]}
                     </Badge>
+                    {item.fulfilment === "DELIVERY" && item.itemStatus === "arrived" ? (
+                      <Badge tone="info">Хүргэлт</Badge>
+                    ) : null}
                   </div>
                   {sel ? <div className="text-[14px] text-muted">{sel}</div> : null}
                 </div>
