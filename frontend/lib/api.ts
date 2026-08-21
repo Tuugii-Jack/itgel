@@ -157,7 +157,24 @@ async function parseEnvelope<T>(res: Response): Promise<Envelope<T>> {
   return json as unknown as Envelope<T>;
 }
 
-async function request<T>(
+function requestKey(path: string, options: RequestOptions): string {
+  const token = options.auth ? (readToken(options.auth) ?? "") : "";
+  return `${options.method ?? "GET"}:${options.auth ?? ""}:${token}:${path}${qs(options.query)}`;
+}
+
+function getTtlMs(path: string, options: RequestOptions): number {
+  const method = options.method ?? "GET";
+  if (method !== "GET") return -1;
+  if (options.auth === "admin") return 0;
+  if (path === "/store" || path === "/categories" || path === "/ads") return 30_000;
+  if (path === "/home" || path === "/products" || path.startsWith("/products/")) return 5_000;
+  return 0;
+}
+
+const inflightGets = new Map<string, Promise<Envelope<unknown>>>();
+const memoGets = new Map<string, { at: number; value: Envelope<unknown> }>();
+
+async function fetchEnvelope<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<Envelope<T>> {
@@ -187,6 +204,33 @@ async function request<T>(
   }
 
   return parseEnvelope<T>(res);
+}
+
+async function request<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<Envelope<T>> {
+  const ttl = getTtlMs(path, options);
+  if (ttl < 0) return fetchEnvelope<T>(path, options);
+
+  const key = requestKey(path, options);
+  if (ttl > 0) {
+    const hit = memoGets.get(key);
+    if (hit && Date.now() - hit.at < ttl) return hit.value as Envelope<T>;
+  }
+  const pending = inflightGets.get(key);
+  if (pending) return pending as Promise<Envelope<T>>;
+
+  const p = fetchEnvelope<T>(path, options)
+    .then((value) => {
+      if (ttl > 0) memoGets.set(key, { at: Date.now(), value });
+      return value;
+    })
+    .finally(() => {
+      inflightGets.delete(key);
+    });
+  inflightGets.set(key, p as Promise<Envelope<unknown>>);
+  return p;
 }
 
 /** Админ зураг — JSON биш, түүхий файл илгээнэ. */
@@ -223,6 +267,15 @@ export const isAuthError = (error: unknown): boolean =>
 // ------------------------------ Хэрэглэгч ------------------------------
 
 export const api = {
+  home: () =>
+    request<{
+      store: Store;
+      categories: Category[];
+      ads: Ad[];
+      order: Envelope<Product[]>;
+      ready: Envelope<Product[]>;
+    }>("/home").then((r) => r.data),
+
   categories: () => request<Category[]>("/categories").then((r) => r.data),
 
   products: (query?: {

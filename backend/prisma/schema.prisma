@@ -108,6 +108,7 @@ model Product {
   orderItems OrderItem[]
 
   @@index([categoryId])
+  @@index([deletedAt])
 }
 
 /**
@@ -159,6 +160,7 @@ model ProductRound {
   @@index([closeAt])
   @@index([productId, createdAt])
   @@index([batchId])
+  @@index([deletedAt, status, closeAt])
 }
 
 /// Гаргалт дээрх сонголтын үнэ — ж: Хэмжээ S = 10,000₮, M = 20,000₮.
@@ -359,6 +361,7 @@ model Order {
   @@index([createdAt])
   /// «Төлбөр дутуу захиалга» шүүхэд.
   @@index([dueAmount])
+  @@index([deletedAt, status, createdAt])
 }
 
 /// Орлого, буцаалт бүрийн бичилт. Устгагдахгүй — залруулга нь эсрэг мөр.
@@ -426,6 +429,7 @@ model OrderItem {
   @@index([orderId])
   @@index([productId])
   @@index([roundId])
+  @@index([roundId, cancelledAt])
   @@index([arrivedAt])
   @@index([handedOverAt])
 }

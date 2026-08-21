@@ -50,33 +50,22 @@ export default function HomePage() {
       setLoading(true);
       setError(null);
       try {
-        const [s, c, a, order, ready] = await Promise.all([
-          api.store(),
-          api.categories(),
-          api.ads(),
-          api.products({
-            type: "order",
-            page: 1,
-            pageSize: ORDER_PREVIEW,
-            sort: "closing",
-          }),
-          api.products({ type: "ready", page: 1, pageSize: PAGE_SIZE }),
-        ]);
+        const home = await api.home();
         if (!alive) return;
-        setStore(s);
-        setCategories(c);
-        setAds(a);
+        setStore(home.store);
+        setCategories(home.categories);
+        setAds(home.ads);
         setOrderData({
-          items: order.data,
-          total: order.meta?.total ?? order.data.length,
-          page: order.meta?.page ?? 1,
-          pages: order.meta?.pages ?? 1,
+          items: home.order.data,
+          total: home.order.meta?.total ?? home.order.data.length,
+          page: home.order.meta?.page ?? 1,
+          pages: home.order.meta?.pages ?? 1,
         });
         setReadyData({
-          items: ready.data,
-          total: ready.meta?.total ?? ready.data.length,
-          page: ready.meta?.page ?? 1,
-          pages: ready.meta?.pages ?? 1,
+          items: home.ready.data,
+          total: home.ready.meta?.total ?? home.ready.data.length,
+          page: home.ready.meta?.page ?? 1,
+          pages: home.ready.meta?.pages ?? 1,
         });
       } catch (e) {
         if (alive) {

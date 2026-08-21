@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { prisma } from '../../prisma.js';
 import { asyncHandler } from '../../middleware/validate.js';
+import { listShopAds } from '../../services/shopCatalog.js';
 
 export const publicAdsRouter = Router();
 
@@ -8,17 +8,7 @@ export const publicAdsRouter = Router();
 publicAdsRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
-    const ads = await prisma.ad.findMany({
-      where: { deletedAt: null, isActive: true },
-      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
-      select: {
-        id: true,
-        title: true,
-        imageUrl: true,
-        linkUrl: true,
-      },
-    });
-
+    const ads = await listShopAds();
     res.setHeader('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
     res.json({ data: ads });
   }),

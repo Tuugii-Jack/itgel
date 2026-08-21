@@ -63,7 +63,7 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     productId: product.id,
     roundNo: round.roundNo,
     name: product.name,
-    description: product.description,
+    description: product.description ?? null,
     categoryId: product.categoryId,
     category: product.category ? { id: product.category.id, name: product.category.name } : undefined,
     price: range.price,

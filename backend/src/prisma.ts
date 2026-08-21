@@ -2,9 +2,8 @@ import { PrismaClient } from '@prisma/client';
 import { isProd } from './env.js';
 
 /**
- * Serverless (Vercel): instance бүрт connection_limit=1 — pooler-ийг дүүргэхгүй.
- * Local long-running: Promise.all + cron зэрэг query хийдэг тул жижиг pool хэрэгтэй.
- * (limit=1 үед P2024 «Timed out fetching a new connection» гардаг.)
+ * Promise.all (count + findMany, нүүрийн 5 query) нэг instance дээр зэрэг явна.
+ * Pooler-ийг дүүргэхгүйн тулд жижиг pool (5). DATABASE_URL-д limit байвал түүнийг үлдээнэ.
  */
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -13,8 +12,9 @@ function datasourceUrl(): string | undefined {
   if (!url) return undefined;
   try {
     const u = new URL(url);
-    if (!u.searchParams.has('connection_limit')) {
-      u.searchParams.set('connection_limit', isProd ? '1' : '5');
+    const current = Number(u.searchParams.get('connection_limit') ?? '0');
+    if (!Number.isFinite(current) || current < 5) {
+      u.searchParams.set('connection_limit', '5');
     }
     if (!u.searchParams.has('pool_timeout')) {
       u.searchParams.set('pool_timeout', isProd ? '10' : '20');
