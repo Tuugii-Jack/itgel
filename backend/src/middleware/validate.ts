@@ -23,9 +23,10 @@ export function validate<TBody extends ZodTypeAny, TQuery extends ZodTypeAny, TP
       next();
     } catch (error) {
       if (error instanceof ZodError) {
+        const mongolian = error.issues.find((i) => /[А-Яа-яӨөҮүЁё]/.test(i.message));
         next(
           badRequest(
-            'Оруулсан утга буруу байна.',
+            mongolian?.message ?? 'Оруулсан утга буруу байна.',
             error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })),
           ),
         );

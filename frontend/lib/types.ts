@@ -726,9 +726,11 @@ export interface BatchProduct {
   image: string | null;
   sellPrice: number;
   costPrice: number;
-  /** Нэгж карго үнэ ₮. */
+  /** Нэгж карго үнэ ₮ — сонголтгүй үндсэн. */
   cargoFee: number;
   cargoTotal?: number;
+  /** Сонголт бүрийн нэгж карго. */
+  cargoVariants?: BatchCargoVariant[];
   status: ProductStatus;
   closeAt: string | null;
   orderedQty: number;
@@ -746,6 +748,14 @@ export interface BatchArrivalVariant {
   remainingQty: number;
   waitingCustomers: number;
   handedOverQty?: number;
+}
+
+export interface BatchCargoVariant {
+  key: string;
+  selections: Record<string, string>;
+  label: string;
+  orderedQty: number;
+  cargoFee: number;
 }
 
 export interface BatchOrderRow {
