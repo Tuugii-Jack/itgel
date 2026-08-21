@@ -7,10 +7,12 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { Badge, Skeleton, type Tone } from "@/components/ui";
+import { EmailAuthForm } from "@/components/EmailAuthForm";
+import { Badge, Card, Skeleton, Spinner, type Tone } from "@/components/ui";
 import { api } from "@/lib/api";
 import { dayLabel, money } from "@/lib/format";
 import { useSession } from "@/lib/session";
@@ -46,6 +48,7 @@ export function fetchTrackedOrder(code: string): Promise<PublicOrder> {
     })
     .catch((error) => {
       inflight.delete(key);
+      orderCache.delete(key);
       throw error;
     });
   inflight.set(key, request);
@@ -78,6 +81,13 @@ export function TrackShellProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useState<Store | null>(null);
   const [myOrders, setMyOrders] = useState<MyOrder[]>([]);
   const [chromeHidden, setChromeHidden] = useState(false);
+  const cacheOwner = useRef(session.me?.id ?? "");
+  const sessionKey = session.me?.id ?? "";
+  if (cacheOwner.current !== sessionKey) {
+    cacheOwner.current = sessionKey;
+    orderCache.clear();
+    inflight.clear();
+  }
 
   useEffect(() => {
     let alive = true;
@@ -121,6 +131,31 @@ export function TrackChrome({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const code = pathname.match(/^\/t\/([^/]+)$/)?.[1]?.toUpperCase();
   const { myOrders, chromeHidden } = useTrackShell();
+  const session = useSession();
+
+  if (session.loading) {
+    return (
+      <div className="flex justify-center py-24">
+        <Spinner className="text-muted" />
+      </div>
+    );
+  }
+
+  if (!session.me) {
+    return (
+      <div className="screen">
+        <div className="px-4 pt-6 lg:mx-auto lg:max-w-[420px] lg:px-0 lg:pt-10">
+          <div className="mb-4 text-[20px] font-medium lg:text-[24px]">Захиалга хянах</div>
+          <Card className="flex flex-col gap-3 p-4 lg:p-6">
+            <p className="m-0 text-[13px] text-ink-2">
+              Нэвтэрсний дараа зөвхөн өөрийн захиалгыг харна.
+            </p>
+            <EmailAuthForm />
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   if (!code) return children;
 

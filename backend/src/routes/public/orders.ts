@@ -257,14 +257,15 @@ async function persistPublicOrderFees(
   }
 }
 
-/** GET /api/orders/:code — публик хяналт, timeline-тай. */
+/** GET /api/orders/:code — нэвтэрсэн хэрэглэгчийн өөрийн захиалга. */
 publicOrdersRouter.get(
   '/:code',
+  requireCustomer,
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
   asyncHandler(async (req, res) => {
     const code = param(req, 'code').toUpperCase();
     const order = await prisma.order.findFirst({
-      where: { code, deletedAt: null },
+      where: { code, deletedAt: null, customerId: req.auth!.sub },
       include: {
         items: { include: { product: true, round: true } },
         batch: true,
@@ -363,11 +364,14 @@ publicOrdersRouter.get(
  */
 publicOrdersRouter.post(
   '/:code/payment-claim',
+  requireCustomer,
   ipRateLimit(20, 10 * 60 * 1000),
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
   asyncHandler(async (req, res) => {
     const code = param(req, 'code').toUpperCase();
-    const order = await prisma.order.findFirst({ where: { code, deletedAt: null } });
+    const order = await prisma.order.findFirst({
+      where: { code, deletedAt: null, customerId: req.auth!.sub },
+    });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
     if (order.status === 'CANCELLED') {
@@ -418,13 +422,14 @@ const fulfilmentBody = z
 /** POST /api/orders/:code/fulfilment — ирсэн барааг мөр бүрээр авах хэлбэрээ сонгоно. */
 publicOrdersRouter.post(
   '/:code/fulfilment',
+  requireCustomer,
   validate({ params: z.object({ code: z.string().min(3).max(20) }), body: fulfilmentBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof fulfilmentBody>;
     const code = param(req, 'code').toUpperCase();
 
     const order = await prisma.order.findFirst({
-      where: { code, deletedAt: null },
+      where: { code, deletedAt: null, customerId: req.auth!.sub },
       include: {
         delivery: true,
         items: { include: { round: true } },

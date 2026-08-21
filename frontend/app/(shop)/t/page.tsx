@@ -27,7 +27,7 @@ export default function LookupPage() {
           <div>
             <div className="text-[15px] font-medium">Захиалгын кодоо оруулна уу</div>
             <p className="mt-1 mb-0 text-[13px] text-ink-2">
-              Захиалга өгөхөд SMS-ээр ирсэн код. Нэвтрэх шаардлагагүй.
+              SMS-ээр ирсэн өөрийн захиалгын код. Өөр хүний захиалга харагдахгүй.
             </p>
           </div>
           <Input

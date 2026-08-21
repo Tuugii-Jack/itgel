@@ -4,6 +4,7 @@ import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
+import { requireCustomer } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import {
   applyQpayPayment,
@@ -69,6 +70,7 @@ function serializeInvoice(input: {
  */
 publicQpayRouter.post(
   '/:code/qpay/invoice',
+  requireCustomer,
   ipRateLimit(40, 10 * 60 * 1000),
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
   asyncHandler(async (req, res) => {
@@ -81,7 +83,7 @@ publicQpayRouter.post(
 
     const code = param(req, 'code').toUpperCase();
     const order = await prisma.order.findFirst({
-      where: { code, deletedAt: null },
+      where: { code, deletedAt: null, customerId: req.auth!.sub },
       select: {
         id: true,
         code: true,
@@ -141,12 +143,13 @@ publicQpayRouter.post(
  */
 publicQpayRouter.get(
   '/:code/qpay/status',
+  requireCustomer,
   ipRateLimit(60, 10 * 60 * 1000),
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
   asyncHandler(async (req, res) => {
     const code = param(req, 'code').toUpperCase();
     const order = await prisma.order.findFirst({
-      where: { code, deletedAt: null },
+      where: { code, deletedAt: null, customerId: req.auth!.sub },
       select: {
         dueAmount: true,
         qpayInvoiceId: true,
@@ -170,12 +173,13 @@ publicQpayRouter.get(
  */
 publicQpayRouter.post(
   '/:code/qpay/verify',
+  requireCustomer,
   ipRateLimit(12, 10 * 60 * 1000),
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
   asyncHandler(async (req, res) => {
     const code = param(req, 'code').toUpperCase();
     const order = await prisma.order.findFirst({
-      where: { code, deletedAt: null },
+      where: { code, deletedAt: null, customerId: req.auth!.sub },
       select: {
         id: true,
         dueAmount: true,

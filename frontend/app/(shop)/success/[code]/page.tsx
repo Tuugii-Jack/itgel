@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { use, useCallback, useEffect, useState } from "react";
+import { EmailAuthForm } from "@/components/EmailAuthForm";
 import { PaymentPanel } from "@/components/PaymentPanel";
 import { Qr } from "@/components/Qr";
-import { Button, ErrorNote, Skeleton } from "@/components/ui";
+import { Button, Card, ErrorNote, Skeleton, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { money, phoneLabel, rangeLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
+import { useSession } from "@/lib/session";
 import { usePolling } from "@/lib/usePolling";
 import type { PublicOrder, Store } from "@/lib/types";
 
@@ -20,20 +22,23 @@ import type { PublicOrder, Store } from "@/lib/types";
  */
 export default function SuccessPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
+  const session = useSession();
   const [order, setOrder] = useState<PublicOrder | null>(null);
   const [store, setStore] = useState<Store | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [trackUrl, setTrackUrl] = useState("");
 
   const load = useCallback(async () => {
+    if (!session.me) return;
     try {
       const [o, s] = await Promise.all([api.order(code), api.store()]);
       setOrder(o);
       setStore(s);
+      setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     }
-  }, [code]);
+  }, [code, session.me]);
 
   useEffect(() => {
     void load();
@@ -52,6 +57,30 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
   // Админ төлбөрийг бүртгэмэгц хуудас өөрөө «Баталгаажлаа» болно —
   // хэрэглэгч refresh дарах шаардлагагүй.
   usePolling(load, 10_000, pending);
+
+  if (session.loading) {
+    return (
+      <div className="flex justify-center py-24">
+        <Spinner className="text-muted" />
+      </div>
+    );
+  }
+
+  if (!session.me) {
+    return (
+      <div className="screen">
+        <div className="px-4 pt-6 lg:mx-auto lg:max-w-[420px] lg:px-0 lg:pt-10">
+          <div className="mb-4 text-[20px] font-medium">Захиалга</div>
+          <Card className="flex flex-col gap-3 p-4 lg:p-6">
+            <p className="m-0 text-[13px] text-ink-2">
+              Нэвтэрсний дараа зөвхөн өөрийн захиалгыг харна.
+            </p>
+            <EmailAuthForm />
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   if (error) {
     return (

@@ -363,8 +363,10 @@ export const api = {
       auth: "customer",
     }).then((r) => r.data),
 
-  order: (code: string) =>
-    request<PublicOrder>(`/orders/${code}`).then((r) => r.data),
+    order: (code: string) =>
+    request<PublicOrder>(`/orders/${code}`, { auth: "customer" }).then(
+      (r) => r.data,
+    ),
 
   /**
    * "Мөнгө шилжүүлсэн" гэж мэдэгдэх. Төлбөр орсонд тооцогдохгүй — админ
@@ -373,26 +375,28 @@ export const api = {
   claimPayment: (code: string) =>
     request<{ code: string; paymentClaimedAt: string | null }>(
       `/orders/${code}/payment-claim`,
-      { method: "POST" },
+      { method: "POST", auth: "customer" },
     ).then((r) => r.data),
 
   /** QPay нэхэмжлэл үүсгэх — QR + deeplink. */
   createQpayInvoice: (code: string) =>
     request<QpayInvoice>(`/orders/${code}/qpay/invoice`, {
       method: "POST",
+      auth: "customer",
     }).then((r) => r.data),
 
   /** Манай дэвтэр — QPay-г poll хийхгүй. */
   qpayStatus: (code: string) =>
     request<{ paid: boolean; invoiceId: string | null }>(
       `/orders/${code}/qpay/status`,
+      { auth: "customer" },
     ).then((r) => r.data),
 
   /** Callback-ийн дараа нэг удаа payment/check. */
   qpayVerify: (code: string) =>
     request<{ paid: boolean; invoiceId: string | null }>(
       `/orders/${code}/qpay/verify`,
-      { method: "POST" },
+      { method: "POST", auth: "customer" },
     ).then((r) => r.data),
 
   chooseFulfilment: (
@@ -415,7 +419,11 @@ export const api = {
       cargoFee?: number;
       delivery: PublicOrder["delivery"];
       canChooseFulfilment: boolean;
-    }>(`/orders/${code}/fulfilment`, { method: "POST", body }).then(
+    }>(`/orders/${code}/fulfilment`, {
+      method: "POST",
+      body,
+      auth: "customer",
+    }).then(
       (r) => r.data,
     ),
 
