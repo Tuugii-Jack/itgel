@@ -13,7 +13,9 @@ import { formatSelections } from "@/lib/options";
 import {
   closeHint,
   DEFAULT_PRODUCT_PRINT,
+  downloadProductOrdersExcel,
   printProductOrders,
+  productExcelFilename,
   roundOrdersToPrintProduct,
   rowToPrintProduct,
   type ProductPrintOptions,
@@ -45,7 +47,7 @@ export default function OrdersByProductPage() {
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [printOpen, setPrintOpen] = useState(false);
   const [printOpts, setPrintOpts] = useState<ProductPrintOptions>(DEFAULT_PRODUCT_PRINT);
-  const [printBusy, setPrintBusy] = useState(false);
+  const [printBusy, setPrintBusy] = useState<"print" | "excel" | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 300);
@@ -150,9 +152,9 @@ export default function OrdersByProductPage() {
     );
   };
 
-  const runPrint = async () => {
+  const runExport = async (mode: "print" | "excel") => {
     if (rows.length === 0) return;
-    setPrintBusy(true);
+    setPrintBusy(mode);
     const title =
       closed === "closed"
         ? "Хаагдсан бараа"
@@ -172,16 +174,28 @@ export default function OrdersByProductPage() {
       .join(" · ");
     const meta = { title, hint: hint || undefined };
     try {
-      if (!printOpts.customers) {
-        printProductOrders(rows.map(rowToPrintProduct), printOpts, meta);
+      const products = printOpts.customers
+        ? (await Promise.all(rows.map((row) => adminApi.roundOrders(row.roundId)))).map(
+            roundOrdersToPrintProduct,
+          )
+        : rows.map(rowToPrintProduct);
+      if (mode === "excel") {
+        downloadProductOrdersExcel(products, printOpts, {
+          filename: productExcelFilename(title),
+        });
         return;
       }
-      const details = await Promise.all(rows.map((row) => adminApi.roundOrders(row.roundId)));
-      printProductOrders(details.map(roundOrdersToPrintProduct), printOpts, meta);
+      printProductOrders(products, printOpts, meta);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Хэвлэж чадсангүй.");
+      setError(
+        e instanceof ApiError
+          ? e.message
+          : mode === "excel"
+            ? "Excel татаж чадсангүй."
+            : "Хэвлэж чадсангүй.",
+      );
     } finally {
-      setPrintBusy(false);
+      setPrintBusy(null);
     }
   };
 
@@ -218,11 +232,11 @@ export default function OrdersByProductPage() {
             <Button
               size="sm"
               variant="outline"
-              disabled={rows.length === 0 || printBusy}
-              loading={printBusy}
+              disabled={rows.length === 0 || printBusy != null}
+              loading={printBusy != null}
               onClick={() => setPrintOpen((v) => !v)}
             >
-              Хэвлэх
+              Хэвлэх / Excel
             </Button>
             <Link
               href="/admin"
@@ -250,7 +264,7 @@ export default function OrdersByProductPage() {
 
       {printOpen && (
         <Card className="mb-4 flex flex-col gap-3 p-4">
-          <div className="text-[14px] font-medium">Хэвлэх сонголт</div>
+          <div className="text-[14px] font-medium">Хэвлэх / Excel сонголт</div>
           <div className="flex flex-wrap gap-x-5 gap-y-2">
             <Check
               checked={printOpts.customers}
@@ -286,9 +300,23 @@ export default function OrdersByProductPage() {
               Үнэ
             </Check>
           </div>
-          <div>
-            <Button size="sm" onClick={() => void runPrint()} loading={printBusy}>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => void runExport("print")}
+              loading={printBusy === "print"}
+              disabled={printBusy != null}
+            >
               {printOpts.customers ? "Жагсаалтыг хэвлэх" : "Тоог хэвлэх"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void runExport("excel")}
+              loading={printBusy === "excel"}
+              disabled={printBusy != null}
+            >
+              Excel татах
             </Button>
           </div>
         </Card>

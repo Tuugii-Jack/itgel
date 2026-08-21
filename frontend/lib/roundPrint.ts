@@ -110,27 +110,174 @@ function variantPrice(product: PrintProduct, v: PrintVariant): number {
   return product.sellPrice;
 }
 
+function variantsOf(product: PrintProduct): PrintVariant[] {
+  return product.byVariant.length > 0
+    ? product.byVariant
+    : [{ selections: {}, size: null, color: null, qty: product.qty }];
+}
+
+function productPrintLayout(products: PrintProduct[]) {
+  const extraKinds = [
+    ...new Set(
+      products.flatMap((p) => variantsOf(p).flatMap((v) => Object.keys(variantParts(v).extra))),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "mn"));
+
+  const hasSize = products.some((p) => variantsOf(p).some((v) => variantParts(v).size));
+  const hasColor = products.some((p) => variantsOf(p).some((v) => variantParts(v).color));
+
+  return { extraKinds, hasSize, hasColor };
+}
+
+type ProductExportRow = {
+  name: string;
+  color: string;
+  size: string;
+  extra: Record<string, string>;
+  customer: string;
+  phone: string;
+  code: string;
+  qty: number;
+  price: number;
+};
+
+function productExportRows(
+  products: PrintProduct[],
+  opts: ProductPrintOptions,
+): ProductExportRow[] {
+  const rows: ProductExportRow[] = [];
+  for (const product of products) {
+    for (const v of variantsOf(product)) {
+      const parts = variantParts(v);
+      const base = {
+        name: product.name,
+        color: parts.color || "—",
+        size: parts.size || "—",
+        extra: parts.extra,
+        price: variantPrice(product, v),
+      };
+      if (!opts.customers) {
+        rows.push({
+          ...base,
+          customer: "",
+          phone: "",
+          code: "",
+          qty: v.qty,
+        });
+        continue;
+      }
+      const buyers = buyersFor(product.orders, v);
+      if (buyers.length === 0) {
+        rows.push({
+          ...base,
+          customer: "—",
+          phone: "",
+          code: "",
+          qty: v.qty,
+        });
+        continue;
+      }
+      for (const o of buyers) {
+        rows.push({
+          ...base,
+          customer: o.customer.name ?? "Нэргүй",
+          phone: phoneLabel(o.customer.phone),
+          code: o.code,
+          qty: o.qty,
+          price: o.unitPrice,
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+function csvEscape(value: string | number): string {
+  const s = String(value ?? "");
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function dayKeySafe(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}${m}${day}`;
+}
+
+function fileSafe(s: string): string {
+  return s
+    .replace(/[^\p{L}\p{N}-]+/gu, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "baraa";
+}
+
+/** Хэвлэлттэй ижил задаргаа — сонголт бүр тусдаа багана. Excel-д нээгдэх UTF-8 BOM CSV. */
+export function downloadProductOrdersExcel(
+  products: PrintProduct[],
+  opts: ProductPrintOptions,
+  meta?: { filename?: string },
+) {
+  const { extraKinds, hasSize, hasColor } = productPrintLayout(products);
+  const headers = [
+    "Бүтээгдэхүүний нэр",
+    hasColor ? "Өнгө" : null,
+    hasSize ? "Хэмжээ" : null,
+    ...extraKinds,
+    opts.customers ? "Хэрэглэгч" : null,
+    opts.phone ? "Утас" : null,
+    opts.code ? "Захиалгын код" : null,
+    "Тоо",
+    opts.amounts ? "Үнэ ₮" : null,
+  ].filter((h): h is string => Boolean(h));
+
+  const lines = productExportRows(products, opts).map((row) => {
+    const cells: (string | number)[] = [row.name];
+    if (hasColor) cells.push(row.color);
+    if (hasSize) cells.push(row.size);
+    for (const k of extraKinds) cells.push(row.extra[k] || "—");
+    if (opts.customers) cells.push(row.customer);
+    if (opts.phone) cells.push(row.phone);
+    if (opts.code) cells.push(row.code);
+    cells.push(row.qty);
+    if (opts.amounts) cells.push(row.price);
+    return cells.map(csvEscape).join(",");
+  });
+
+  const totalQty = products.reduce((sum, p) => sum + p.qty, 0);
+  const qtyIndex = headers.length - (opts.amounts ? 2 : 1);
+  const totalCells = headers.map((_, i) => {
+    if (i === 0) return "Нийт";
+    if (i === qtyIndex) return String(totalQty);
+    return "";
+  });
+  lines.push(totalCells.map(csvEscape).join(","));
+
+  const bom = "\uFEFF";
+  const blob = new Blob([bom + headers.map(csvEscape).join(",") + "\n" + lines.join("\n")], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = meta?.filename ?? `baraagaar-zahialga-${dayKeySafe()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function productExcelFilename(title: string): string {
+  return `${fileSafe(title)}-${dayKeySafe()}.csv`;
+}
+
 export function printProductOrders(
   products: PrintProduct[],
   opts: ProductPrintOptions,
   meta?: { title?: string; hint?: string; countLabel?: string },
 ) {
-  const extraKinds = [
-    ...new Set(
-      products.flatMap((p) =>
-        (p.byVariant.length ? p.byVariant : [{ selections: {}, size: null, color: null, qty: 0 }]).flatMap(
-          (v) => Object.keys(variantParts(v).extra),
-        ),
-      ),
-    ),
-  ].sort((a, b) => a.localeCompare(b, "mn"));
-
-  const hasSize = products.some((p) =>
-    (p.byVariant.length ? p.byVariant : []).some((v) => variantParts(v).size),
-  );
-  const hasColor = products.some((p) =>
-    (p.byVariant.length ? p.byVariant : []).some((v) => variantParts(v).color),
-  );
+  const { extraKinds, hasSize, hasColor } = productPrintLayout(products);
 
   const title = meta?.title ?? "Бараагаар захиалга";
   const totalQty = products.reduce((sum, p) => sum + p.qty, 0);
