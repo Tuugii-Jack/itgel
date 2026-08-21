@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { ArrivalRegister } from "@/components/admin/ArrivalRegister";
@@ -1036,6 +1036,7 @@ function ClosedRoundPicker({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [rounds, setRounds] = useState<BatchProduct[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
   const [loadingMonths, setLoadingMonths] = useState(true);
   const [loadingRounds, setLoadingRounds] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1106,6 +1107,15 @@ function ClosedRoundPicker({
   };
 
   const inBatch = new Set(batch.products.map((p) => p.roundId));
+  const q = search.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!q) return rounds;
+    return rounds.filter(
+      (row) =>
+        row.name.toLowerCase().includes(q) ||
+        String(row.roundNo).includes(q),
+    );
+  }, [rounds, q]);
 
   return (
     <Card className="mb-4 p-4">
@@ -1145,6 +1155,14 @@ function ClosedRoundPicker({
             })}
           </div>
 
+          <div className="mb-3">
+            <Input
+              value={search}
+              onChange={setSearch}
+              placeholder="Барааны нэр эсвэл гаргалтын дугаараар хайх"
+            />
+          </div>
+
           {error && (
             <div className="mb-3">
               <ErrorNote>{error}</ErrorNote>
@@ -1159,9 +1177,13 @@ function ClosedRoundPicker({
             <div className="py-6 text-center text-[13px] text-muted">
               Энэ сард нэмэх гаргалт алга.
             </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-6 text-center text-[13px] text-muted">
+              Хайлтад тохирох бараа олдсонгүй.
+            </div>
           ) : (
             <div className="max-h-[320px] overflow-y-auto">
-              {rounds.map((row) => {
+              {filtered.map((row) => {
                 const linked = inBatch.has(row.roundId);
                 const checked = selected.has(row.roundId);
                 return (
