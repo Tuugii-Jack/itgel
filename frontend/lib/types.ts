@@ -746,6 +746,8 @@ export interface BatchArrivalVariant {
   remainingQty: number;
   waitingCustomers: number;
   handedOverQty?: number;
+  /** Сонголтын нэгж карго ₮. */
+  cargoFee?: number;
 }
 
 export interface BatchOrderRow {

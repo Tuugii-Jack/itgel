@@ -16,7 +16,7 @@ import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
 import { paidPayoutDaySet } from '../../services/returns.js';
 import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
-import { syncOrderCargoFee } from '../../services/cargoFee.js';
+import { syncOrderCargoFee, lineCargoFee } from '../../services/cargoFee.js';
 import { getSettings, getSettingsCached, districtNames } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
@@ -24,7 +24,7 @@ import { resolveOptionPrice } from '../../lib/optionPrices.js';
 import { comboLabel, findSku } from '../../lib/skuStock.js';
 import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } from '../../lib/itemFulfilment.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
-import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
+import { itemSelections, normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
 
 export const publicOrdersRouter = Router();
 
@@ -267,7 +267,7 @@ publicOrdersRouter.get(
     const order = await prisma.order.findFirst({
       where: { code, deletedAt: null, customerId: req.auth!.sub },
       include: {
-        items: { include: { product: true, round: true } },
+        items: { include: { product: true, round: { include: { cargoFees: true } } } },
         batch: true,
         delivery: true,
         customer: true,
@@ -283,7 +283,10 @@ publicOrdersRouter.get(
     const storage = peekStorageFee(order, settings);
     const expectedCargo = order.items
       .filter((item) => item.cancelledAt == null)
-      .reduce((sum, item) => sum + item.qty * (item.round?.cargoFee ?? 0), 0);
+      .reduce(
+        (sum, item) => sum + lineCargoFee(item.qty, item.round, itemSelections(item)),
+        0,
+      );
     const frozen = order.status === 'HANDED_OVER' || order.status === 'CANCELLED';
     const cargoFee = frozen ? order.cargoFee : expectedCargo;
     const storageFee = storage.fee;
@@ -432,7 +435,7 @@ publicOrdersRouter.post(
       where: { code, deletedAt: null, customerId: req.auth!.sub },
       include: {
         delivery: true,
-        items: { include: { round: true } },
+        items: { include: { round: { include: { cargoFees: true } } } },
       },
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
@@ -461,7 +464,10 @@ publicOrdersRouter.post(
     const itemIds = requested.map((item) => item.id);
     const allCargo = order.items
       .filter((item) => item.cancelledAt == null)
-      .reduce((sum, item) => sum + item.qty * item.round.cargoFee, 0);
+      .reduce(
+        (sum, item) => sum + lineCargoFee(item.qty, item.round, itemSelections(item)),
+        0,
+      );
     const cargoDue = unpaidCargoFee({ ...order, cargoFee: allCargo });
     if (body.type === 'DELIVERY' && cargoDue > 0 && body.payMethod !== 'QPAY') {
       throw badRequest('Хүргэлтээр авахад каргог зөвхөн QPay-ээр төлнө.');

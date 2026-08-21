@@ -1,13 +1,41 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
+import { itemSelections } from '../lib/options.js';
+import { skuKeyOf } from '../lib/skuStock.js';
 import { recalcOrderTotals } from './money.js';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
 const FROZEN = ['HANDED_OVER', 'CANCELLED'] as const;
 
+export type CargoFeeRow = { skuKey: string; cargoFee: number };
+
+export type CargoRound = {
+  cargoFee: number;
+  cargoFees?: CargoFeeRow[] | null;
+} | null | undefined;
+
+/** Сонголтын нэгж карго — яг таарсан мөр байхгүй бол тойргийн үндсэн үнэ. */
+export function unitCargoFee(
+  round: CargoRound,
+  selections: Record<string, string>,
+): number {
+  const base = round?.cargoFee ?? 0;
+  const key = skuKeyOf(selections);
+  if (!key || !round?.cargoFees?.length) return base;
+  return round.cargoFees.find((row) => row.skuKey === key)?.cargoFee ?? base;
+}
+
+export function lineCargoFee(
+  qty: number,
+  round: CargoRound,
+  selections: Record<string, string>,
+): number {
+  return Math.max(0, qty) * unitCargoFee(round, selections);
+}
+
 /**
- * Захиалгын карго = идэвхтэй мөр бүрийн (qty × тойргийн нэгж карго).
+ * Захиалгын карго = идэвхтэй мөр бүрийн (qty × сонголтын нэгж карго).
  * Ирж авах, хүргэлт — аль ч аргаар карго тооцогдоно.
  */
 export async function syncOrderCargoFee(tx: Db, orderId: string): Promise<number> {
@@ -20,9 +48,24 @@ export async function syncOrderCargoFee(tx: Db, orderId: string): Promise<number
 
   const items = await tx.orderItem.findMany({
     where: { orderId, cancelledAt: null },
-    select: { qty: true, round: { select: { cargoFee: true } } },
+    select: {
+      qty: true,
+      selections: true,
+      size: true,
+      color: true,
+      round: {
+        select: {
+          cargoFee: true,
+          cargoFees: { select: { skuKey: true, cargoFee: true } },
+        },
+      },
+    },
   });
-  const cargoFee = items.reduce((sum, item) => sum + item.qty * (item.round?.cargoFee ?? 0), 0);
+  const cargoFee = items.reduce(
+    (sum, item) =>
+      sum + lineCargoFee(item.qty, item.round, itemSelections(item)),
+    0,
+  );
   if (cargoFee === order.cargoFee) {
     await recalcOrderTotals(tx, orderId);
     return cargoFee;

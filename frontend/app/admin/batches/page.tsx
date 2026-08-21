@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { ArrivalRegister } from "@/components/admin/ArrivalRegister";
+import { CargoFeeEditor } from "@/components/admin/CargoFeeEditor";
 import {
   BATCH_STAGE_LABEL,
   Metric,
@@ -37,10 +38,6 @@ import type {
 } from "@/lib/types";
 
 const STAGES: BatchStage[] = ["IN_TRANSIT", "AT_WAREHOUSE", "DONE"];
-
-function parseCargo(raw: string | undefined): number {
-  return Math.max(0, Math.round(Number((raw ?? "").replace(/[^\d]/g, "") || "0")));
-}
 
 const MONTH_LABELS = [
   "1-р сар",
@@ -312,7 +309,6 @@ function BatchDetail({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [cargoDraft, setCargoDraft] = useState<Record<string, string>>({});
 
   const load = useCallback(async (background = false) => {
     if (!background) setLoading(true);
@@ -405,38 +401,10 @@ function BatchDetail({
   }
 
   const editable = batch.stage === "IN_TRANSIT";
-  const canEditCargo = batch.stage === "IN_TRANSIT";
   const canOmit = editable;
   const unpaidCount = batch.orders.filter(
     (o) => (o.paidAmount ?? 0) < o.subtotal,
   ).length;
-
-  const saveCargo = async () => {
-    if (!batch) return;
-    const items = batch.products.map((p) => ({
-      roundId: p.roundId,
-      cargoFee:
-        p.roundId in cargoDraft
-          ? parseCargo(cargoDraft[p.roundId])
-          : (p.cargoFee ?? 0),
-    }));
-    setBusyKey("cargo");
-    try {
-      const result = await adminApi.saveBatchCargoFees(batch.id, items);
-      setCargoDraft({});
-      toast.success(
-        result.ordersUpdated > 0
-          ? `Карго хадгалагдлаа · ${result.ordersUpdated} захиалга шинэчлэгдлээ.`
-          : "Карго хадгалагдлаа.",
-      );
-      await load(true);
-      onListChanged();
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Карго хадгалж чадсангүй.");
-    } finally {
-      setBusyKey(null);
-    }
-  };
 
   const omitOrder = async (order: BatchOrderRow) => {
     setBusyKey(`omit:${order.id}`);
@@ -675,110 +643,13 @@ function BatchDetail({
         <ArrivalRegister batch={batch} onSaved={() => load(true)} />
       </div>
 
-      {batch.products.length > 0 && (
-        <Card className="mt-4 p-4">
-          <div className="mb-1 flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <div className="text-[16px] font-medium">Карго үнэ</div>
-              <p className="m-0 mt-1 text-[13px] text-muted">
-                {canEditCargo
-                  ? "Бараа бүрийн нэгж карго үнийг оруулаад хадгална. Агуулахад орсны дараа солих боломжгүй."
-                  : "Агуулахад орсон тул карго үнийг өөрчлөх боломжгүй."}
-              </p>
-            </div>
-            {canEditCargo && (
-              <Button
-                size="sm"
-                onClick={() => void saveCargo()}
-                loading={busyKey === "cargo"}
-              >
-                Карго хадгалах
-              </Button>
-            )}
-          </div>
-
-          <div className="mt-3 flex flex-col gap-3">
-            {batch.products.map((p) => {
-              const unit =
-                p.roundId in cargoDraft
-                  ? parseCargo(cargoDraft[p.roundId])
-                  : p.cargoFee ?? 0;
-              return (
-                <div
-                  key={p.roundId}
-                  className="flex flex-col gap-2 rounded-[8px] border border-line p-3 sm:flex-row sm:items-center sm:gap-4"
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                    <ProductImage
-                      src={p.image}
-                      alt={p.name}
-                      className="h-10 w-10 shrink-0 rounded-[8px]"
-                    />
-                    <div className="min-w-0">
-                      <div className="truncate text-[14px]">{p.name}</div>
-                      <div className="text-[12px] text-muted">
-                        {p.orderedQty} ш · {p.customerCount} хүн
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 sm:w-[280px] sm:shrink-0">
-                    {canEditCargo ? (
-                      <div className="flex-1">
-                        <div className="mb-1 text-[12px] text-muted">Нэгж карго ₮</div>
-                        <Input
-                          value={
-                            p.roundId in cargoDraft
-                              ? cargoDraft[p.roundId]!
-                              : p.cargoFee
-                                ? String(p.cargoFee)
-                                : ""
-                          }
-                          onChange={(v) => {
-                            setCargoDraft((prev) => ({
-                              ...prev,
-                              [p.roundId]: v.replace(/[^\d]/g, ""),
-                            }));
-                          }}
-                          placeholder="0"
-                          inputMode="numeric"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex-1">
-                        <div className="text-[12px] text-muted">Нэгж карго</div>
-                        <div className="tnum text-[15px] font-medium">
-                          {p.cargoFee ? money(p.cargoFee) : "—"}
-                        </div>
-                      </div>
-                    )}
-                    <div className="w-[110px] text-right">
-                      <div className="text-[12px] text-muted">Нийт</div>
-                      <div className="tnum text-[15px] font-medium">
-                        {money(p.orderedQty * unit)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-3 flex items-center justify-between border-t border-line pt-3">
-            <span className="text-[14px] text-ink-2">Багцын нийт карго</span>
-            <span className="tnum text-[18px] font-medium">
-              {money(
-                batch.products.reduce((sum, p) => {
-                  const unit =
-                    p.roundId in cargoDraft
-                      ? parseCargo(cargoDraft[p.roundId])
-                      : p.cargoFee ?? 0;
-                  return sum + p.orderedQty * unit;
-                }, 0),
-              )}
-            </span>
-          </div>
-        </Card>
-      )}
+      <CargoFeeEditor
+        batch={batch}
+        onSaved={async () => {
+          await load(true);
+          onListChanged();
+        }}
+      />
 
       {/* --- Багцын захиалгууд --- */}
       <h2 className="mt-6 mb-2 text-[16px] font-medium">Захиалгууд</h2>

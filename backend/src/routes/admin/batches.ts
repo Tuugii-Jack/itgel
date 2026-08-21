@@ -27,7 +27,8 @@ import { roundStats } from '../../services/roundStats.js';
 import { finalizeRoundClose } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, PAYMENT_STATE_LABEL } from '../../services/money.js';
-import { syncCargoFeesForRounds } from '../../services/cargoFee.js';
+import { syncCargoFeesForRounds, unitCargoFee } from '../../services/cargoFee.js';
+import { skuKeyOf } from '../../lib/skuStock.js';
 
 export const adminBatchesRouter = Router();
 
@@ -186,6 +187,7 @@ adminBatchesRouter.get(
           orderBy: { createdAt: 'asc' },
           include: {
             product: { select: { id: true, name: true, images: true, categoryId: true } },
+            cargoFees: true,
           },
         },
       },
@@ -260,6 +262,13 @@ adminBatchesRouter.get(
         omittedOrders,
         products: batch.rounds.map((round) => {
           const s = stats.get(round.id);
+          const variants = (arrivals.get(round.id) ?? []).map((v) => {
+            const cargoFee = unitCargoFee(round, v.selections);
+            return { ...v, cargoFee };
+          });
+          const cargoTotal = variants.length
+            ? variants.reduce((sum, v) => sum + v.orderedQty * v.cargoFee, 0)
+            : (s?.qty ?? 0) * round.cargoFee;
           return {
             roundId: round.id,
             roundNo: round.roundNo,
@@ -269,12 +278,12 @@ adminBatchesRouter.get(
             sellPrice: round.sellPrice,
             costPrice: round.costPrice,
             cargoFee: round.cargoFee,
-            cargoTotal: (s?.qty ?? 0) * round.cargoFee,
+            cargoTotal,
             status: round.status,
             closeAt: round.closeAt?.toISOString() ?? null,
             orderedQty: s?.qty ?? 0,
             customerCount: s?.customerCount ?? 0,
-            variants: arrivals.get(round.id) ?? [],
+            variants,
           };
         }),
         totalValue: orders.reduce((sum, o) => sum + o.subtotal, 0),
@@ -414,7 +423,7 @@ adminBatchesRouter.patch(
 );
 
 /**
- * POST /batches/:id/cargo-fees — бараа бүрийн нэгж карго үнийг хадгалж,
+ * POST /batches/:id/cargo-fees — бараа/сонголт бүрийн нэгж карго үнийг хадгалж,
  * холбоотой захиалгын `cargoFee` / `dueAmount`-г шинэчилнэ.
  */
 adminBatchesRouter.post(
@@ -427,6 +436,15 @@ adminBatchesRouter.post(
           z.object({
             roundId: z.string().min(1),
             cargoFee: z.coerce.number().int().min(0).max(10_000_000),
+            variants: z
+              .array(
+                z.object({
+                  selections: z.record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(40)),
+                  cargoFee: z.coerce.number().int().min(0).max(10_000_000),
+                }),
+              )
+              .max(200)
+              .optional(),
           }),
         )
         .min(1)
@@ -435,7 +453,13 @@ adminBatchesRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const batchId = param(req, 'id');
-    const { items } = req.body as { items: { roundId: string; cargoFee: number }[] };
+    const { items } = req.body as {
+      items: {
+        roundId: string;
+        cargoFee: number;
+        variants?: { selections: Record<string, string>; cargoFee: number }[];
+      }[];
+    };
     const batch = await prisma.batch.findFirst({
       where: { id: batchId, deletedAt: null },
     });
@@ -454,15 +478,35 @@ adminBatchesRouter.post(
       throw badRequest('Зарим бараа энэ багцад хамаарахгүй.');
     }
 
-    const feeByRound = new Map(items.map((i) => [i.roundId, i.cargoFee]));
-    // Interactive $transaction + олон захиалга sync = pooler/timeout-оор 500 болдог.
-    // Тойргийн үнийг эхлээд хадгалаад, захиалгыг дараа нь тусад нь шинэчилнэ.
-    await prisma.$transaction(
-      [...feeByRound.entries()].map(([roundId, cargoFee]) =>
-        prisma.productRound.update({ where: { id: roundId }, data: { cargoFee } }),
-      ),
-    );
-    const updatedCount = await syncCargoFeesForRounds(prisma, [...feeByRound.keys()]);
+    await prisma.$transaction(async (tx) => {
+      for (const item of items) {
+        await tx.productRound.update({
+          where: { id: item.roundId },
+          data: { cargoFee: item.cargoFee },
+        });
+        await tx.roundCargoFee.deleteMany({ where: { roundId: item.roundId } });
+        const variants = item.variants ?? [];
+        const rows = new Map<
+          string,
+          { selections: Record<string, string>; cargoFee: number }
+        >();
+        for (const row of variants) {
+          const key = skuKeyOf(row.selections);
+          if (!key) continue;
+          rows.set(key, { selections: row.selections, cargoFee: row.cargoFee });
+        }
+        if (rows.size === 0) continue;
+        await tx.roundCargoFee.createMany({
+          data: [...rows.entries()].map(([skuKey, row]) => ({
+            roundId: item.roundId,
+            skuKey,
+            selections: row.selections,
+            cargoFee: row.cargoFee,
+          })),
+        });
+      }
+    });
+    const updatedCount = await syncCargoFeesForRounds(prisma, uniqueIds);
 
     await audit({
       actor: actorOf(req),
@@ -472,7 +516,7 @@ adminBatchesRouter.post(
       after: { items, ordersUpdated: updatedCount },
     });
 
-    res.json({ data: { saved: feeByRound.size, ordersUpdated: updatedCount } });
+    res.json({ data: { saved: uniqueIds.length, ordersUpdated: updatedCount } });
   }),
 );
 

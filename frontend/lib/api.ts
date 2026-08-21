@@ -1043,10 +1043,14 @@ export const adminApi = {
       body,
     }).then((r) => r.data),
 
-  /** Багцын барааны нэгж карго үнийг хадгална. */
+  /** Багцын барааны нэгж карго үнийг хадгална — сонголт тус бүрээр. */
   saveBatchCargoFees: (
     batchId: string,
-    items: { roundId: string; cargoFee: number }[],
+    items: {
+      roundId: string;
+      cargoFee: number;
+      variants?: { selections: Record<string, string>; cargoFee: number }[];
+    }[],
   ) =>
     request<{ saved: number; ordersUpdated: number }>(
       `/admin/batches/${batchId}/cargo-fees`,

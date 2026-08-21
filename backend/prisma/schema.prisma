@@ -152,6 +152,7 @@ model ProductRound {
   orderItems   OrderItem[]
   optionPrices RoundOptionPrice[]
   skuStocks    RoundSkuStock[]
+  cargoFees    RoundCargoFee[]
 
   @@unique([productId, roundNo])
   @@index([status])
@@ -187,6 +188,21 @@ model RoundSkuStock {
   skuKey      String
   selections  Json
   stock       Int
+
+  round ProductRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@unique([roundId, skuKey])
+  @@index([roundId])
+}
+
+/// Багцын барааны сонголт (хэмжээ/өнгө/…) бүрийн нэгж карго үнэ.
+model RoundCargoFee {
+  id         String @id @default(cuid())
+  roundId    String
+  /// Тогтвортой түлхүүр — ж: «Хэмжээ=XL|Өнгө=Хар».
+  skuKey     String
+  selections Json
+  cargoFee   Int
 
   round ProductRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
 

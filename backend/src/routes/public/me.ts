@@ -276,7 +276,7 @@ publicMeRouter.get(
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
         include: {
-          items: { include: { product: true, round: true } },
+          items: { include: { product: true, round: { include: { cargoFees: true } } } },
           batch: true,
           delivery: true,
           payments: { where: { kind: "REFUND" }, select: { createdAt: true } },
