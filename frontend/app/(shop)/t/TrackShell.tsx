@@ -124,26 +124,30 @@ export function TrackChrome({ children }: { children: ReactNode }) {
 
   if (!code) return children;
 
-  if (chromeHidden) {
-    return <div className="screen max-w-full overflow-x-hidden pb-8">{children}</div>;
-  }
-
   const multi = myOrders.length >= 2;
 
   return (
     <div className="screen max-w-full overflow-x-hidden pb-8">
-      <div className="hidden px-10 pt-8 lg:block">
+      <div className={chromeHidden ? "hidden" : "hidden px-10 pt-8 lg:block"}>
         <div className="text-[24px] font-medium">Захиалга хянах</div>
       </div>
 
       <div
         className={`min-w-0 lg:items-start lg:px-10 lg:pt-6 ${
-          multi ? "lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-8" : ""
+          multi && !chromeHidden ? "lg:grid lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-8" : ""
         }`}
       >
-        {multi ? <OrderList orders={myOrders} current={code} /> : null}
+        {multi ? (
+          <div className={chromeHidden ? "hidden" : "contents"}>
+            <OrderList orders={myOrders} current={code} />
+          </div>
+        ) : null}
         <div className="min-w-0 max-w-full overflow-x-hidden lg:flex lg:flex-col lg:gap-6">
-          {multi ? <OrderChips orders={myOrders} current={code} /> : null}
+          {multi ? (
+            <div className={chromeHidden ? "hidden" : "contents"}>
+              <OrderChips orders={myOrders} current={code} />
+            </div>
+          ) : null}
           {children}
         </div>
       </div>

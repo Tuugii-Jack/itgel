@@ -5,12 +5,12 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { FulfilmentChooser } from "@/components/FulfilmentChooser";
 import { PaymentPanel } from "@/components/PaymentPanel";
-import { Badge, Button, ErrorNote } from "@/components/ui";
+import { Badge, Button, ErrorNote, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
-import { orderHasPickup, ITEM_FULFILMENT_LABEL } from "@/lib/fulfilment";
+import { orderHasPickup, ITEM_FULFILMENT_LABEL, itemNeedsFulfilment } from "@/lib/fulfilment";
 import { usePolling } from "@/lib/usePolling";
 import type { OrderStatus, PublicOrder } from "@/lib/types";
 import {
@@ -116,8 +116,17 @@ export default function TrackPage() {
 
   const stages = buildStages(order);
   const eta = etaOf(order);
+  const canCollect =
+    order.canChooseFulfilment || order.items.some(itemNeedsFulfilment);
 
-  if (order.canChooseFulfilment && collecting && store) {
+  if (canCollect && collecting) {
+    if (!store) {
+      return (
+        <div className="flex justify-center px-4 py-16">
+          <Spinner className="text-muted" />
+        </div>
+      );
+    }
     return (
       <FulfilmentChooser
         order={order}
@@ -157,7 +166,12 @@ export default function TrackPage() {
         </div>
 
         {/* Мобайл — тусдаа карт; laptop — ижил картын дотор, товч баруун талд */}
-        <div className="mt-5 rounded-[12px] border border-line bg-surface p-4 lg:mt-5 lg:flex lg:items-end lg:justify-between lg:gap-6 lg:rounded-none lg:border-0 lg:p-0">
+        <div
+          className={`mt-5 rounded-[12px] border border-line bg-surface p-4 lg:mt-5 lg:flex lg:items-end lg:justify-between lg:gap-6 lg:rounded-none lg:border-0 lg:p-0 ${
+            canCollect ? "cursor-pointer" : ""
+          }`}
+          onClick={canCollect ? () => setCollecting(true) : undefined}
+        >
           <div className="flex flex-col gap-1">
             <span className="text-[13px] text-muted">{eta.label}</span>
             <span className="tnum text-[20px] lg:text-[24px]">{eta.value}</span>
@@ -166,7 +180,7 @@ export default function TrackPage() {
             </span>
           </div>
 
-          {order.canChooseFulfilment && (
+          {canCollect && (
             <Button
               size="bar"
               onClick={() => setCollecting(true)}
