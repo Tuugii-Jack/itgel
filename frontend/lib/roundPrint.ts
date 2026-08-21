@@ -110,171 +110,92 @@ function variantPrice(product: PrintProduct, v: PrintVariant): number {
   return product.sellPrice;
 }
 
-type TableColumn = { key: string; label: string; numeric?: boolean };
-type TableCell = string | number;
-type TableRow = {
-  cells: Record<string, TableCell>;
-  groupStart: boolean;
-};
-
-function productVariants(product: PrintProduct): PrintVariant[] {
-  return product.byVariant.length > 0
-    ? product.byVariant
-    : [{ selections: {}, size: null, color: null, qty: product.qty }];
-}
-
-function extraKindsOf(products: PrintProduct[]): string[] {
-  const names = new Set<string>();
-  for (const product of products) {
-    for (const variant of productVariants(product)) {
-      for (const key of Object.keys(variantParts(variant).extra)) names.add(key);
-    }
-  }
-  return [...names].sort((a, b) => a.localeCompare(b, "mn"));
-}
-
-/**
- * Хэмжээ/өнгө + бараан дээрх бусад сонголт тус бүрд багана.
- * Худалдан авагч/код асаалттай үед захиалга бүр тусдаа мөр.
- */
-function buildProductOrderTable(
-  products: PrintProduct[],
-  opts: ProductPrintOptions,
-): { columns: TableColumn[]; rows: TableRow[]; totalQty: number } {
-  const extraKinds = extraKindsOf(products);
-  const hasSize = products.some((p) => productVariants(p).some((v) => variantParts(v).size));
-  const hasColor = products.some((p) => productVariants(p).some((v) => variantParts(v).color));
-
-  const columns: TableColumn[] = [
-    { key: "name", label: "Бүтээгдэхүүний нэр" },
-    ...(hasColor ? [{ key: "color", label: "Өнгө" }] : []),
-    ...(hasSize ? [{ key: "size", label: "Хэмжээ" }] : []),
-    ...extraKinds.map((kind) => ({ key: `opt:${kind}`, label: kind })),
-    ...(opts.customers ? [{ key: "customer", label: "Хэрэглэгч" }] : []),
-    ...(opts.phone ? [{ key: "phone", label: "Утас" }] : []),
-    ...(opts.code ? [{ key: "code", label: "Захиалгын код" }] : []),
-    { key: "qty", label: "Тоо", numeric: true },
-    ...(opts.amounts ? [{ key: "price", label: "Үнэ ₮", numeric: true }] : []),
-  ];
-
-  const rows: TableRow[] = [];
-  for (const product of products) {
-    let first = true;
-    for (const variant of productVariants(product)) {
-      const parts = variantParts(variant);
-      const buyers = opts.customers ? buyersFor(product.orders, variant) : [];
-      const units: Array<RoundBuyer | null> = opts.customers
-        ? buyers.length > 0
-          ? buyers
-          : [null]
-        : [null];
-
-      for (const buyer of units) {
-        const cells: Record<string, TableCell> = {
-          name: product.name,
-          qty: buyer ? buyer.qty : variant.qty,
-        };
-        if (hasColor) cells.color = parts.color || "—";
-        if (hasSize) cells.size = parts.size || "—";
-        for (const kind of extraKinds) {
-          cells[`opt:${kind}`] = parts.extra[kind] || "—";
-        }
-        if (opts.customers) cells.customer = buyer?.customer.name?.trim() || "Нэргүй";
-        if (opts.phone) cells.phone = buyer ? phoneLabel(buyer.customer.phone) : "—";
-        if (opts.code) cells.code = buyer?.code ?? "—";
-        if (opts.amounts) {
-          cells.price = buyer ? buyer.unitPrice : variantPrice(product, variant);
-        }
-        rows.push({ cells, groupStart: first });
-        first = false;
-      }
-    }
-  }
-
-  const totalQty = rows.reduce((sum, row) => sum + Number(row.cells.qty ?? 0), 0);
-  return { columns, rows, totalQty };
-}
-
-function csvEscape(value: TableCell): string {
-  const text = String(value ?? "");
-  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
-}
-
-function dayKeySafe(): string {
-  const d = new Date();
-  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/** Excel-д нээгдэх UTF-8 BOM CSV — сонголт бүр багана, код асаалттай бол захиалга бүр мөр. */
-export function downloadProductOrdersExcel(
-  products: PrintProduct[],
-  opts: ProductPrintOptions,
-  meta?: { title?: string; filename?: string },
-) {
-  const table = buildProductOrderTable(products, opts);
-  const header = table.columns.map((col) => csvEscape(col.label)).join(",");
-  const body = table.rows
-    .map((row) => table.columns.map((col) => csvEscape(row.cells[col.key] ?? "")).join(","))
-    .join("\n");
-  const qtyIndex = table.columns.findIndex((col) => col.key === "qty");
-  const totalCells = table.columns.map((col, i) => {
-    if (i === 0) return csvEscape("Нийт");
-    if (i === qtyIndex) return csvEscape(table.totalQty);
-    return "";
-  });
-  const bom = "\uFEFF";
-  const blob = new Blob([`${bom}${header}\n${body}\n${totalCells.join(",")}\n`], {
-    type: "text/csv;charset=utf-8",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = meta?.filename ?? `baraagaar-${dayKeySafe()}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 export function printProductOrders(
   products: PrintProduct[],
   opts: ProductPrintOptions,
   meta?: { title?: string; hint?: string; countLabel?: string },
 ) {
-  const table = buildProductOrderTable(products, opts);
-  const explodePeople = opts.customers || opts.phone || opts.code;
-  const title = meta?.title ?? "Бараагаар захиалга";
+  const extraKinds = [
+    ...new Set(
+      products.flatMap((p) =>
+        (p.byVariant.length ? p.byVariant : [{ selections: {}, size: null, color: null, qty: 0 }]).flatMap(
+          (v) => Object.keys(variantParts(v).extra),
+        ),
+      ),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "mn"));
 
-  const headerCells = table.columns
-    .map((col) => `<th${col.numeric ? ' class="num"' : ""}>${esc(col.label)}</th>`)
+  const hasSize = products.some((p) =>
+    (p.byVariant.length ? p.byVariant : []).some((v) => variantParts(v).size),
+  );
+  const hasColor = products.some((p) =>
+    (p.byVariant.length ? p.byVariant : []).some((v) => variantParts(v).color),
+  );
+
+  const title = meta?.title ?? "Бараагаар захиалга";
+  const totalQty = products.reduce((sum, p) => sum + p.qty, 0);
+
+  const headerCells = [
+    "<th>Бүтээгдэхүүний нэр</th>",
+    hasColor ? "<th>Өнгө</th>" : "",
+    hasSize ? "<th>Хэмжээ</th>" : "",
+    ...extraKinds.map((k) => `<th>${esc(k)}</th>`),
+    opts.customers ? "<th>Хэрэглэгч</th>" : "",
+    '<th class="num">Тоо</th>',
+    opts.amounts ? '<th class="num">Үнэ ₮</th>' : "",
+  ]
+    .filter(Boolean)
     .join("");
 
-  const body = table.rows
-    .map((row) => {
-      const tds = table.columns
-        .map((col) => {
-          const raw = row.cells[col.key] ?? "";
-          const value =
-            col.key === "price" && typeof raw === "number" ? num(raw) : String(raw);
-          const hideName = col.key === "name" && !explodePeople && !row.groupStart;
-          const cls = [
-            col.numeric ? "num" : "",
-            col.key === "name" ? "name" : "",
-            col.key === "customer" || col.key === "phone" || col.key === "code" || col.key.startsWith("opt:") || col.key === "size" || col.key === "color"
-              ? "opt"
-              : "",
-          ]
-            .filter(Boolean)
-            .join(" ");
-          return `<td${cls ? ` class="${cls}"` : ""}>${hideName ? "" : esc(value)}</td>`;
+  const body = products
+    .map((product) => {
+      const variants =
+        product.byVariant.length > 0
+          ? product.byVariant
+          : [{ selections: {}, size: null, color: null, qty: product.qty }];
+
+      return variants
+        .map((v, i) => {
+          const parts = variantParts(v);
+          const buyers = buyersFor(product.orders, v);
+          const customerHtml = opts.customers
+            ? `<td class="people">${
+                buyers.length === 0
+                  ? "—"
+                  : buyers
+                      .map((o) => {
+                        const bits = [esc(o.customer.name ?? "Нэргүй")];
+                        if (opts.phone) bits.push(esc(phoneLabel(o.customer.phone)));
+                        if (opts.code) bits.push(esc(o.code));
+                        const who = bits.join(" · ");
+                        return buyers.length > 1
+                          ? `${who} <span class="qty-inline">${o.qty}ш</span>`
+                          : who;
+                      })
+                      .join("<br/>")
+              }</td>`
+            : "";
+
+          return `<tr class="${i === 0 ? "group" : "variant"}">
+            <td class="name">${i === 0 ? esc(product.name) : ""}</td>
+            ${hasColor ? `<td class="opt">${esc(parts.color || "—")}</td>` : ""}
+            ${hasSize ? `<td class="opt">${esc(parts.size || "—")}</td>` : ""}
+            ${extraKinds.map((k) => `<td class="opt">${esc(parts.extra[k] || "—")}</td>`).join("")}
+            ${customerHtml}
+            <td class="num">${v.qty}</td>
+            ${opts.amounts ? `<td class="num">${esc(num(variantPrice(product, v)))}</td>` : ""}
+          </tr>`;
         })
         .join("");
-      return `<tr class="${row.groupStart ? "group" : "variant"}">${tds}</tr>`;
     })
     .join("");
 
-  const beforeQty = table.columns.findIndex((col) => col.key === "qty");
+  const beforeQty =
+    1 +
+    (hasColor ? 1 : 0) +
+    (hasSize ? 1 : 0) +
+    extraKinds.length +
+    (opts.customers ? 1 : 0);
 
   const html = `<!DOCTYPE html>
 <html lang="mn">
@@ -352,8 +273,8 @@ export function printProductOrders(
     <tbody>${body}</tbody>
     <tfoot>
       <tr>
-        <td class="label" colspan="${Math.max(beforeQty, 1)}">Нийт</td>
-        <td class="num">${table.totalQty}</td>
+        <td class="label" colspan="${beforeQty}">Нийт</td>
+        <td class="num">${totalQty}</td>
         ${opts.amounts ? "<td></td>" : ""}
       </tr>
     </tfoot>

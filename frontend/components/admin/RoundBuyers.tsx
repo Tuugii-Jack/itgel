@@ -10,7 +10,6 @@ import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import {
   closeHint,
   DEFAULT_PRODUCT_PRINT,
-  downloadProductOrdersExcel,
   printProductOrders,
   roundOrdersToPrintProduct,
   type ProductPrintOptions,
@@ -108,7 +107,7 @@ export function RoundBuyers({
 
       {printOpen && (
         <Card className="mb-5 flex flex-col gap-3 p-4">
-          <div className="text-[14px] font-medium">Хэвлэх / Excel</div>
+          <div className="text-[14px] font-medium">Хэвлэх сонголт</div>
           <div className="flex flex-wrap gap-x-5 gap-y-2">
             <label className="flex cursor-pointer items-center gap-2 text-[13px]">
               <input
@@ -157,19 +156,7 @@ export function RoundBuyers({
               Үнэ
             </label>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                downloadProductOrdersExcel([roundOrdersToPrintProduct(data)], printOpts, {
-                  title: data.round.name,
-                  filename: `${data.round.name.replace(/[^\p{L}\p{N}]+/gu, "-")}.csv`,
-                })
-              }
-            >
-              Excel татах
-            </Button>
+          <div>
             <Button
               size="sm"
               onClick={() =>

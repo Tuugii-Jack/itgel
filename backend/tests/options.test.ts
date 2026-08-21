@@ -23,18 +23,4 @@ describe('tallyVariants', () => {
       { value: 'Цагаан', qty: 1 },
     ]);
   });
-
-  it('хэмжээ/өнгөнөөс бусад сонголтыг тусад нь хослол болон бүлгээр нэгтгэнэ', () => {
-    const { byKind, byVariant } = tallyVariants([
-      { selections: { Хэмжээ: 'M', Өнгө: 'Хар', Материал: 'Ноос' }, qty: 2 },
-      { selections: { Хэмжээ: 'M', Өнгө: 'Хар', Материал: 'Хлопок' }, qty: 1 },
-    ]);
-
-    expect(byVariant).toHaveLength(2);
-    const material = byKind.find((k) => k.kind === 'Материал')?.rows;
-    expect(material).toEqual([
-      { value: 'Ноос', qty: 2 },
-      { value: 'Хлопок', qty: 1 },
-    ]);
-  });
 });

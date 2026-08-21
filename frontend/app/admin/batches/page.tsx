@@ -42,10 +42,6 @@ function parseCargo(raw: string | undefined): number {
   return Math.max(0, Math.round(Number((raw ?? "").replace(/[^\d]/g, "") || "0")));
 }
 
-function cargoDraftKey(roundId: string, variantKey: string) {
-  return `${roundId}\0${variantKey}`;
-}
-
 const MONTH_LABELS = [
   "1-р сар",
   "2-р сар",
@@ -417,28 +413,13 @@ function BatchDetail({
 
   const saveCargo = async () => {
     if (!batch) return;
-    const items = batch.products.map((p) => {
-      const variants = p.cargoVariants ?? [];
-      if (variants.length === 0) {
-        return {
-          roundId: p.roundId,
-          cargoFee:
-            p.roundId in cargoDraft
-              ? parseCargo(cargoDraft[p.roundId])
-              : (p.cargoFee ?? 0),
-        };
-      }
-      return {
-        roundId: p.roundId,
-        variants: variants.map((v) => {
-          const key = cargoDraftKey(p.roundId, v.key);
-          return {
-            selections: v.selections,
-            cargoFee: key in cargoDraft ? parseCargo(cargoDraft[key]) : v.cargoFee,
-          };
-        }),
-      };
-    });
+    const items = batch.products.map((p) => ({
+      roundId: p.roundId,
+      cargoFee:
+        p.roundId in cargoDraft
+          ? parseCargo(cargoDraft[p.roundId])
+          : (p.cargoFee ?? 0),
+    }));
     setBusyKey("cargo");
     try {
       const result = await adminApi.saveBatchCargoFees(batch.id, items);
@@ -701,7 +682,7 @@ function BatchDetail({
               <div className="text-[16px] font-medium">Карго үнэ</div>
               <p className="m-0 mt-1 text-[13px] text-muted">
                 {canEditCargo
-                  ? "Хэмжээ, өнгө болон бараанд оруулсан бүх сонголт бүрийн нэгж каргог оруулаад хадгална. Агуулахад орсны дараа солих боломжгүй."
+                  ? "Бараа бүрийн нэгж карго үнийг оруулаад хадгална. Агуулахад орсны дараа солих боломжгүй."
                   : "Агуулахад орсон тул карго үнийг өөрчлөх боломжгүй."}
               </p>
             </div>
@@ -718,124 +699,65 @@ function BatchDetail({
 
           <div className="mt-3 flex flex-col gap-3">
             {batch.products.map((p) => {
-              const variants = p.cargoVariants ?? [];
-              const productTotal =
-                variants.length > 0
-                  ? variants.reduce((sum, v) => {
-                      const key = cargoDraftKey(p.roundId, v.key);
-                      const unit =
-                        key in cargoDraft ? parseCargo(cargoDraft[key]) : v.cargoFee;
-                      return sum + v.orderedQty * unit;
-                    }, 0)
-                  : p.orderedQty *
-                    (p.roundId in cargoDraft
-                      ? parseCargo(cargoDraft[p.roundId])
-                      : (p.cargoFee ?? 0));
+              const unit =
+                p.roundId in cargoDraft
+                  ? parseCargo(cargoDraft[p.roundId])
+                  : p.cargoFee ?? 0;
               return (
                 <div
                   key={p.roundId}
-                  className="flex flex-col gap-2 rounded-[8px] border border-line p-3"
+                  className="flex flex-col gap-2 rounded-[8px] border border-line p-3 sm:flex-row sm:items-center sm:gap-4"
                 >
-                  <div className="flex min-w-0 items-center gap-2.5">
+                  <div className="flex min-w-0 flex-1 items-center gap-2.5">
                     <ProductImage
                       src={p.image}
                       alt={p.name}
                       className="h-10 w-10 shrink-0 rounded-[8px]"
                     />
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0">
                       <div className="truncate text-[14px]">{p.name}</div>
                       <div className="text-[12px] text-muted">
                         {p.orderedQty} ш · {p.customerCount} хүн
                       </div>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <div className="text-[12px] text-muted">Нийт карго</div>
-                      <div className="tnum text-[15px] font-medium">{money(productTotal)}</div>
+                  </div>
+                  <div className="flex items-center gap-3 sm:w-[280px] sm:shrink-0">
+                    {canEditCargo ? (
+                      <div className="flex-1">
+                        <div className="mb-1 text-[12px] text-muted">Нэгж карго ₮</div>
+                        <Input
+                          value={
+                            p.roundId in cargoDraft
+                              ? cargoDraft[p.roundId]!
+                              : p.cargoFee
+                                ? String(p.cargoFee)
+                                : ""
+                          }
+                          onChange={(v) => {
+                            setCargoDraft((prev) => ({
+                              ...prev,
+                              [p.roundId]: v.replace(/[^\d]/g, ""),
+                            }));
+                          }}
+                          placeholder="0"
+                          inputMode="numeric"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex-1">
+                        <div className="text-[12px] text-muted">Нэгж карго</div>
+                        <div className="tnum text-[15px] font-medium">
+                          {p.cargoFee ? money(p.cargoFee) : "—"}
+                        </div>
+                      </div>
+                    )}
+                    <div className="w-[110px] text-right">
+                      <div className="text-[12px] text-muted">Нийт</div>
+                      <div className="tnum text-[15px] font-medium">
+                        {money(p.orderedQty * unit)}
+                      </div>
                     </div>
                   </div>
-
-                  {variants.length > 0 ? (
-                    <div className="overflow-x-auto rounded-[8px] border border-line">
-                      <div className="grid grid-cols-[minmax(0,1fr)_72px_120px_110px] gap-2 border-b border-line bg-surface px-3 py-2 text-[12px] text-muted">
-                        <span>Сонголт</span>
-                        <span className="text-right">Тоо</span>
-                        <span className="text-right">Нэгж карго ₮</span>
-                        <span className="text-right">Нийт</span>
-                      </div>
-                      {variants.map((v) => {
-                        const key = cargoDraftKey(p.roundId, v.key);
-                        const unit =
-                          key in cargoDraft ? parseCargo(cargoDraft[key]) : v.cargoFee;
-                        const raw =
-                          key in cargoDraft
-                            ? cargoDraft[key]!
-                            : v.cargoFee
-                              ? String(v.cargoFee)
-                              : "";
-                        return (
-                          <div
-                            key={v.key}
-                            className="grid grid-cols-[minmax(0,1fr)_72px_120px_110px] items-center gap-2 border-b border-line px-3 py-2 last:border-b-0"
-                          >
-                            <div className="min-w-0 truncate text-[14px]">{v.label}</div>
-                            <div className="tnum text-right text-[13px]">{v.orderedQty}</div>
-                            {canEditCargo ? (
-                              <Input
-                                value={raw}
-                                onChange={(val) => {
-                                  setCargoDraft((prev) => ({
-                                    ...prev,
-                                    [key]: val.replace(/[^\d]/g, ""),
-                                  }));
-                                }}
-                                placeholder="0"
-                                inputMode="numeric"
-                              />
-                            ) : (
-                              <div className="tnum text-right text-[13px]">
-                                {v.cargoFee ? money(v.cargoFee) : "—"}
-                              </div>
-                            )}
-                            <div className="tnum text-right text-[13px] font-medium">
-                              {money(v.orderedQty * unit)}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-3 sm:w-[280px] sm:self-end">
-                      {canEditCargo ? (
-                        <div className="flex-1">
-                          <div className="mb-1 text-[12px] text-muted">Нэгж карго ₮</div>
-                          <Input
-                            value={
-                              p.roundId in cargoDraft
-                                ? cargoDraft[p.roundId]!
-                                : p.cargoFee
-                                  ? String(p.cargoFee)
-                                  : ""
-                            }
-                            onChange={(v) => {
-                              setCargoDraft((prev) => ({
-                                ...prev,
-                                [p.roundId]: v.replace(/[^\d]/g, ""),
-                              }));
-                            }}
-                            placeholder="0"
-                            inputMode="numeric"
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex-1">
-                          <div className="text-[12px] text-muted">Нэгж карго</div>
-                          <div className="tnum text-[15px] font-medium">
-                            {p.cargoFee ? money(p.cargoFee) : "—"}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -846,18 +768,6 @@ function BatchDetail({
             <span className="tnum text-[18px] font-medium">
               {money(
                 batch.products.reduce((sum, p) => {
-                  const variants = p.cargoVariants ?? [];
-                  if (variants.length > 0) {
-                    return (
-                      sum +
-                      variants.reduce((s, v) => {
-                        const key = cargoDraftKey(p.roundId, v.key);
-                        const unit =
-                          key in cargoDraft ? parseCargo(cargoDraft[key]) : v.cargoFee;
-                        return s + v.orderedQty * unit;
-                      }, 0)
-                    );
-                  }
                   const unit =
                     p.roundId in cargoDraft
                       ? parseCargo(cargoDraft[p.roundId])
@@ -1130,15 +1040,6 @@ function ClosedRoundPicker({
   const [loadingRounds, setLoadingRounds] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [debouncedQ, setDebouncedQ] = useState("");
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQ(query.trim()), 250);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  const searching = debouncedQ.length > 0;
 
   useEffect(() => {
     void (async () => {
@@ -1157,43 +1058,25 @@ function ClosedRoundPicker({
   }, []);
 
   useEffect(() => {
-    let alive = true;
-    const parts = selectedKey?.split("-") ?? [];
-    const year = Number(parts[0]);
-    const month = Number(parts[1]);
-    const hasMonth = Number.isFinite(year) && Number.isFinite(month);
-
-    if (!searching && !hasMonth) {
+    if (!selectedKey) {
       setRounds([]);
       return;
     }
-
+    const [y, m] = selectedKey.split("-").map(Number);
     void (async () => {
       setLoadingRounds(true);
+      setSelected(new Set());
       try {
-        const list = await adminApi.batchEligibleRounds(
-          searching ? { q: debouncedQ } : { year, month },
-        );
-        if (!alive) return;
+        const list = await adminApi.batchEligibleRounds(y!, m!);
         setRounds(list);
         setError(null);
       } catch (e) {
-        if (!alive) return;
-        setError(
-          e instanceof ApiError
-            ? e.message
-            : searching
-              ? "Хайлт амжилтгүй."
-              : "Гаргалт ачаалж чадсангүй.",
-        );
+        setError(e instanceof ApiError ? e.message : "Гаргалт ачаалж чадсангүй.");
       } finally {
-        if (alive) setLoadingRounds(false);
+        setLoadingRounds(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
-  }, [searching, debouncedQ, selectedKey]);
+  }, [selectedKey]);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -1226,58 +1109,41 @@ function ClosedRoundPicker({
 
   return (
     <Card className="mb-4 p-4">
-      <div className="mb-2 text-[14px] font-medium">Хаагдсан гаргалт — хайх эсвэл сараар</div>
+      <div className="mb-2 text-[14px] font-medium">Хаагдсан гаргалт — он/сараар</div>
       <p className="mt-0 mb-3 text-[12px] text-muted">
-        Нийт бараанаас нэрээр хайж, эсвэл хаагдсан сараар шүүж багцад оруулна. Захиалгууд дагаж орно.
+        Захиалга хаагдсан сараар шүүж сонгоод багцад оруулна. Захиалгууд дагаж орно.
       </p>
-
-      <div className="mb-3">
-        <Input
-          value={query}
-          onChange={setQuery}
-          placeholder="Нийт бараанаас нэрээр хайх"
-          maxLength={80}
-        />
-      </div>
 
       {loadingMonths ? (
         <div className="flex justify-center py-6">
           <Spinner className="text-muted" />
         </div>
+      ) : months.length === 0 ? (
+        <div className="py-4 text-center text-[13px] text-muted">
+          Нэмэх боломжтой хаагдсан гаргалт алга.
+        </div>
       ) : (
         <>
-          {months.length === 0 && !searching ? (
-            <div className="py-4 text-center text-[13px] text-muted">
-              Нэмэх боломжтой хаагдсан гаргалт алга.
-            </div>
-          ) : (
-            <>
-              {months.length > 0 && (
-                <div className="no-scrollbar mb-3 flex gap-2 overflow-x-auto">
-                  {months.map((m) => {
-                    const active = !searching && m.key === selectedKey;
-                    return (
-                      <button
-                        key={m.key}
-                        type="button"
-                        onClick={() => {
-                          setQuery("");
-                          setDebouncedQ("");
-                          setSelectedKey(m.key);
-                        }}
-                        className={`h-9 shrink-0 cursor-pointer rounded-[8px] border px-3 text-[13px] ${
-                          active
-                            ? "border-ink bg-ink text-white"
-                            : "border-line bg-bg text-ink hover:border-ink/40"
-                        }`}
-                      >
-                        {m.year} · {MONTH_LABELS[m.month - 1]}
-                        <span className="tnum ml-1.5 opacity-70">{m.count}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+          <div className="no-scrollbar mb-3 flex gap-2 overflow-x-auto">
+            {months.map((m) => {
+              const active = m.key === selectedKey;
+              return (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => setSelectedKey(m.key)}
+                  className={`h-9 shrink-0 cursor-pointer rounded-[8px] border px-3 text-[13px] ${
+                    active
+                      ? "border-ink bg-ink text-white"
+                      : "border-line bg-bg text-ink hover:border-ink/40"
+                  }`}
+                >
+                  {m.year} · {MONTH_LABELS[m.month - 1]}
+                  <span className="tnum ml-1.5 opacity-70">{m.count}</span>
+                </button>
+              );
+            })}
+          </div>
 
           {error && (
             <div className="mb-3">
@@ -1291,9 +1157,7 @@ function ClosedRoundPicker({
             </div>
           ) : rounds.length === 0 ? (
             <div className="py-6 text-center text-[13px] text-muted">
-              {searching
-                ? `«${debouncedQ}»-д таарах хаагдсан гаргалт алга.`
-                : "Энэ сард нэмэх гаргалт алга."}
+              Энэ сард нэмэх гаргалт алга.
             </div>
           ) : (
             <div className="max-h-[320px] overflow-y-auto">
@@ -1350,8 +1214,6 @@ function ClosedRoundPicker({
               Багцад нэмэх
             </Button>
           </div>
-            </>
-          )}
         </>
       )}
     </Card>

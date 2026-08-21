@@ -25,18 +25,9 @@ export function ArrivalRegister({
   const toast = useToast();
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const [query, setQuery] = useState("");
 
   const canEdit = batch.stage === "IN_TRANSIT";
-  const q = query.trim().toLowerCase();
-  const visible = useMemo(() => {
-    const list = batch.products.filter((p) => (p.variants?.length ?? 0) > 0);
-    if (!q) return list;
-    return list.filter((p) => {
-      if (p.name.toLowerCase().includes(q)) return true;
-      return (p.variants ?? []).some((v) => v.label.toLowerCase().includes(q));
-    });
-  }, [batch.products, q]);
+  const products = batch.products.filter((p) => (p.variants?.length ?? 0) > 0);
 
   const remainingTotal = useMemo(
     () =>
@@ -104,7 +95,7 @@ export function ArrivalRegister({
     }
   };
 
-  if (batch.products.filter((p) => (p.variants?.length ?? 0) > 0).length === 0) return null;
+  if (products.length === 0) return null;
 
   return (
     <Card className="mb-4 p-4">
@@ -133,32 +124,18 @@ export function ArrivalRegister({
         )}
       </div>
 
-      <div className="mb-3">
-        <Input
-          value={query}
-          onChange={setQuery}
-          placeholder="Нийт бараанаас нэр, хэмжээ, өнгөөр хайх"
-        />
-      </div>
-
       <div className="flex flex-col gap-4">
-        {visible.length === 0 ? (
-          <div className="py-6 text-center text-[13px] text-muted">
-            «{query.trim()}»-д таарах бараа алга.
-          </div>
-        ) : (
-          visible.map((p) => (
-            <ProductArrivalRows
-              key={p.roundId}
-              product={p}
-              valueOf={(v) => valueOf(p, v)}
-              canEdit={canEdit}
-              onChange={(key, value) =>
-                setDraft((prev) => ({ ...prev, [draftKey(p.roundId, key)]: value.replace(/\D/g, "") }))
-              }
-            />
-          ))
-        )}
+        {products.map((p) => (
+          <ProductArrivalRows
+            key={p.roundId}
+            product={p}
+            valueOf={(v) => valueOf(p, v)}
+            canEdit={canEdit}
+            onChange={(key, value) =>
+              setDraft((prev) => ({ ...prev, [draftKey(p.roundId, key)]: value.replace(/\D/g, "") }))
+            }
+          />
+        ))}
       </div>
 
       {canEdit && (

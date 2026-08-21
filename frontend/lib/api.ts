@@ -1035,14 +1035,10 @@ export const adminApi = {
       body,
     }).then((r) => r.data),
 
-  /** Багцын барааны нэгж карго үнийг сонголт бүрээр хадгална. */
+  /** Багцын барааны нэгж карго үнийг хадгална. */
   saveBatchCargoFees: (
     batchId: string,
-    items: {
-      roundId: string;
-      cargoFee?: number;
-      variants?: { selections: Record<string, string>; cargoFee: number }[];
-    }[],
+    items: { roundId: string; cargoFee: number }[],
   ) =>
     request<{ saved: number; ordersUpdated: number }>(
       `/admin/batches/${batchId}/cargo-fees`,
@@ -1074,22 +1070,12 @@ export const adminApi = {
       adminAuth,
     ).then((r) => r.data),
 
-  /** Хаагдсан, багцгүй гаргалт — сар эсвэл барааны нэрээр. */
-  batchEligibleRounds: (opts: { year?: number; month?: number; q?: string }) => {
-    const q = opts.q?.trim();
-    const year = opts.year;
-    const month = opts.month;
-    const query =
-      q
-        ? { q }
-        : Number.isFinite(year) && Number.isFinite(month)
-          ? { year, month }
-          : undefined;
-    return request<BatchProduct[]>("/admin/batches/eligible-rounds", {
+  /** Тухайн сарын хаагдсан, багцгүй гаргалт. */
+  batchEligibleRounds: (year: number, month: number) =>
+    request<BatchProduct[]>("/admin/batches/eligible-rounds", {
       ...adminAuth,
-      query,
-    }).then((r) => r.data);
-  },
+      query: { year, month },
+    }).then((r) => r.data),
 
   /** Хаагдсан гаргалтыг багцад холбоно. */
   addBatchProduct: (

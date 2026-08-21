@@ -27,7 +27,7 @@ import { roundStats } from '../../services/roundStats.js';
 import { finalizeRoundClose } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { computeTotals, paymentState, PAYMENT_STATE_LABEL } from '../../services/money.js';
-import { syncCargoFeesForRounds, replaceRoundCargoFees, buildCargoVariantRows } from '../../services/cargoFee.js';
+import { syncCargoFeesForRounds } from '../../services/cargoFee.js';
 
 export const adminBatchesRouter = Router();
 
@@ -38,25 +38,6 @@ const listQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
-
-/** Express query — хоосон мөр, массив, NaN-ийг алгасна. */
-function queryInt(min: number, max: number) {
-  return z.preprocess((raw) => {
-    const v = Array.isArray(raw) ? raw[0] : raw;
-    if (v === undefined || v === null || v === '') return undefined;
-    const n = typeof v === 'number' ? v : Number(String(v).trim());
-    return Number.isFinite(n) ? n : undefined;
-  }, z.number().int().min(min).max(max).optional());
-}
-
-function queryText(max: number) {
-  return z.preprocess((raw) => {
-    const v = Array.isArray(raw) ? raw[0] : raw;
-    if (v === undefined || v === null) return undefined;
-    const s = String(v).trim();
-    return s ? s : undefined;
-  }, z.string().max(max).optional());
-}
 
 adminBatchesRouter.get(
   '/',
@@ -138,53 +119,31 @@ adminBatchesRouter.get(
 );
 
 /**
- * GET /batches/eligible-rounds?year=&month= | ?q=
- * Сар эсвэл барааны нэрээр хаагдсан, багцгүй гаргалт.
+ * GET /batches/eligible-rounds?year=&month= — тухайн сарын хаагдсан, багцгүй гаргалт.
  */
 adminBatchesRouter.get(
   '/eligible-rounds',
   validate({
     query: z.object({
-      year: queryInt(2020, 2100),
-      month: queryInt(1, 12),
-      q: queryText(120),
+      year: z.coerce.number().int().min(2020).max(2100),
+      month: z.coerce.number().int().min(1).max(12),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const q = query<{ year?: number; month?: number; q?: string }>(req);
-    const search = q.q?.trim() ?? '';
-    const year = q.year;
-    const month = q.month;
-
-    if (!search && (year == null || month == null)) {
-      res.json({ data: [], meta: { year: null, month: null, q: null, total: 0 } });
-      return;
-    }
-
-    const closeAt = search
-      ? { not: null }
-      : (() => {
-          const monthStart = startOfUbMonth(
-            parseUbDay(`${year}-${String(month).padStart(2, '0')}-01`),
-          );
-          return {
-            gte: monthStart,
-            lte: new Date(addUbMonths(monthStart, 1).getTime() - 1),
-          };
-        })();
+    const q = query<{ year: number; month: number }>(req);
+    const monthStart = startOfUbMonth(
+      parseUbDay(`${q.year}-${String(q.month).padStart(2, '0')}-01`),
+    );
+    const monthEnd = new Date(addUbMonths(monthStart, 1).getTime() - 1);
 
     const rounds = await prisma.productRound.findMany({
       where: {
         deletedAt: null,
         batchId: null,
         status: 'CLOSED',
-        closeAt,
-        ...(search
-          ? { product: { name: { contains: search, mode: 'insensitive' as const } } }
-          : {}),
+        closeAt: { gte: monthStart, lte: monthEnd },
       },
       orderBy: { closeAt: 'desc' },
-      ...(search ? { take: 80 } : {}),
       include: {
         product: { select: { id: true, name: true, images: true } },
       },
@@ -210,12 +169,7 @@ adminBatchesRouter.get(
           customerCount: s?.customerCount ?? 0,
         };
       }),
-      meta: {
-        year: q.year ?? null,
-        month: q.month ?? null,
-        q: search || null,
-        total: rounds.length,
-      },
+      meta: { year: q.year, month: q.month, total: rounds.length },
     });
   }),
 );
@@ -231,16 +185,7 @@ adminBatchesRouter.get(
           where: { deletedAt: null },
           orderBy: { createdAt: 'asc' },
           include: {
-            product: {
-              select: {
-                id: true,
-                name: true,
-                images: true,
-                categoryId: true,
-                variants: { orderBy: { sortOrder: 'asc' } },
-              },
-            },
-            cargoFees: true,
+            product: { select: { id: true, name: true, images: true, categoryId: true } },
           },
         },
       },
@@ -262,7 +207,7 @@ adminBatchesRouter.get(
       findOrderIdsForBatch(prisma, batch.id, roundIds, true),
     ]);
     const allIds = [...new Set([...activeIds, ...omittedIds])];
-    const [stats, arrivalByRound, orderRows] = await Promise.all([
+    const [stats, arrivals, orderRows] = await Promise.all([
       roundStats(roundIds),
       summarizeRoundArrivals(prisma, roundIds),
       allIds.length === 0
@@ -315,17 +260,6 @@ adminBatchesRouter.get(
         omittedOrders,
         products: batch.rounds.map((round) => {
           const s = stats.get(round.id);
-          const arrivalRows = arrivalByRound.get(round.id) ?? [];
-          const cargoVariants = buildCargoVariantRows({
-            defaultFee: round.cargoFee,
-            overrides: round.cargoFees,
-            arrivals: arrivalRows,
-            productVariants: round.product.variants,
-          });
-          const cargoTotal = cargoVariants.reduce(
-            (sum, v) => sum + v.orderedQty * v.cargoFee,
-            0,
-          );
           return {
             roundId: round.id,
             roundNo: round.roundNo,
@@ -335,13 +269,12 @@ adminBatchesRouter.get(
             sellPrice: round.sellPrice,
             costPrice: round.costPrice,
             cargoFee: round.cargoFee,
-            cargoTotal,
-            cargoVariants,
+            cargoTotal: (s?.qty ?? 0) * round.cargoFee,
             status: round.status,
             closeAt: round.closeAt?.toISOString() ?? null,
             orderedQty: s?.qty ?? 0,
             customerCount: s?.customerCount ?? 0,
-            variants: arrivalRows,
+            variants: arrivals.get(round.id) ?? [],
           };
         }),
         totalValue: orders.reduce((sum, o) => sum + o.subtotal, 0),
@@ -481,7 +414,7 @@ adminBatchesRouter.patch(
 );
 
 /**
- * POST /batches/:id/cargo-fees — сонголт бүрийн нэгж карго үнийг хадгалж,
+ * POST /batches/:id/cargo-fees — бараа бүрийн нэгж карго үнийг хадгалж,
  * холбоотой захиалгын `cargoFee` / `dueAmount`-г шинэчилнэ.
  */
 adminBatchesRouter.post(
@@ -493,38 +426,16 @@ adminBatchesRouter.post(
         .array(
           z.object({
             roundId: z.string().min(1),
-            cargoFee: z.coerce.number().int().min(0).max(10_000_000).optional(),
-            variants: z
-              .array(
-                z.object({
-                  selections: z.record(z.string(), z.coerce.string()).default({}),
-                  cargoFee: z.coerce.number().int().min(0).max(10_000_000),
-                }),
-              )
-              .max(200)
-              .optional(),
+            cargoFee: z.coerce.number().int().min(0).max(10_000_000),
           }),
         )
         .min(1)
-        .max(200)
-        .refine(
-          (rows) =>
-            rows.every(
-              (row) => row.cargoFee != null || (row.variants && row.variants.length > 0),
-            ),
-          { message: 'Карго үнэ эсвэл сонголтын үнэ заавал.' },
-        ),
+        .max(200),
     }),
   }),
   asyncHandler(async (req, res) => {
     const batchId = param(req, 'id');
-    const { items } = req.body as {
-      items: {
-        roundId: string;
-        cargoFee?: number;
-        variants?: { selections: Record<string, string>; cargoFee: number }[];
-      }[];
-    };
+    const { items } = req.body as { items: { roundId: string; cargoFee: number }[] };
     const batch = await prisma.batch.findFirst({
       where: { id: batchId, deletedAt: null },
     });
@@ -543,30 +454,15 @@ adminBatchesRouter.post(
       throw badRequest('Зарим бараа энэ багцад хамаарахгүй.');
     }
 
+    const feeByRound = new Map(items.map((i) => [i.roundId, i.cargoFee]));
     // Interactive $transaction + олон захиалга sync = pooler/timeout-оор 500 болдог.
-    await prisma.$transaction(async (tx) => {
-      for (const row of items) {
-        if (row.cargoFee != null) {
-          await tx.productRound.update({
-            where: { id: row.roundId },
-            data: { cargoFee: row.cargoFee },
-          });
-        }
-        if (row.variants) {
-          await replaceRoundCargoFees(tx, row.roundId, row.variants);
-          const base = row.variants.find(
-            (v) => Object.keys(v.selections ?? {}).length === 0,
-          );
-          if (base && row.cargoFee == null) {
-            await tx.productRound.update({
-              where: { id: row.roundId },
-              data: { cargoFee: base.cargoFee },
-            });
-          }
-        }
-      }
-    });
-    const updatedCount = await syncCargoFeesForRounds(prisma, uniqueIds);
+    // Тойргийн үнийг эхлээд хадгалаад, захиалгыг дараа нь тусад нь шинэчилнэ.
+    await prisma.$transaction(
+      [...feeByRound.entries()].map(([roundId, cargoFee]) =>
+        prisma.productRound.update({ where: { id: roundId }, data: { cargoFee } }),
+      ),
+    );
+    const updatedCount = await syncCargoFeesForRounds(prisma, [...feeByRound.keys()]);
 
     await audit({
       actor: actorOf(req),
@@ -576,7 +472,7 @@ adminBatchesRouter.post(
       after: { items, ordersUpdated: updatedCount },
     });
 
-    res.json({ data: { saved: uniqueIds.length, ordersUpdated: updatedCount } });
+    res.json({ data: { saved: feeByRound.size, ordersUpdated: updatedCount } });
   }),
 );
 
@@ -760,14 +656,12 @@ adminBatchesRouter.post(
         .array(
           z.object({
             roundId: z.string().min(1),
-            selections: z
-              .record(z.string(), z.coerce.string())
-              .default({}),
+            selections: z.record(z.string(), z.string()).default({}),
             arrivedQty: z.coerce.number().int().min(0).max(100_000),
           }),
         )
         .min(1)
-        .max(500),
+        .max(200),
     }),
   }),
   asyncHandler(async (req, res) => {

@@ -27,7 +27,6 @@ import {
 } from '../lib/options.js';
 import { BATCH_STAGE_LABEL, ORDER_STATUS_LABEL } from '../lib/orderStatus.js';
 import { publicSkuStocks } from '../lib/skuStock.js';
-import { itemCargoTotal, type RoundCargoSource } from './cargoFee.js';
 
 export type ProductWithRelations = Product & {
   category?: Category | null;
@@ -177,7 +176,7 @@ export function adminProduct(
 }
 
 export function publicOrderItem(
-  item: OrderItem & { round?: RoundCargoSource },
+  item: OrderItem & { round?: { cargoFee: number } | null },
   paidDays?: ReadonlySet<string>,
 ) {
   const selections = (() => {
@@ -209,7 +208,7 @@ export function publicOrderItem(
     arrivedQty: item.arrivedQty,
     unitPrice: item.unitPrice,
     total: item.unitPrice * item.qty,
-    cargoFee: itemCargoTotal(item.qty, item.round, selections),
+    cargoFee: item.qty * (item.round?.cargoFee ?? 0),
     /** Захиалах үед амласан огноо — тойрог дахин гарсан ч хөдлөхгүй. */
     arriveFrom: toIso(item.arriveFrom),
     arriveTo: toIso(item.arriveTo),
