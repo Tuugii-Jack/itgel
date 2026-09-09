@@ -22,7 +22,7 @@ import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { downloadOrdersExcel, printOrders, type OrderExportSelection } from "@/lib/orderExport";
 import { PAYMENT_TONE } from "@/lib/payment";
-import { leasingGoodsArrived } from "@/lib/leasing";
+import { leasingGoodsArrived, leasingPercentTag } from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
 import type {
   AdminOrderDetail,
@@ -522,7 +522,7 @@ export function OrderDetail({
               <>
                 <div className="mb-1 text-[15px] font-medium">Лизинг</div>
                 <SumRow
-                  label="Шимтгэл (10%)"
+                  label={`Шимтгэл${leasingPercentTag(order.leasingFee ?? 0, order.subtotal)}`}
                   value={`${money(order.leasingFee ?? 0)}${order.leasingFeePaid ? " · төлсөн" : " · төлөөгүй"}`}
                 />
                 <SumRow

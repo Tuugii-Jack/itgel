@@ -17,7 +17,7 @@ import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refund
 import { paidPayoutDaySet } from '../../services/returns.js';
 import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
 import { syncOrderCargoFee, lineCargoFee } from '../../services/cargoFee.js';
-import { getSettings, getSettingsCached, districtNames } from '../../services/settings.js';
+import { getSettings, getSettingsCached, districtNames, leasingFeeFromSettings, leasingTiersOf } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { resolveOptionPrice } from '../../lib/optionPrices.js';
@@ -25,7 +25,7 @@ import { comboLabel, findSku } from '../../lib/skuStock.js';
 import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } from '../../lib/itemFulfilment.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { itemSelections, normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
-import { leasingFeeOf, leasingFlagOf, leasingHoldsGoods, serializeLeasing } from '../../lib/leasing.js';
+import { leasingFlagOf, leasingHoldsGoods, serializeLeasing } from '../../lib/leasing.js';
 import { cancelQpayInvoice, qpayAccountForOrder } from '../../services/qpay.js';
 
 export const publicOrdersRouter = Router();
@@ -147,7 +147,7 @@ publicOrdersRouter.post(
 
     const subtotal = subtotalOf(items);
     const isLeasing = Boolean(body.leasing);
-    const leasingFee = isLeasing ? leasingFeeOf(subtotal) : 0;
+    const leasingFee = isLeasing ? await leasingFeeFromSettings(subtotal) : 0;
 
     const order = await prisma.$transaction(async (tx) => {
       if (body.name && body.name !== customer.name) {
@@ -451,7 +451,11 @@ publicOrdersRouter.patch(
       throw conflict('Төлбөр орсон тул төлбөрийн хэлбэр солих боломжгүй.');
     }
 
-    const flag = leasingFlagOf(order.subtotal, leasing);
+    const flag = leasingFlagOf(
+      order.subtotal,
+      leasing,
+      leasingTiersOf(await getSettingsCached()),
+    );
     if (order.isLeasing === flag.isLeasing) {
       res.json({
         data: {
@@ -475,6 +479,7 @@ publicOrdersRouter.patch(
         where: { id: order.id },
         data: {
           isLeasing: flag.isLeasing,
+          leasingFee: flag.leasingFee,
           qpayInvoiceId: null,
           qpayInvoiceAt: null,
         },

@@ -10,7 +10,7 @@ import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
-import { leasingDueHeadline, leasingHoldsGoods } from "@/lib/leasing";
+import { leasingDueHeadline, leasingFeeCaption, leasingHoldsGoods } from "@/lib/leasing";
 import {
   orderHasPickup,
   orderAccruesStorage,
@@ -459,7 +459,7 @@ export default function TrackPage() {
         <div className="flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5">
           {order.isLeasing && (order.leasingFee ?? 0) > 0 && (
             <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
-              <span>Лизингийн шимтгэл (10%)</span>
+              <span>{leasingFeeCaption(order.leasingFee ?? 0, order.subtotal)}</span>
               <span className="tnum">
                 {money(order.leasingFee ?? 0)}
                 {order.leasingFeePaid ? " · төлсөн" : " · төлөөгүй"}

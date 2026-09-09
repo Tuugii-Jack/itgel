@@ -7,7 +7,7 @@ import { Button, Card, Divider, Input } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { money } from "@/lib/format";
 import { orderAccruesStorage } from "@/lib/fulfilment";
-import { leasingFeeOf, leasingNowPayAmount, isLeasingSplitPay } from "@/lib/leasing";
+import { leasingFeeCaption, leasingFeeOf, leasingFeePercentOf, formatLeasingPercent, leasingNowPayAmount, isLeasingSplitPay, leasingPercentTag } from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
 import type { PublicOrder, QpayInvoice, Store } from "@/lib/types";
 
@@ -39,8 +39,13 @@ export function PaymentPanel({
     ? (store.leasingQpay ?? { enabled: false, ready: false })
     : (store.qpay ?? { enabled: false, ready: false });
 
-  const fee = leasingFeeOf(order.subtotal);
+  const fee = leasing
+    ? order.isLeasing && (order.leasingFee ?? 0) > 0
+      ? (order.leasingFee ?? 0)
+      : leasingFeeOf(order.subtotal, store.leasing?.feeTiers)
+    : 0;
   const firstPay = leasing ? fee : order.subtotal;
+  const feeLabel = leasingFeeCaption(fee, order.subtotal);
 
   const applyMethod = async (next: boolean) => {
     if (next === order.isLeasing || switching) return;
@@ -69,7 +74,7 @@ export function PaymentPanel({
             {leasing ? (
               <>
                 <Row label="Барааны үнэ" value={money(order.subtotal)} />
-                <Row label="Лизингийн шимтгэл (10%)" value={money(fee)} />
+                <Row label={feeLabel} value={money(fee)} />
                 <Divider className="my-0" />
                 <Row label="Эхний төлөлт" value={money(firstPay)} big />
                 <Row label="Дараа төлнө (үндсэн)" value={money(order.subtotal)} />
@@ -83,6 +88,11 @@ export function PaymentPanel({
               leasing={leasing}
               onChange={(v) => void applyMethod(v)}
               disabled={switching}
+              subtotal={order.subtotal}
+              feeTiers={store.leasing?.feeTiers}
+              choiceHint={store.leasing?.choiceHint}
+              termsTitle={store.leasing?.termsTitle}
+              termsBody={store.leasing?.termsBody}
             />
           </div>
           <p className="mt-3 mb-0 text-[13px] leading-[1.6] text-ink-2">
@@ -103,7 +113,7 @@ export function PaymentPanel({
           {order.isLeasing && (
             <div className="tnum mt-3 flex flex-col gap-2.5 text-[14px]">
               <Row
-                label="Шимтгэл (10%)"
+                label={`Шимтгэл${leasingPercentTag(order.leasingFee ?? 0, order.subtotal)}`}
                 value={`${money(order.leasingFee ?? 0)} · төлсөн`}
               />
               <Row
@@ -163,6 +173,9 @@ function QpayPay({
   );
   const splitPay = isLeasingSplitPay(order);
   const maxSplit = leasingNowPayAmount(order);
+  const feePercent = formatLeasingPercent(
+    leasingFeePercentOf(order.leasingFee ?? 0, order.subtotal),
+  );
   const [splitAmount, setSplitAmount] = useState("");
   const chosenSplit = Number(splitAmount.replace(/\D/g, "")) || 0;
   const payAmount = feeFirst
@@ -171,7 +184,7 @@ function QpayPay({
       ? Math.min(Math.max(0, chosenSplit), maxSplit)
       : (order.nextPayAmount ?? order.dueAmount);
   const payLabel = feeFirst
-    ? "Одоо төлөх (10% шимтгэл)"
+    ? `Одоо төлөх (${feePercent}% шимтгэл)`
     : splitPay
       ? "Энэ удаагийн төлөлт"
       : "Төлөх дүн";
@@ -253,7 +266,7 @@ function QpayPay({
           дугаарт холбогдоно уу.
         </p>
         <div className="mt-3 text-[13px] text-muted">
-          {feeFirst ? "Одоо төлөх (10%): " : splitPay ? "Үндсэн үлдэгдэл: " : "Үлдэгдэл: "}
+          {feeFirst ? `Одоо төлөх (${feePercent}%): ` : splitPay ? "Үндсэн үлдэгдэл: " : "Үлдэгдэл: "}
           <span className="tnum font-medium text-ink">
             {money(feeFirst || splitPay ? leasingNowPayAmount(order) : order.dueAmount)}
           </span>
@@ -268,7 +281,7 @@ function QpayPay({
     <div className="flex flex-col gap-3">
       {feeFirst && !hideAmounts && (
         <>
-          <Row label="Одоо төлөх (10% шимтгэл)" value={money(qrAmount || payAmount)} big />
+          <Row label={`Одоо төлөх (${feePercent}% шимтгэл)`} value={money(qrAmount || payAmount)} big />
           <Row label="Дараа төлнө (үндсэн)" value={money(order.subtotal)} />
           <Row label="Нийт" value={money(order.dueAmount)} />
         </>

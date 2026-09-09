@@ -1,9 +1,98 @@
-/** Лизингийн шимтгэл — барааны үнийн 10%. Backend-тэй ижил. */
+/** Лизингийн шимтгэл — backend-тэй ижил шатлал. Тохиргоо байхгүй бол 10%. */
+
+export interface LeasingFeeTier {
+  minAmount: number;
+  ratePercent: number;
+}
+
 export const LEASING_FEE_RATE = 0.1;
 
-export function leasingFeeOf(subtotal: number): number {
+export const FALLBACK_LEASING_FEE_TIERS: LeasingFeeTier[] = [
+  { minAmount: 0, ratePercent: 10 },
+];
+
+export const SUGGESTED_LEASING_FEE_TIERS: LeasingFeeTier[] = [
+  { minAmount: 500_000, ratePercent: 11 },
+  { minAmount: 400_000, ratePercent: 12 },
+  { minAmount: 300_000, ratePercent: 13 },
+  { minAmount: 200_000, ratePercent: 14 },
+  { minAmount: 0, ratePercent: 15 },
+];
+
+export const DEFAULT_LEASING_CHOICE_HINT =
+  "Эхлээд {percent}% шимтгэл, дараа нь үндсэн 100%-ийг хувааж төлнө.";
+export const DEFAULT_LEASING_TERMS_TITLE = "Лизингийн нөхцөл";
+export const DEFAULT_LEASING_TERMS_BODY =
+  "Эхний төлөлт нь барааны үнийн {percent}% — лизингийн шимтгэл. Шимтгэл төлөгдсөний дараа барааны үндсэн 100%-ийг нэг удаа эсвэл хувааж төлнө. Шимтгэл нь барааны үнээс тусдаа.";
+
+export function parseLeasingFeeTiers(raw: unknown): LeasingFeeTier[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [...FALLBACK_LEASING_FEE_TIERS];
+  const seen = new Set<number>();
+  const parsed: LeasingFeeTier[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const minAmount = Math.round(Number((row as { minAmount?: unknown }).minAmount));
+    const ratePercent = Number((row as { ratePercent?: unknown }).ratePercent);
+    if (!Number.isFinite(minAmount) || minAmount < 0) continue;
+    if (!Number.isFinite(ratePercent) || ratePercent < 0.1 || ratePercent > 100) continue;
+    if (seen.has(minAmount)) continue;
+    seen.add(minAmount);
+    parsed.push({ minAmount, ratePercent: Math.round(ratePercent * 10) / 10 });
+  }
+  if (parsed.length === 0) return [...FALLBACK_LEASING_FEE_TIERS];
+  const sorted = [...parsed].sort((a, b) => b.minAmount - a.minAmount);
+  if (!sorted.some((t) => t.minAmount === 0)) {
+    sorted.push({ minAmount: 0, ratePercent: sorted[sorted.length - 1]!.ratePercent });
+  }
+  return [...sorted].sort((a, b) => b.minAmount - a.minAmount);
+}
+
+export function leasingRatePercent(
+  subtotal: number,
+  tiers: LeasingFeeTier[] = FALLBACK_LEASING_FEE_TIERS,
+): number {
   if (!Number.isFinite(subtotal) || subtotal <= 0) return 0;
-  return Math.round(subtotal * LEASING_FEE_RATE);
+  const sorted = parseLeasingFeeTiers(tiers);
+  return sorted.find((t) => subtotal >= t.minAmount)?.ratePercent ?? 0;
+}
+
+export function leasingFeeOf(
+  subtotal: number,
+  tiers: LeasingFeeTier[] = FALLBACK_LEASING_FEE_TIERS,
+): number {
+  if (!Number.isFinite(subtotal) || subtotal <= 0) return 0;
+  return Math.round(subtotal * (leasingRatePercent(subtotal, tiers) / 100));
+}
+
+export function formatLeasingPercent(percent: number): string {
+  if (!Number.isFinite(percent) || percent <= 0) return "0";
+  return Number.isInteger(percent) ? String(percent) : String(Math.round(percent * 10) / 10);
+}
+
+/** Захиалга дээр хадгалсан шимтгэлээс хувь. */
+export function leasingFeePercentOf(fee: number, subtotal: number): number {
+  if (!(subtotal > 0) || !(fee >= 0)) return 0;
+  return Math.round((fee / subtotal) * 1000) / 10;
+}
+
+export function leasingFeeCaption(fee: number, subtotal: number): string {
+  const percent = leasingFeePercentOf(fee, subtotal);
+  return percent > 0 ? `Лизингийн шимтгэл (${formatLeasingPercent(percent)}%)` : "Лизингийн шимтгэл";
+}
+
+export function leasingPercentTag(fee: number, subtotal: number): string {
+  const percent = leasingFeePercentOf(fee, subtotal);
+  return percent > 0 ? ` (${formatLeasingPercent(percent)}%)` : "";
+}
+
+export function fillLeasingCopy(
+  template: string,
+  vars: { percent: number; fee: number; feeText: string },
+): string {
+  return template
+    .replaceAll("{percent}", formatLeasingPercent(vars.percent))
+    .replaceAll("{rate}", formatLeasingPercent(vars.percent))
+    .replaceAll("{fee}", vars.feeText);
 }
 
 type LeasingPayOrder = {
@@ -105,7 +194,11 @@ export function leasingDueHeadline(order: LeasingPayOrder & {
     return { label: "Шилжүүлэх үлдэгдэл", amount: order.dueAmount };
   }
   if (!order.leasingFeePaid || order.nextPayKind === "FEE") {
-    return { label: "Одоо төлөх (10%)", amount: leasingNowPayAmount(order) };
+    const percent = leasingFeePercentOf(order.leasingFee ?? 0, order.subtotal);
+    return {
+      label: percent > 0 ? `Одоо төлөх (${formatLeasingPercent(percent)}%)` : "Одоо төлөх",
+      amount: leasingNowPayAmount(order),
+    };
   }
   if (isLeasingSplitPay(order)) {
     return {

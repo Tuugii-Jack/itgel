@@ -1,5 +1,11 @@
 import type { Setting } from '@prisma/client';
 import { prisma } from '../prisma.js';
+import {
+  leasingCopyOf,
+  leasingFeeOf,
+  parseLeasingFeeTiers,
+  type LeasingFeeTier,
+} from '../lib/leasing.js';
 
 /** Хүргэлтийн дүүргүүд — төлбөрийг хүргэлтийн компани авна, дэлгүүр авдаггүй. */
 export const DEFAULT_DISTRICTS = [
@@ -55,4 +61,22 @@ export function districtNames(settings: Setting): string[] {
 
 export function districtList(settings: Setting): { district: string; fee: number }[] {
   return districtNames(settings).map((district) => ({ district, fee: 0 }));
+}
+
+export function leasingTiersOf(settings: Setting): LeasingFeeTier[] {
+  return parseLeasingFeeTiers(settings.leasingFeeTiers);
+}
+
+export async function leasingFeeFromSettings(subtotal: number): Promise<number> {
+  return leasingFeeOf(subtotal, leasingTiersOf(await getSettingsCached()));
+}
+
+export function publicLeasingOf(settings: Setting) {
+  const copy = leasingCopyOf(settings);
+  return {
+    feeTiers: leasingTiersOf(settings),
+    choiceHint: copy.choiceHint,
+    termsTitle: copy.termsTitle,
+    termsBody: copy.termsBody,
+  };
 }

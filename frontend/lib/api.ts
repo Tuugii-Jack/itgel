@@ -48,6 +48,7 @@ import type {
   OrdersByProductDate,
   OrdersByProductRow,
   Settings,
+  LeasingSettings,
   Slot,
   Store,
 } from "./types";
@@ -1604,6 +1605,21 @@ export const leasingApi = {
     }>,
   ) =>
     request<AdminCustomer>(`/leasing/customers/${id}`, {
+      ...adminAuth,
+      method: "PATCH",
+      body,
+    }).then((r) => r.data),
+
+  settings: () =>
+    request<LeasingSettings>("/leasing/settings", adminAuth).then((r) => r.data),
+
+  updateSettings: (body: {
+    feeTiers?: { minAmount: number; ratePercent: number }[];
+    choiceHint?: string;
+    termsTitle?: string;
+    termsBody?: string;
+  }) =>
+    request<LeasingSettings>("/leasing/settings", {
       ...adminAuth,
       method: "PATCH",
       body,

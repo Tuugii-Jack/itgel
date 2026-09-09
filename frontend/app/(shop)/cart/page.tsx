@@ -19,8 +19,9 @@ import { useCart, type CartLine } from "@/lib/cart";
 import { useSession } from "@/lib/session";
 import { money, relativeDay } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
+import { leasingFeeCaption, leasingFeeOf } from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
-import { leasingFeeOf } from "@/lib/leasing";
+import type { Store } from "@/lib/types";
 
 /**
  * 03 Сагс ба захиалга — дизайны хэмжээг яг барина.
@@ -38,6 +39,7 @@ export default function CartPage() {
   const [contactPhone, setContactPhone] = useState("");
   const [note, setNote] = useState("");
   const [leasing, setLeasing] = useState(false);
+  const [store, setStore] = useState<Store | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +47,13 @@ export default function CartPage() {
     if (session.me?.name) setBuyerName(session.me.name);
     if (session.me?.phone) setContactPhone(session.me.phone);
   }, [session.me]);
+
+  useEffect(() => {
+    api
+      .store()
+      .then(setStore)
+      .catch(() => undefined);
+  }, []);
 
   const groups = useMemo(() => groupLines(cart.lines), [cart.lines]);
 
@@ -118,7 +127,7 @@ export default function CartPage() {
     .filter((l) => l.type === "order")
     .reduce((sum, l) => sum + l.price * l.qty, 0);
   const readyTotal = cart.subtotal - orderTotal;
-  const fee = leasing ? leasingFeeOf(cart.subtotal) : 0;
+  const fee = leasing ? leasingFeeOf(cart.subtotal, store?.leasing?.feeTiers) : 0;
   const firstPay = leasing ? fee : cart.subtotal;
 
   return (
@@ -253,7 +262,7 @@ export default function CartPage() {
             {leasing ? (
               <>
                 <SumRow label='Барааны үнэ' value={money(cart.subtotal)} />
-                <SumRow label='Лизингийн шимтгэл (10%)' value={money(fee)} />
+                <SumRow label={leasingFeeCaption(fee, cart.subtotal)} value={money(fee)} />
                 <div className='h-px bg-line' />
                 <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
                   <span>Эхний төлөлт</span>
@@ -270,7 +279,15 @@ export default function CartPage() {
           </div>
 
           <div className='mt-4'>
-            <PayMethodChoice leasing={leasing} onChange={setLeasing} />
+            <PayMethodChoice
+              leasing={leasing}
+              onChange={setLeasing}
+              subtotal={cart.subtotal}
+              feeTiers={store?.leasing?.feeTiers}
+              choiceHint={store?.leasing?.choiceHint}
+              termsTitle={store?.leasing?.termsTitle}
+              termsBody={store?.leasing?.termsBody}
+            />
           </div>
 
           {/* Laptop дээр товч хураангуйн дотор — тогтмол доод мөр хэрэггүй. */}

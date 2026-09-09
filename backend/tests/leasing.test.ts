@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { leasingFeeOf, leasingFlagOf, leasingView, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere } from '../src/lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingView, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS } from '../src/lib/leasing.js';
+import { AppError } from '../src/lib/errors.js';
 
 describe('Лизингийн шимтгэл', () => {
   it('нийт үнийн 10%', () => {
@@ -15,6 +16,39 @@ describe('Лизингийн шимтгэл', () => {
   it('QPay ↔ лизинг шилжихэд шимтгэл зөв', () => {
     expect(leasingFlagOf(1_000, true)).toEqual({ isLeasing: true, leasingFee: 100 });
     expect(leasingFlagOf(1_000, false)).toEqual({ isLeasing: false, leasingFee: 0 });
+  });
+
+  it('үнийн шатлалаар хувь өснө', () => {
+    const tiers = SUGGESTED_LEASING_FEE_TIERS;
+    expect(leasingRatePercent(199_999, tiers)).toBe(15);
+    expect(leasingRatePercent(200_000, tiers)).toBe(14);
+    expect(leasingRatePercent(300_000, tiers)).toBe(13);
+    expect(leasingRatePercent(400_000, tiers)).toBe(12);
+    expect(leasingRatePercent(500_000, tiers)).toBe(11);
+    expect(leasingFeeOf(200_000, tiers)).toBe(28_000);
+    expect(leasingFeeOf(500_000, tiers)).toBe(55_000);
+  });
+
+  it('хоосон тохиргоо 10% руу буцна', () => {
+    expect(parseLeasingFeeTiers([])).toEqual([{ minAmount: 0, ratePercent: 10 }]);
+  });
+
+  it('0₮-ийн шатлалгүйгээр хадгалахгүй', () => {
+    expect(() =>
+      assertLeasingFeeTiers([{ minAmount: 500_000, ratePercent: 11 }]),
+    ).toThrow(AppError);
+  });
+
+  it('хуучин захиалгын шимтгэлийг шинэ шатлалаар солихгүй', () => {
+    expect(
+      leasingFeeSnapshot({
+        isLeasing: true,
+        previousSubtotal: 100_000,
+        previousFee: 10_000,
+        nextSubtotal: 50_000,
+        fallbackFee: 7_500,
+      }),
+    ).toBe(5_000);
   });
 });
 

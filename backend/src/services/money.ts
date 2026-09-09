@@ -1,7 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { conflict, notFound } from '../lib/errors.js';
-import { leasingFeeOf, leasingView } from '../lib/leasing.js';
+import { leasingFeeOf, leasingFeeSnapshot, leasingView } from '../lib/leasing.js';
+import { getSettingsCached, leasingTiersOf } from './settings.js';
 
 /**
  * Захиалгын мөнгөн дүнгийн цорын ганц эх сурвалж.
@@ -39,7 +40,14 @@ export interface OrderTotals {
 export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderTotals> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { id: true, storageFee: true, cargoFee: true, isLeasing: true },
+    select: {
+      id: true,
+      storageFee: true,
+      cargoFee: true,
+      isLeasing: true,
+      leasingFee: true,
+      subtotal: true,
+    },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
 
@@ -58,7 +66,20 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
   const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
   const paidAmount = payments.find((p) => p.kind === 'PAYMENT')?._sum.amount ?? 0;
   const refundedAmount = payments.find((p) => p.kind === 'REFUND')?._sum.amount ?? 0;
-  const leasingFee = order.isLeasing ? leasingFeeOf(subtotal) : 0;
+  let leasingFee = 0;
+  if (order.isLeasing) {
+    if (order.subtotal > 0 && order.leasingFee > 0) {
+      leasingFee = leasingFeeSnapshot({
+        isLeasing: true,
+        previousSubtotal: order.subtotal,
+        previousFee: order.leasingFee,
+        nextSubtotal: subtotal,
+        fallbackFee: 0,
+      });
+    } else {
+      leasingFee = leasingFeeOf(subtotal, leasingTiersOf(await getSettingsCached()));
+    }
+  }
 
   const totals = computeTotals({
     subtotal,

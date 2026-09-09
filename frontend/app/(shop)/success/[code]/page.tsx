@@ -13,6 +13,7 @@ import { awaitingPayment } from "@/lib/payment";
 import { orderAccruesStorage } from "@/lib/fulfilment";
 import { useSession } from "@/lib/session";
 import { usePolling } from "@/lib/usePolling";
+import { leasingFeeCaption, formatLeasingPercent, leasingFeePercentOf } from "@/lib/leasing";
 import type { PublicOrder, Store } from "@/lib/types";
 
 /**
@@ -204,7 +205,7 @@ function OrderSummary({ order }: { order: PublicOrder }) {
       <div className="h-px bg-line" />
       {order.isLeasing && (order.leasingFee ?? 0) > 0 && (
         <div className="flex justify-between gap-3">
-          <span className="text-ink-2">Лизингийн шимтгэл (10%)</span>
+          <span className="text-ink-2">{leasingFeeCaption(order.leasingFee ?? 0, order.subtotal)}</span>
           <span>{money(order.leasingFee ?? 0)}</span>
         </div>
       )}
@@ -237,7 +238,7 @@ function OrderSummary({ order }: { order: PublicOrder }) {
             <div className="flex justify-between gap-3 text-[17px] font-medium">
               <span>
                 {!order.leasingFeePaid
-                  ? "Одоо төлөх (10%)"
+                  ? `Одоо төлөх (${formatLeasingPercent(leasingFeePercentOf(order.leasingFee ?? 0, order.subtotal))}%)`
                   : "Үлдэгдэл — хувааж төлнө"}
               </span>
               <span>

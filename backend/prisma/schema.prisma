@@ -525,6 +525,13 @@ model Setting {
   /// Үнэгүй хоногоос хэтэрсэн хоног бүрт (мөр × тоо) нэмэгдэх хураамж ₮. 0 = унтраана.
   storageFeePerDay  Int    @default(1000)
 
+  /// Лизингийн шимтгэлийн шатлал: [{ minAmount, ratePercent }]. Хоосон бол 10%.
+  leasingFeeTiers     Json   @default("[]")
+  /// Сагсан дээрх богино тайлбар. {percent} {fee} орно.
+  leasingChoiceHint   String @default("")
+  leasingTermsTitle   String @default("Лизингийн нөхцөл")
+  leasingTermsBody    String @default("")
+
   updatedAt DateTime @updatedAt
 }
 

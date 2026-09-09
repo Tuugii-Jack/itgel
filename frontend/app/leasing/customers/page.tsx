@@ -143,7 +143,7 @@ export default function LeasingCustomersPage() {
     <div>
       <PageHead
         title="Лизинг хэрэглэгчид"
-        hint="10% шимтгэл төлсөн лизинг хэрэглэгчид."
+        hint="Шимтгэл төлсөн лизинг хэрэглэгчид."
       />
       <div className="mb-4">
         <Input value={search} onChange={setSearch} placeholder="Нэр, и-мэйл, утас" className="w-64" />

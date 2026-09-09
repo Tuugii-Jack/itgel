@@ -518,6 +518,12 @@ export interface Store {
   storageFreeDays: number;
   /** Үнэгүй хоногоос хойш хоног бүрийн хураамж ₮. 0 = унтраана. */
   storageFeePerDay: number;
+  leasing?: {
+    feeTiers: { minAmount: number; ratePercent: number }[];
+    choiceHint: string;
+    termsTitle: string;
+    termsBody: string;
+  };
 }
 
 /** QPay нэхэмжлэл — QR + банкны deeplink. */
@@ -1002,6 +1008,15 @@ export interface Settings {
   unpaidCancelHours: number;
   storageFreeDays: number;
   storageFeePerDay: number;
+  updatedAt: string;
+}
+
+export interface LeasingSettings {
+  feeTiers: { minAmount: number; ratePercent: number }[];
+  suggestedFeeTiers: { minAmount: number; ratePercent: number }[];
+  choiceHint: string;
+  termsTitle: string;
+  termsBody: string;
   updatedAt: string;
 }
 

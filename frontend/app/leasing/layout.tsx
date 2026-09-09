@@ -11,6 +11,7 @@ import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 const NAV = [
   { href: "/leasing", label: "Захиалга" },
   { href: "/leasing/customers", label: "Хэрэглэгчид" },
+  { href: "/leasing/settings", label: "Тохиргоо" },
 ];
 
 export default function LeasingLayout({ children }: { children: ReactNode }) {

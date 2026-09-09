@@ -10,7 +10,7 @@ import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } fro
 import { consumeReadyStock } from './readyStock.js';
 import { changeOrderStatus } from './orders.js';
 import { recordPayment } from './payments.js';
-import { leasingFeeOf } from '../lib/leasing.js';
+import { leasingFeeFromSettings } from './settings.js';
 
 export interface CreateOrderItemInput {
   /** Тойргийн id (дэлгүүрийн productId). */
@@ -125,7 +125,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
 
   const subtotal = subtotalOf(items);
   const isLeasing = Boolean(input.leasing);
-  const leasingFee = isLeasing ? leasingFeeOf(subtotal) : 0;
+  const leasingFee = isLeasing ? await leasingFeeFromSettings(subtotal) : 0;
 
   const order = await prisma.$transaction(async (tx) => {
     if (input.customerName && input.customerName !== customer.name) {

@@ -1,24 +1,159 @@
-import { forbidden } from './errors.js';
+import { badRequest, forbidden } from './errors.js';
 
 /**
- * Лизингийн төлбөр — барааны үнийн 10% шимтгэл + 100% үндсэн төлбөр.
- * Энгийн захиалгын дүнд нөлөөлөхгүй (`isLeasing` false үед шимтгэл 0).
+ * Лизингийн төлбөр — үнийн шатлалаар шимтгэл + үндсэн 100%.
+ * Тохиргоо байхгүй бол 10%. Энгийн захиалгын дүнд нөлөөлөхгүй.
  */
 export const LEASING_FEE_RATE = 0.1;
 
-export function leasingFeeOf(subtotal: number): number {
+export interface LeasingFeeTier {
+  /** Энэ дүнгээс дээш (тухайн дүн орно). */
+  minAmount: number;
+  /** Барааны үнийн хувь (11 = 11%). */
+  ratePercent: number;
+}
+
+/** Тохиргоо хоосон үед — хуучин 10%. */
+export const FALLBACK_LEASING_FEE_TIERS: LeasingFeeTier[] = [
+  { minAmount: 0, ratePercent: 10 },
+];
+
+/** Админд санал болгох шатлал. */
+export const SUGGESTED_LEASING_FEE_TIERS: LeasingFeeTier[] = [
+  { minAmount: 500_000, ratePercent: 11 },
+  { minAmount: 400_000, ratePercent: 12 },
+  { minAmount: 300_000, ratePercent: 13 },
+  { minAmount: 200_000, ratePercent: 14 },
+  { minAmount: 0, ratePercent: 15 },
+];
+
+export const DEFAULT_LEASING_CHOICE_HINT =
+  'Эхлээд {percent}% шимтгэл, дараа нь үндсэн 100%-ийг хувааж төлнө.';
+export const DEFAULT_LEASING_TERMS_TITLE = 'Лизингийн нөхцөл';
+export const DEFAULT_LEASING_TERMS_BODY =
+  'Эхний төлөлт нь барааны үнийн {percent}% — лизингийн шимтгэл. Шимтгэл төлөгдсөний дараа барааны үндсэн 100%-ийг нэг удаа эсвэл хувааж төлнө. Шимтгэл нь барааны үнээс тусдаа.';
+
+export function leasingCopyOf(input: {
+  leasingChoiceHint?: string | null;
+  leasingTermsTitle?: string | null;
+  leasingTermsBody?: string | null;
+}): {
+  choiceHint: string;
+  termsTitle: string;
+  termsBody: string;
+} {
+  return {
+    choiceHint: input.leasingChoiceHint?.trim() || DEFAULT_LEASING_CHOICE_HINT,
+    termsTitle: input.leasingTermsTitle?.trim() || DEFAULT_LEASING_TERMS_TITLE,
+    termsBody: input.leasingTermsBody?.trim() || DEFAULT_LEASING_TERMS_BODY,
+  };
+}
+
+/**
+ * Захиалга дээрх шимтгэлийг хадгалсан хувиар үлдээнэ.
+ * Шинэ тохиргоо хуучин захиалгын дүнг өөрчлөхгүй.
+ */
+export function leasingFeeSnapshot(input: {
+  isLeasing: boolean;
+  previousSubtotal: number;
+  previousFee: number;
+  nextSubtotal: number;
+  fallbackFee: number;
+}): number {
+  if (!input.isLeasing) return 0;
+  if (input.previousSubtotal > 0 && input.previousFee > 0) {
+    return Math.round(input.nextSubtotal * (input.previousFee / input.previousSubtotal));
+  }
+  return input.fallbackFee;
+}
+
+function sortTiers(tiers: LeasingFeeTier[]): LeasingFeeTier[] {
+  return [...tiers].sort((a, b) => b.minAmount - a.minAmount || a.ratePercent - b.ratePercent);
+}
+
+export function parseLeasingFeeTiers(raw: unknown): LeasingFeeTier[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [...FALLBACK_LEASING_FEE_TIERS];
+  const seen = new Set<number>();
+  const parsed: LeasingFeeTier[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const minAmount = Math.round(Number((row as { minAmount?: unknown }).minAmount));
+    const ratePercent = Number((row as { ratePercent?: unknown }).ratePercent);
+    if (!Number.isFinite(minAmount) || minAmount < 0) continue;
+    if (!Number.isFinite(ratePercent) || ratePercent < 0.1 || ratePercent > 100) continue;
+    if (seen.has(minAmount)) continue;
+    seen.add(minAmount);
+    parsed.push({
+      minAmount,
+      ratePercent: Math.round(ratePercent * 10) / 10,
+    });
+  }
+  if (parsed.length === 0) return [...FALLBACK_LEASING_FEE_TIERS];
+  const sorted = sortTiers(parsed);
+  if (!sorted.some((t) => t.minAmount === 0)) {
+    sorted.push({ minAmount: 0, ratePercent: sorted[sorted.length - 1]!.ratePercent });
+  }
+  return sortTiers(sorted);
+}
+
+/** Хадгалахад шалгана — хоосон/давхардсан шатлал зөвшөөрөхгүй. */
+export function assertLeasingFeeTiers(raw: unknown): LeasingFeeTier[] {
+  if (!Array.isArray(raw) || raw.length < 1) {
+    throw badRequest('Дор хаяж нэг шимтгэлийн шатлал оруулна уу.');
+  }
+  if (raw.length > 12) throw badRequest('Шатлал хамгийн ихдээ 12 байна.');
+  const seen = new Set<number>();
+  const parsed: LeasingFeeTier[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') throw badRequest('Шатлалын мөр буруу байна.');
+    const minAmount = Math.round(Number((row as { minAmount?: unknown }).minAmount));
+    const ratePercent = Number((row as { ratePercent?: unknown }).ratePercent);
+    if (!Number.isInteger(minAmount) || minAmount < 0 || minAmount > 100_000_000) {
+      throw badRequest('Шатлалын доод дүн 0–100,000,000₮ байх ёстой.');
+    }
+    if (!Number.isFinite(ratePercent) || ratePercent < 0.1 || ratePercent > 100) {
+      throw badRequest('Шимтгэлийн хувь 0.1–100 байх ёстой.');
+    }
+    if (seen.has(minAmount)) throw badRequest('Шатлалын доод дүн давхардсан байна.');
+    seen.add(minAmount);
+    parsed.push({ minAmount, ratePercent: Math.round(ratePercent * 10) / 10 });
+  }
+  if (!parsed.some((t) => t.minAmount === 0)) {
+    throw badRequest('0₮-ийн шатлал заавал байна — хамгийн бага үнийн хувь.');
+  }
+  return sortTiers(parsed);
+}
+
+export function leasingRatePercent(
+  subtotal: number,
+  tiers: LeasingFeeTier[] = FALLBACK_LEASING_FEE_TIERS,
+): number {
   if (!Number.isFinite(subtotal) || subtotal <= 0) return 0;
-  return Math.round(subtotal * LEASING_FEE_RATE);
+  const sorted = sortTiers(parseLeasingFeeTiers(tiers));
+  return sorted.find((t) => subtotal >= t.minAmount)?.ratePercent ?? 0;
+}
+
+export function leasingFeeOf(
+  subtotal: number,
+  tiers: LeasingFeeTier[] = FALLBACK_LEASING_FEE_TIERS,
+): number {
+  if (!Number.isFinite(subtotal) || subtotal <= 0) return 0;
+  const rate = leasingRatePercent(subtotal, tiers);
+  return Math.round(subtotal * (rate / 100));
 }
 
 /** Төлөөгүй захиалгын QPay ↔ лизинг шилжилт. */
-export function leasingFlagOf(subtotal: number, leasing: boolean): {
+export function leasingFlagOf(
+  subtotal: number,
+  leasing: boolean,
+  tiers: LeasingFeeTier[] = FALLBACK_LEASING_FEE_TIERS,
+): {
   isLeasing: boolean;
   leasingFee: number;
 } {
   return {
     isLeasing: leasing,
-    leasingFee: leasing ? leasingFeeOf(subtotal) : 0,
+    leasingFee: leasing ? leasingFeeOf(subtotal, tiers) : 0,
   };
 }
 
@@ -115,7 +250,7 @@ export function serializeLeasing(order: Parameters<typeof leasingView>[0]) {
 
 /**
  * QPay нэхэмжлэлийн дүн.
- * Шимтгэл төлөгдөөгүй бол ямагт 10%. Үндсэн төлбөрт `requested` заавал.
+ * Шимтгэл төлөгдөөгүй бол тохиргооны хувь. Үндсэн төлбөрт `requested` заавал.
  * Карго/агуулахын үлдэгдэл (`BALANCE`) дүнгүйгээр үлдэгдлийг нэхэмжилнэ.
  */
 export function resolveInvoiceAmount(
