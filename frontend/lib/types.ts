@@ -452,7 +452,10 @@ export interface MyOrder {
   paymentState: PaymentState;
   isLeasing?: boolean;
   leasingFee?: number;
+  leasingFeePaid?: boolean;
+  leasingPrincipalDue?: number;
   nextPayAmount?: number;
+  nextPayKind?: LeasingPayKind;
   fulfilment: Fulfilment | null;
   canChooseFulfilment: boolean;
   itemCount: number;

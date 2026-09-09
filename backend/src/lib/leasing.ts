@@ -139,6 +139,12 @@ export function resolveInvoiceAmount(
   return { amount: Math.min(n, max), kind: view.nextPayKind };
 }
 
+/** Үндсэн төлбөр дутуу бол бараа өгөхгүй — лизингийн данс тусдаа. */
+export function leasingHoldsGoods(order: Parameters<typeof leasingView>[0]): boolean {
+  const view = leasingView(order);
+  return view.isLeasing && view.principalDue > 0;
+}
+
 /** Ирсэн = агуулахад эсвэл хүлээлгэн өгсөн. Цуцлагдсаныг энд оруулахгүй. */
 export const LEASING_ARRIVED_STATUSES = ['ARRIVED', 'HANDED_OVER'] as const;
 export const LEASING_NOT_ARRIVED_STATUSES = [

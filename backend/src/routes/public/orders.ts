@@ -25,7 +25,7 @@ import { comboLabel, findSku } from '../../lib/skuStock.js';
 import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } from '../../lib/itemFulfilment.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { itemSelections, normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
-import { leasingFeeOf, leasingFlagOf, serializeLeasing } from '../../lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingHoldsGoods, serializeLeasing } from '../../lib/leasing.js';
 import { cancelQpayInvoice, qpayAccountForOrder } from '../../services/qpay.js';
 
 export const publicOrdersRouter = Router();
@@ -505,13 +505,26 @@ const fulfilmentBody = z
   .object({
     type: z.enum(['PICKUP', 'DELIVERY']),
     payMethod: z.enum(['QPAY']).optional(),
-    district: z.string().trim().min(1).max(60).optional(),
-    khoroo: z.string().trim().min(1).max(60).optional(),
-    address: z.string().trim().min(5).max(300).optional(),
+    district: z.string().trim().max(60).optional(),
+    khoroo: z.string().trim().max(60).optional(),
+    address: z.string().trim().max(300).optional(),
     itemIds: z.array(z.string().min(1)).min(1).max(100),
   })
-  .refine((v) => v.type === 'PICKUP' || (v.district && v.khoroo && v.address), {
-    message: 'Хүргэлтэд байршил, хороо/сум, хаяг заавал шаардлагатай.',
+  .superRefine((v, ctx) => {
+    if (v.type !== 'DELIVERY') return;
+    if (!v.district) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['district'], message: 'Дүүрэг эсвэл аймаг заавал.' });
+    }
+    if (!v.khoroo) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['khoroo'], message: 'Хороо эсвэл сум заавал.' });
+    }
+    if (!v.address || v.address.length < 5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['address'],
+        message: 'Хүргэлтийн хаяг дор хаяж 5 тэмдэгт байна.',
+      });
+    }
   });
 
 /** POST /api/orders/:code/fulfilment — ирсэн барааг мөр бүрээр авах хэлбэрээ сонгоно. */
@@ -534,6 +547,11 @@ publicOrdersRouter.post(
 
     if (order.status !== 'ARRIVED') {
       throw conflict('Бараа агуулахад ирсний дараа авах хэлбэрээ сонгоно.');
+    }
+    if (leasingHoldsGoods(order)) {
+      throw conflict('Лизингийн үлдэгдэл төлбөрөө эхлээд төлнө үү. Төлсний дараа бараагаа авна.', {
+        code: 'LEASING_BALANCE_DUE',
+      });
     }
 
     const known = new Set(order.items.map((item) => item.id));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leasingFeeOf, leasingFlagOf, leasingView, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere } from '../src/lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingView, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere } from '../src/lib/leasing.js';
 
 describe('Лизингийн шимтгэл', () => {
   it('нийт үнийн 10%', () => {
@@ -146,5 +146,44 @@ describe('Лизинг бараа ирсэн эсэх', () => {
     expect(leasingGoodsWhere('not_arrived').status).toEqual({
       in: ['NEW', 'CONFIRMED', 'IN_BATCH', 'IN_TRANSIT'],
     });
+  });
+});
+
+describe('Лизинг үлдэгдэлтэй бараа авах', () => {
+  it('шимтгэл л төлсөн бол хориглоно', () => {
+    expect(
+      leasingHoldsGoods({
+        isLeasing: true,
+        leasingFee: 10_000,
+        subtotal: 100_000,
+        paidAmount: 10_000,
+        refundedAmount: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it('үндсэн төлөгдсөн бол карго үлдсэн ч хориглохгүй', () => {
+    expect(
+      leasingHoldsGoods({
+        isLeasing: true,
+        leasingFee: 10_000,
+        subtotal: 100_000,
+        paidAmount: 110_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+        dueAmount: 8_000,
+      }),
+    ).toBe(false);
+  });
+
+  it('QPay захиалгыг хориглохгүй', () => {
+    expect(
+      leasingHoldsGoods({
+        isLeasing: false,
+        subtotal: 100_000,
+        paidAmount: 0,
+        refundedAmount: 0,
+      }),
+    ).toBe(false);
   });
 });

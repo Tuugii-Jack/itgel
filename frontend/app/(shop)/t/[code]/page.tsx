@@ -10,7 +10,7 @@ import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
-import { leasingDueHeadline } from "@/lib/leasing";
+import { leasingDueHeadline, leasingHoldsGoods } from "@/lib/leasing";
 import {
   orderHasPickup,
   orderAccruesStorage,
@@ -125,8 +125,10 @@ export default function TrackPage() {
   const dueHead = leasingDueHeadline(order);
   const stages = buildStages(order);
   const eta = etaOf(order);
-  const canCollect =
+  const goodsReady =
     order.canChooseFulfilment || order.items.some(itemNeedsFulfilment);
+  const leasingHold = leasingHoldsGoods(order);
+  const canCollect = goodsReady && !leasingHold;
 
   if (canCollect && collecting) {
     if (!store) {
@@ -188,10 +190,17 @@ export default function TrackPage() {
             <span className="text-[13px] text-muted">{eta.label}</span>
             <span className="tnum text-[20px] lg:text-[24px]">{eta.value}</span>
             <span className="mt-1 max-w-[520px] text-[14px] leading-[1.5] text-ink-2">
-              {eta.note}
+              {leasingHold && goodsReady
+                ? "Лизингийн үлдэгдэл төлбөрөө төлнө үү. Төлсний дараа бараагаа авна."
+                : eta.note}
             </span>
           </div>
 
+          {leasingHold && goodsReady && (
+            <div className="mt-4 text-[14px] font-medium text-danger lg:mt-0 lg:max-w-[240px] lg:text-right">
+              Лизингийн төлбөрөө төлөөрэй
+            </div>
+          )}
           {canCollect && (
             <Button
               size="bar"
@@ -261,8 +270,8 @@ export default function TrackPage() {
           </div>
         )}
 
-      {/* Мөнгө хүлээж байгаа бол QPay */}
-      {unpaid && store && (
+      {/* Мөнгө хүлээж байгаа бол QPay — лизинг үлдэгдэлтэй бол бараанаас өмнө */}
+      {(unpaid || leasingHold) && store && (
         <div className="px-4 pt-6 lg:px-0 lg:pt-0">
           <PaymentPanel order={order} store={store} onClaimed={load} />
         </div>

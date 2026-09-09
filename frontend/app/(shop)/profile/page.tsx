@@ -26,6 +26,7 @@ import { LocationFields } from "@/components/LocationFields";
 import { dayLabel, money, phoneLabel, refundPayoutLabel } from "@/lib/format";
 import { UB_DISTRICTS } from "@/lib/locations";
 import { awaitingPayment, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
+import { leasingHoldsGoods } from "@/lib/leasing";
 import type { MyOrder, OrderStatus, Store } from "@/lib/types";
 
 const STATUS_TONE: Record<OrderStatus, Tone> = {
@@ -308,8 +309,11 @@ function OrdersTab({
                         {PAYMENT_LABEL[order.paymentState]}
                       </Badge>
                     )}
-                  {order.canChooseFulfilment && (
-                    <Badge tone='ok'>Авах аргаа сонгоно уу</Badge>
+                  {order.canChooseFulfilment && leasingHoldsGoods(order) && (
+                    <Badge tone="danger">Лизингийн төлбөрөө төлөөрэй</Badge>
+                  )}
+                  {order.canChooseFulfilment && !leasingHoldsGoods(order) && (
+                    <Badge tone="ok">Авах аргаа сонгоно уу</Badge>
                   )}
                 </div>
               </Card>

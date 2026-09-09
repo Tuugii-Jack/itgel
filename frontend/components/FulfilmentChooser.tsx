@@ -10,6 +10,7 @@ import { useSession } from "@/lib/session";
 import { money } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { ITEM_FULFILMENT_LABEL, itemNeedsFulfilment } from "@/lib/fulfilment";
+import { leasingHoldsGoods } from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
 import type { PublicOrder, Store } from "@/lib/types";
 
@@ -147,10 +148,14 @@ export function FulfilmentChooser({
       const result = await api.chooseFulfilment(order.code, {
         type,
         itemIds,
-        payMethod: needsCargoPay ? "QPAY" : undefined,
-        district: district ?? undefined,
-        khoroo: khoroo || undefined,
-        address: address || undefined,
+        ...(type === "DELIVERY"
+          ? {
+              payMethod: needsCargoPay ? "QPAY" : undefined,
+              district: district ?? undefined,
+              khoroo: khoroo.trim() || undefined,
+              address: address.trim() || undefined,
+            }
+          : {}),
       });
       if (type === "DELIVERY" && session.me) {
         await api
@@ -200,6 +205,32 @@ export function FulfilmentChooser({
       setBusy(false);
     }
   };
+
+  if (leasingHoldsGoods(order)) {
+    return (
+      <div className="px-4 pb-24 pt-6 lg:px-10 lg:pb-12 lg:pt-8">
+        <div className="tnum text-[13px] text-muted">{order.code}</div>
+        <div className="mt-1 text-[24px] font-medium">Лизингийн үлдэгдэл</div>
+        <p className="mt-1 mb-5 text-[14px] leading-[1.5] text-ink-2">
+          Лизингийн данс тусдаа тул үлдэгдэл төлбөрөө эхлээд төлнө үү. Төлсний
+          дараа ирсэн бараагаа авна.
+        </p>
+        <PaymentPanel
+          order={order}
+          store={store}
+          onClaimed={() => {
+            toast.success("Төлбөр орлоо.");
+            onDone(true);
+          }}
+        />
+        <div className="mt-4">
+          <Button variant="ghost" onClick={() => onDone(false)}>
+            Буцах
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (awaitingQpay) {
     return (

@@ -49,6 +49,13 @@ export function leasingArrivalUnpaid(status: string, dueAmount: number): boolean
   return leasingGoodsArrived(status) && dueAmount > 0;
 }
 
+/** Үндсэн төлбөр дутуу бол бараа авч болохгүй — лизингийн данс тусдаа. */
+export function leasingHoldsGoods(order: LeasingPayOrder): boolean {
+  if (!order.isLeasing) return false;
+  if ((order.leasingPrincipalDue ?? 0) > 0) return true;
+  return order.nextPayKind === "FEE" || order.nextPayKind === "PRINCIPAL";
+}
+
 /** Хураангуй дээрх «одоо төлөх» дүн — лизингт нийт дүн биш. */
 export function leasingDueHeadline(order: LeasingPayOrder & {
   paidAmount?: number;
