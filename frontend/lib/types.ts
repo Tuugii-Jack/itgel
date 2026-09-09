@@ -45,6 +45,7 @@ export interface LeasingFields {
   leasingFeePaidAmount: number;
   leasingPrincipalPaid: number;
   leasingPrincipalDue: number;
+  leasingDueAmount?: number;
   nextPayAmount: number;
   nextPayKind: LeasingPayKind;
 }
@@ -619,6 +620,7 @@ export interface AdminOrderRow {
   paidAmount: number;
   refundedAmount: number;
   dueAmount: number;
+  shopDueAmount?: number;
   paymentState: PaymentState;
   isLeasing?: boolean;
   leasingFee?: number;
@@ -626,6 +628,7 @@ export interface AdminOrderRow {
   leasingFeePaidAmount?: number;
   leasingPrincipalPaid?: number;
   leasingPrincipalDue?: number;
+  leasingDueAmount?: number;
   nextPayAmount?: number;
   nextPayKind?: LeasingPayKind;
   paymentClaimedAt: string | null;
@@ -668,11 +671,14 @@ export interface HandoverCustomerItem extends OrderItem {
   orderStatus: OrderStatus;
   orderStatusLabel: string;
   dueAmount: number;
+  shopDueAmount?: number;
   storageFee: number;
   deliveryFee: number;
   paidAmount: number;
   subtotal: number;
   canPick: boolean;
+  isLeasing?: boolean;
+  leasingDueAmount?: number;
 }
 
 export interface HandoverOrderDue {
@@ -686,6 +692,9 @@ export interface HandoverOrderDue {
   cargoFee?: number;
   paidAmount: number;
   dueAmount: number;
+  isLeasing?: boolean;
+  shopDueAmount?: number;
+  leasingDueAmount?: number;
 }
 
 export interface HandoverCustomer {
@@ -698,8 +707,10 @@ export interface HandoverCustomer {
     waiting: number;
     arrived: number;
     handedOver: number;
-    /** Бүх захиалгын төлбөрийн үлдэгдлийн нийлбэр. */
+    /** Дэлгүүрийн кассанд авах нийлбэр (лизингийн үлдэгдэл орохгүй). */
     dueAmount: number;
+    shopDueAmount?: number;
+    leasingDueAmount?: number;
   };
   /** Захиалга бүрийн төлбөрийн задаргаа. */
   orders: HandoverOrderDue[];

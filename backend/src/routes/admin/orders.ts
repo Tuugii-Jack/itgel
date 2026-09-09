@@ -18,6 +18,7 @@ import {
   PAYMENT_STATE_LABEL,
   paymentState,
   confirmThreshold,
+  shopDueAmount,
 } from '../../services/money.js';
 import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
 import {
@@ -135,6 +136,7 @@ adminOrdersRouter.get(
           paidAmount: order.paidAmount,
           refundedAmount: order.refundedAmount,
           dueAmount: order.dueAmount,
+          shopDueAmount: shopDueAmount(order),
           paymentState: paymentState(computeTotals(order)),
           ...serializeLeasing(order),
           paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
@@ -653,6 +655,7 @@ export function adminOrderDetail(order: OrderDetail) {
     paidAmount: order.paidAmount,
     refundedAmount: order.refundedAmount,
     dueAmount: order.dueAmount,
+    shopDueAmount: shopDueAmount(order),
     total: totals.total,
     netPaid: totals.netPaid,
     paymentState: state,

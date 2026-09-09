@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { conflict, notFound } from '../lib/errors.js';
-import { leasingFeeOf } from '../lib/leasing.js';
+import { leasingFeeOf, leasingView } from '../lib/leasing.js';
 
 /**
  * Захиалгын мөнгөн дүнгийн цорын ганц эх сурвалж.
@@ -171,6 +171,41 @@ export function unpaidCargoFee(input: {
     netPaid - input.subtotal - (input.leasingFee ?? 0) - (input.storageFee ?? 0),
   );
   return Math.max(0, cargoFee - towardCargo);
+}
+
+type ShopDueInput = {
+  isLeasing?: boolean | null;
+  subtotal: number;
+  leasingFee?: number | null;
+  storageFee?: number | null;
+  cargoFee?: number | null;
+  paidAmount: number;
+  refundedAmount: number;
+};
+
+/**
+ * Дэлгүүрийн кассанд авах дүн.
+ * Лизингт бараа + 10% нь өөр данс тул энд зөвхөн карго/агуулах үлдэнэ.
+ * Энгийн захиалгад нийт үлдэгдэлтэй ижил (сөрөгийг 0 болгоно).
+ */
+export function shopDueAmount(input: ShopDueInput): number {
+  const storageFee = Math.max(0, input.storageFee ?? 0);
+  const cargoFee = Math.max(0, input.cargoFee ?? 0);
+  const leasingFee = Math.max(0, input.leasingFee ?? 0);
+  const netPaid = input.paidAmount - input.refundedAmount;
+  const leasing = Boolean(input.isLeasing) || leasingFee > 0;
+  if (!leasing) {
+    return Math.max(0, input.subtotal + storageFee + cargoFee - netPaid);
+  }
+  const towardShop = Math.max(0, netPaid - leasingFee - input.subtotal);
+  return Math.max(0, storageFee + cargoFee - towardShop);
+}
+
+/** Лизингийн дансны үлдэгдэл (шимтгэл + үндсэн). Дэлгүүрийн кассанд оруулахгүй. */
+export function leasingAccountDue(input: ShopDueInput): number {
+  if (!Boolean(input.isLeasing) && !(input.leasingFee ?? 0)) return 0;
+  const view = leasingView(input);
+  return view.feeDue + view.principalDue;
 }
 
 export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {

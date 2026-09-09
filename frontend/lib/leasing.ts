@@ -15,6 +15,12 @@ type LeasingPayOrder = {
   nextPayKind?: string;
   subtotal: number;
   dueAmount: number;
+  storageFee?: number;
+  cargoFee?: number;
+  paidAmount?: number;
+  refundedAmount?: number;
+  shopDueAmount?: number;
+  leasingDueAmount?: number;
 };
 
 /** Шимтгэл төлөгдөөгүй лизинг — ямагт 10%, хэзээ ч бүтэн дүн биш. */
@@ -54,6 +60,34 @@ export function leasingHoldsGoods(order: LeasingPayOrder): boolean {
   if (!order.isLeasing) return false;
   if ((order.leasingPrincipalDue ?? 0) > 0) return true;
   return order.nextPayKind === "FEE" || order.nextPayKind === "PRINCIPAL";
+}
+
+/** Лизингийн дансны үлдэгдэл (шимтгэл + үндсэн). */
+export function leasingAccountDue(order: LeasingPayOrder): number {
+  if (!order.isLeasing) return 0;
+  if (order.leasingDueAmount != null) return Math.max(0, order.leasingDueAmount);
+  const fee =
+    order.leasingFee && order.leasingFee > 0
+      ? order.leasingFee
+      : leasingFeeOf(order.subtotal);
+  const feeDue = order.leasingFeePaid ? 0 : fee;
+  return feeDue + (order.leasingPrincipalDue ?? 0);
+}
+
+/**
+ * Дэлгүүрийн кассанд авах дүн.
+ * Лизингт бараа/шимтгэл өөр данс тул зөвхөн карго+агуулах үлдэнэ.
+ */
+export function shopDueOf(order: LeasingPayOrder): number {
+  if (order.shopDueAmount != null) return Math.max(0, order.shopDueAmount);
+  if (!order.isLeasing) return Math.max(0, order.dueAmount);
+  const net = (order.paidAmount ?? 0) - (order.refundedAmount ?? 0);
+  const fee =
+    order.leasingFee && order.leasingFee > 0
+      ? order.leasingFee
+      : leasingFeeOf(order.subtotal);
+  const towardShop = Math.max(0, net - fee - order.subtotal);
+  return Math.max(0, (order.storageFee ?? 0) + (order.cargoFee ?? 0) - towardShop);
 }
 
 /** Хураангуй дээрх «одоо төлөх» дүн — лизингт нийт дүн биш. */

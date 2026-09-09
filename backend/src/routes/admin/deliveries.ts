@@ -11,6 +11,7 @@ import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { deliveryHistory } from '../../services/deliveryHistory.js';
 import { handOverItems } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
+import { shopDueAmount } from '../../services/money.js';
 
 export const adminDeliveriesRouter = Router();
 
@@ -220,11 +221,12 @@ adminDeliveriesRouter.patch(
           note: 'Хүргэлтээр хүлээлгэн өгсөн',
         });
       }
-      if (before.order.dueAmount > 0) {
+      const shopDue = shopDueAmount(before.order);
+      if (shopDue > 0) {
         await recordPayment({
           orderId: before.orderId,
           kind: 'PAYMENT',
-          amount: before.order.dueAmount,
+          amount: shopDue,
           method: 'CASH',
           note: `Хүргэлтээр авсан${after.courierName ? ` — ${after.courierName}` : before.courierName ? ` — ${before.courierName}` : ''}`,
           actor,

@@ -107,6 +107,7 @@ export function serializeLeasing(order: Parameters<typeof leasingView>[0]) {
     leasingFeePaidAmount: view.feePaidAmount,
     leasingPrincipalPaid: view.principalPaid,
     leasingPrincipalDue: view.principalDue,
+    leasingDueAmount: view.feeDue + view.principalDue,
     nextPayAmount: view.nextPayAmount,
     nextPayKind: view.nextPayKind,
   };

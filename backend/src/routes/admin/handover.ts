@@ -5,10 +5,12 @@ import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
 import { itemPickableAtStore } from '../../lib/itemFulfilment.js';
+import { leasingHoldsGoods, leasingView } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { handOverItems } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
+import { shopDueAmount } from '../../services/money.js';
 import { HANDOVER_PAY_NOTE, handoverHistory } from '../../services/handoverHistory.js';
 import { adminOrderItem, publicOrderItem } from '../../services/serialize.js';
 import { syncOrderCargoFee, syncOrdersCargoFees } from '../../services/cargoFee.js';
@@ -70,6 +72,8 @@ adminHandoverRouter.get(
         paidAmount: true,
         refundedAmount: true,
         subtotal: true,
+        isLeasing: true,
+        leasingFee: true,
       },
     });
     const fresh = { ...order, ...money };
@@ -78,21 +82,25 @@ adminHandoverRouter.get(
     const deliveryHeld = fresh.items.filter(
       (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt && i.fulfilment === 'DELIVERY',
     );
+    const leasingHeld = leasingHoldsGoods(fresh);
 
     res.json({
       data: {
         ...adminOrderDetail(fresh),
-        canHandOver: pickable.length > 0 && fresh.status !== 'CANCELLED',
+        canHandOver:
+          pickable.length > 0 && fresh.status !== 'CANCELLED' && !leasingHeld,
         blockReason:
           fresh.status === 'CANCELLED'
             ? 'Захиалга цуцлагдсан.'
             : fresh.status === 'HANDED_OVER'
               ? 'Энэ захиалгыг аль хэдийн хүлээлгэн өгсөн байна.'
-              : pickable.length === 0
-                ? deliveryHeld.length > 0
-                  ? 'Эдгээр бараа хүргэлтээр авахаар сонгогдсон.'
-                  : 'Авах боломжтой (ирсэн) бараа алга.'
-                : null,
+              : leasingHeld
+                ? 'Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.'
+                : pickable.length === 0
+                  ? deliveryHeld.length > 0
+                    ? 'Эдгээр бараа хүргэлтээр авахаар сонгогдсон.'
+                    : 'Авах боломжтой (ирсэн) бараа алга.'
+                  : null,
         pickableItemIds: pickable.map((i) => i.id),
       },
     });
@@ -157,21 +165,31 @@ adminHandoverRouter.get(
 
     res.json({
       data: refreshed.map((customer) => {
-        const orderDues = customer.orders.map((order) => ({
-          orderId: order.id,
-          code: order.code,
-          status: order.status,
-          statusLabel: ORDER_STATUS_LABEL[order.status],
-          subtotal: order.subtotal,
-          deliveryFee: order.deliveryFee,
-          storageFee: order.storageFee,
-          cargoFee: order.cargoFee,
-          paidAmount: order.paidAmount,
-          dueAmount: order.dueAmount,
-        }));
+        const orderDues = customer.orders.map((order) => {
+          const view = leasingView(order);
+          return {
+            orderId: order.id,
+            code: order.code,
+            status: order.status,
+            statusLabel: ORDER_STATUS_LABEL[order.status],
+            subtotal: order.subtotal,
+            deliveryFee: order.deliveryFee,
+            storageFee: order.storageFee,
+            cargoFee: order.cargoFee,
+            paidAmount: order.paidAmount,
+            dueAmount: order.dueAmount,
+            isLeasing: view.isLeasing,
+            shopDueAmount: shopDueAmount(order),
+            leasingDueAmount: view.feeDue + view.principalDue,
+          };
+        });
 
-        const lines = customer.orders.flatMap((order) =>
-          order.items.map((item) => {
+        const lines = customer.orders.flatMap((order) => {
+          const view = leasingView(order);
+          const shopDue = shopDueAmount(order);
+          const leasingDue = view.feeDue + view.principalDue;
+          const leasingHeld = leasingHoldsGoods(order);
+          return order.items.map((item) => {
             const pub = publicOrderItem(item);
             return {
               ...adminOrderItem(item),
@@ -180,20 +198,27 @@ adminHandoverRouter.get(
               orderStatus: order.status,
               orderStatusLabel: ORDER_STATUS_LABEL[order.status],
               dueAmount: order.dueAmount,
+              shopDueAmount: shopDue,
+              leasingDueAmount: leasingDue,
+              isLeasing: view.isLeasing,
               storageFee: order.storageFee,
               deliveryFee: order.deliveryFee,
               paidAmount: order.paidAmount,
               subtotal: order.subtotal,
-              canPick: pub.itemStatus === 'arrived' && pub.fulfilment !== 'DELIVERY',
+              canPick:
+                pub.itemStatus === 'arrived' &&
+                pub.fulfilment !== 'DELIVERY' &&
+                !leasingHeld,
             };
-          }),
-        );
+          });
+        });
 
         const active = lines.filter((l) => !l.cancelled);
         const waiting = active.filter((l) => l.itemStatus === 'waiting').length;
         const arrived = active.filter((l) => l.itemStatus === 'arrived').length;
         const handedOver = active.filter((l) => l.itemStatus === 'handed_over').length;
-        const dueAmount = orderDues.reduce((sum, o) => sum + Math.max(0, o.dueAmount), 0);
+        const dueAmount = orderDues.reduce((sum, o) => sum + o.shopDueAmount, 0);
+        const leasingDueAmount = orderDues.reduce((sum, o) => sum + o.leasingDueAmount, 0);
 
         return {
           id: customer.id,
@@ -206,6 +231,8 @@ adminHandoverRouter.get(
             arrived,
             handedOver,
             dueAmount,
+            shopDueAmount: dueAmount,
+            leasingDueAmount,
           },
           orders: orderDues,
           items: lines,
@@ -217,7 +244,8 @@ adminHandoverRouter.get(
 
 /**
  * POST /handover/partial — сонгосон мөрүүдийг хүлээлгэн өгнө.
- * dueAmount > 0 захиалгад collectedAmount бүрэн байх ёстой.
+ * Дэлгүүрийн үлдэгдэл (карго/агуулах) > 0 бол collectedAmount бүрэн байх ёстой.
+ * Лизингийн үлдэгдлийг энд авч бүртгэхгүй.
  */
 adminHandoverRouter.post(
   '/partial',
@@ -252,15 +280,29 @@ adminHandoverRouter.post(
     for (const orderId of uniqueOrderIds) {
       const order = await prisma.order.findUniqueOrThrow({
         where: { id: orderId },
-        select: { dueAmount: true },
+        select: {
+          isLeasing: true,
+          subtotal: true,
+          leasingFee: true,
+          storageFee: true,
+          cargoFee: true,
+          paidAmount: true,
+          refundedAmount: true,
+        },
       });
-      dueByOrder.set(orderId, order.dueAmount);
+      if (leasingHoldsGoods(order)) {
+        throw conflict('Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.', {
+          code: 'LEASING_BALANCE_DUE',
+          orderId,
+        });
+      }
+      dueByOrder.set(orderId, shopDueAmount(order));
     }
     const totalDue = [...dueByOrder.values()].reduce((a, b) => a + b, 0);
     if (totalDue > 0) {
       const collected = body.collectedAmount ?? 0;
       if (collected < totalDue) {
-        throw conflict(`Үлдэгдэл ${totalDue}₮ бүрэн төлөгдөөгүй байна.`, {
+        throw conflict(`Дэлгүүрийн үлдэгдэл ${totalDue}₮ бүрэн төлөгдөөгүй байна.`, {
           dueAmount: totalDue,
           collected,
         });
@@ -347,10 +389,17 @@ adminHandoverRouter.post(
       throw conflict('Авах боломжтой (ирсэн) бараа алга.');
     }
 
-    const collected = collectedAmount ?? order.dueAmount;
-    if (collected < order.dueAmount) {
-      throw conflict(`Үлдэгдэл ${order.dueAmount}₮ бүрэн төлөгдөөгүй байна.`, {
-        dueAmount: order.dueAmount,
+    if (leasingHoldsGoods(order)) {
+      throw conflict('Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.', {
+        code: 'LEASING_BALANCE_DUE',
+      });
+    }
+
+    const shopDue = shopDueAmount(order);
+    const collected = collectedAmount ?? shopDue;
+    if (shopDue > 0 && collected < shopDue) {
+      throw conflict(`Дэлгүүрийн үлдэгдэл ${shopDue}₮ бүрэн төлөгдөөгүй байна.`, {
+        dueAmount: shopDue,
         collected,
       });
     }
@@ -367,11 +416,11 @@ adminHandoverRouter.post(
     // Хэрэв бүх мөр авсан бол handOverItems аль хэдийн HANDED_OVER болгосон.
     // Хэрэв зөвхөн ирсэнүүдийг өгсөн ч захиалга бүрэн дуусаагүй бол OK.
 
-    if (collected > 0) {
+    if (shopDue > 0) {
       await recordPayment({
         orderId: order.id,
         kind: 'PAYMENT',
-        amount: collected,
+        amount: shopDue,
         method: method ?? 'CASH',
         note: note ?? HANDOVER_PAY_NOTE,
         actor,

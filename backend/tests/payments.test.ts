@@ -6,6 +6,8 @@ import {
   fullyPaid,
   isProductPaid,
   unpaidCargoFee,
+  shopDueAmount,
+  leasingAccountDue,
   type OrderTotals,
 } from '../src/services/money.js';
 import { AppError } from '../src/lib/errors.js';
@@ -168,6 +170,80 @@ describe('Карго үлдэгдэл', () => {
   it('карго байхгүй бол 0', () => {
     expect(
       unpaidCargoFee({ subtotal: 100_000, cargoFee: 0, paidAmount: 50_000, refundedAmount: 0 }),
+    ).toBe(0);
+  });
+});
+
+describe('Дэлгүүрийн кассын үлдэгдэл', () => {
+  it('энгийн захиалгад нийт үлдэгдэлтэй ижил', () => {
+    expect(
+      shopDueAmount({
+        subtotal: 100_000,
+        paidAmount: 40_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+      }),
+    ).toBe(68_000);
+  });
+
+  it('лизингт барааны үлдэгдлийг кассанд оруулахгүй', () => {
+    expect(
+      shopDueAmount({
+        isLeasing: true,
+        subtotal: 100_000,
+        leasingFee: 10_000,
+        paidAmount: 10_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+        storageFee: 3_000,
+      }),
+    ).toBe(11_000);
+    expect(
+      leasingAccountDue({
+        isLeasing: true,
+        subtotal: 100_000,
+        leasingFee: 10_000,
+        paidAmount: 10_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+        storageFee: 3_000,
+      }),
+    ).toBe(100_000);
+  });
+
+  it('лизингийн үндсэн төлөгдсөн бол зөвхөн карго/агуулах үлдэнэ', () => {
+    expect(
+      shopDueAmount({
+        isLeasing: true,
+        subtotal: 100_000,
+        leasingFee: 10_000,
+        paidAmount: 110_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+      }),
+    ).toBe(8_000);
+    expect(
+      leasingAccountDue({
+        isLeasing: true,
+        subtotal: 100_000,
+        leasingFee: 10_000,
+        paidAmount: 110_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+      }),
+    ).toBe(0);
+  });
+
+  it('лизинг бүрэн төлөгдсөн бол кассанд авах дүн 0', () => {
+    expect(
+      shopDueAmount({
+        isLeasing: true,
+        subtotal: 100_000,
+        leasingFee: 10_000,
+        paidAmount: 118_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+      }),
     ).toBe(0);
   });
 });
