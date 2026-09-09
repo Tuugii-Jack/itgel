@@ -38,6 +38,29 @@ export type PaymentState =
 
 export type LeasingPayKind = "NONE" | "FEE" | "PRINCIPAL" | "BALANCE";
 
+export type LeasingPlanStepStatus = "paid" | "due_today" | "overdue" | "upcoming";
+
+export interface LeasingPlanStep {
+  kind: "FEE" | "INSTALLMENT";
+  index: number;
+  daysFromStart: number;
+  dueDay: string;
+  amount: number;
+  paidAmount: number;
+  remaining: number;
+  status: LeasingPlanStepStatus;
+  isLast: boolean;
+}
+
+export interface LeasingPayPlan {
+  gaps: number[];
+  totalDays: number;
+  steps: LeasingPlanStep[];
+  overdue: boolean;
+  dueToday: boolean;
+  nextAmount: number;
+}
+
 export interface LeasingFields {
   isLeasing: boolean;
   leasingFee: number;
@@ -48,6 +71,7 @@ export interface LeasingFields {
   leasingDueAmount?: number;
   nextPayAmount: number;
   nextPayKind: LeasingPayKind;
+  payPlan?: LeasingPayPlan | null;
 }
 
 export type PaymentKind = "PAYMENT" | "REFUND";
@@ -422,6 +446,7 @@ export interface PublicOrder {
   leasingPrincipalDue?: number;
   nextPayAmount?: number;
   nextPayKind?: LeasingPayKind;
+  payPlan?: LeasingPayPlan | null;
   /** Хэрэглэгч "шилжүүлсэн" гэж мэдэгдсэн огноо. Төлбөр орсны баталгаа биш. */
   paymentClaimedAt: string | null;
   fulfilment: Fulfilment | null;
@@ -457,6 +482,7 @@ export interface MyOrder {
   leasingPrincipalDue?: number;
   nextPayAmount?: number;
   nextPayKind?: LeasingPayKind;
+  payPlan?: LeasingPayPlan | null;
   fulfilment: Fulfilment | null;
   canChooseFulfilment: boolean;
   itemCount: number;
@@ -520,6 +546,7 @@ export interface Store {
   storageFeePerDay: number;
   leasing?: {
     feeTiers: { minAmount: number; ratePercent: number }[];
+    payGaps?: number[];
     choiceHint: string;
     termsTitle: string;
     termsBody: string;
@@ -637,6 +664,7 @@ export interface AdminOrderRow {
   leasingDueAmount?: number;
   nextPayAmount?: number;
   nextPayKind?: LeasingPayKind;
+  payPlan?: LeasingPayPlan | null;
   paymentClaimedAt: string | null;
   profit: number;
   fulfilment: Fulfilment | null;
@@ -1014,6 +1042,7 @@ export interface Settings {
 export interface LeasingSettings {
   feeTiers: { minAmount: number; ratePercent: number }[];
   suggestedFeeTiers: { minAmount: number; ratePercent: number }[];
+  payGaps: number[];
   choiceHint: string;
   termsTitle: string;
   termsBody: string;

@@ -28,6 +28,7 @@ import { paidPayoutDaySet } from "../../services/returns.js";
 import { mailTemplates, sendMail } from "../../services/mail.js";
 import { ipLimiters, RateLimiter } from "../../lib/rateLimit.js";
 import { randomInt } from "node:crypto";
+import { currentLeasingPayGaps } from "../../services/settings.js";
 
 export const publicMeRouter = Router();
 
@@ -291,6 +292,7 @@ publicMeRouter.get(
         refundPayoutDatesFor({ items: order.items, refunds: order.payments }),
       ),
     );
+    const gaps = await currentLeasingPayGaps();
 
     res.json({
       data: orders.map((order) => {
@@ -312,7 +314,7 @@ publicMeRouter.get(
           refundedAmount: order.refundedAmount,
           dueAmount: order.dueAmount,
           paymentState: paymentState(computeTotals(order)),
-          ...serializeLeasing(order),
+          ...serializeLeasing(order, gaps),
           fulfilment: order.fulfilment,
           canChooseFulfilment: orderCanChooseFulfilment(order),
           itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),

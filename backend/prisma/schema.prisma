@@ -531,6 +531,8 @@ model Setting {
   leasingChoiceHint   String @default("")
   leasingTermsTitle   String @default("Лизингийн нөхцөл")
   leasingTermsBody    String @default("")
+  /// Үндсэн төлбөрийн хоногийн зай. Ж: [5,8,8] = 3 төлөлт, нийт 21 хоног.
+  leasingPayGaps      Json   @default("[5,8,8]")
 
   updatedAt DateTime @updatedAt
 }

@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
+import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import { Button, Card, ErrorNote, Field, Input, Spinner, Textarea } from "@/components/ui";
 import { leasingApi, ApiError } from "@/lib/api";
 import { money } from "@/lib/format";
-import { fillLeasingCopy, leasingFeeOf, leasingRatePercent } from "@/lib/leasing";
+import {
+  DEFAULT_LEASING_PAY_GAPS,
+  buildLeasingPayPlan,
+  fillLeasingCopy,
+  leasingFeeOf,
+  leasingRatePercent,
+} from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
 import type { LeasingSettings } from "@/lib/types";
 
@@ -36,6 +43,7 @@ export default function LeasingSettingsPage() {
   const [choiceHint, setChoiceHint] = useState("");
   const [termsTitle, setTermsTitle] = useState("");
   const [termsBody, setTermsBody] = useState("");
+  const [gapInputs, setGapInputs] = useState<string[]>(["5", "8", "8"]);
   const [sample, setSample] = useState("350000");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -50,6 +58,7 @@ export default function LeasingSettingsPage() {
       setChoiceHint(data.choiceHint);
       setTermsTitle(data.termsTitle);
       setTermsBody(data.termsBody);
+      setGapInputs((data.payGaps?.length ? data.payGaps : DEFAULT_LEASING_PAY_GAPS).map(String));
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
       setError(message);
@@ -64,9 +73,27 @@ export default function LeasingSettingsPage() {
   }, [load]);
 
   const previewTiers = useMemo(() => parseRows(rows), [rows]);
+  const previewGaps = useMemo(
+    () => gapInputs.map((g) => Number(g.replace(/\D/g, "")) || 0),
+    [gapInputs],
+  );
   const sampleAmount = Number(sample.replace(/\D/g, "")) || 0;
   const previewPercent = leasingRatePercent(sampleAmount, previewTiers);
   const previewFee = leasingFeeOf(sampleAmount, previewTiers);
+  const previewPlan = useMemo(
+    () =>
+      sampleAmount > 0 && previewGaps.every((n) => n >= 1)
+        ? buildLeasingPayPlan({
+            isLeasing: true,
+            subtotal: sampleAmount,
+            leasingFee: previewFee,
+            paidAmount: 0,
+            refundedAmount: 0,
+            payGaps: previewGaps,
+          })
+        : null,
+    [sampleAmount, previewFee, previewGaps],
+  );
   const previewHint = fillLeasingCopy(choiceHint, {
     percent: previewPercent,
     fee: previewFee,
@@ -84,6 +111,7 @@ export default function LeasingSettingsPage() {
     try {
       const updated = await leasingApi.updateSettings({
         feeTiers: parseRows(rows),
+        payGaps: previewGaps,
         choiceHint,
         termsTitle,
         termsBody,
@@ -93,6 +121,7 @@ export default function LeasingSettingsPage() {
       setChoiceHint(updated.choiceHint);
       setTermsTitle(updated.termsTitle);
       setTermsBody(updated.termsBody);
+      setGapInputs(updated.payGaps.map(String));
       toast.success("Лизингийн тохиргоо хадгалагдлаа.");
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
@@ -115,7 +144,7 @@ export default function LeasingSettingsPage() {
     <div className="max-w-[720px]">
       <PageHead
         title="Лизингийн тохиргоо"
-        hint="Шимтгэлийн хувь болон хэрэглэгчид харагдах нөхцөлийн бичвэр"
+        hint="Шимтгэл, үндсэн төлбөрийн хоногийн зай, хэрэглэгчид харагдах нөхцөл"
       />
 
       <div className="flex flex-col gap-4">
@@ -199,6 +228,81 @@ export default function LeasingSettingsPage() {
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div className="text-[15px] font-medium">Үндсэн төлбөрийн хуваарь</div>
+              <p className="mt-1 mb-0 text-[13px] text-ink-2">
+                Бараа 14–25 хоногт ирдэг. Үндсэн 100%-ийг 2 эсвэл 3 хувааж, хоорондын
+                хоногийн зайг энд тохируулна. Сүүлийн төлөлт бараа ирэх үетэй давхцана.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant={gapInputs.length === 2 ? "primary" : "outline"}
+                onClick={() =>
+                  setGapInputs((prev) => [prev[0] || "10", prev[1] || "11"])
+                }
+              >
+                2 хуваах
+              </Button>
+              <Button
+                size="sm"
+                variant={gapInputs.length === 3 ? "primary" : "outline"}
+                onClick={() =>
+                  setGapInputs((prev) => [
+                    prev[0] || "5",
+                    prev[1] || "8",
+                    prev[2] || "8",
+                  ])
+                }
+              >
+                3 хуваах
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setGapInputs(DEFAULT_LEASING_PAY_GAPS.map(String))}
+              >
+                5, 8, 8
+              </Button>
+            </div>
+          </div>
+          <div
+            className={`grid gap-2 ${gapInputs.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}
+          >
+            {gapInputs.map((value, index) => (
+              <Field
+                key={index}
+                label={
+                  index === gapInputs.length - 1
+                    ? `${index + 1}-р зай · бараа ирэх`
+                    : `${index + 1}-р зай (хоног)`
+                }
+              >
+                <Input
+                  value={value}
+                  onChange={(v) =>
+                    setGapInputs((prev) =>
+                      prev.map((g, i) => (i === index ? v.replace(/\D/g, "") : g)),
+                    )
+                  }
+                  inputMode="numeric"
+                  placeholder="8"
+                />
+              </Field>
+            ))}
+          </div>
+          <p className="m-0 text-[13px] text-ink-2">
+            Нийт{" "}
+            <span className="tnum font-medium text-ink">
+              {previewGaps.reduce((a, b) => a + b, 0)}
+            </span>{" "}
+            хоног · {previewGaps.filter((n) => n > 0).join(" + ") || "—"} (7–90 хоног)
+          </p>
+        </Card>
+
+        <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Хэрэглэгчид харагдах бичвэр</div>
           <p className="m-0 text-[13px] text-ink-2">
             Сагсан дээрх хувийг <span className="font-medium text-ink">{"{percent}"}</span>,
@@ -242,6 +346,7 @@ export default function LeasingSettingsPage() {
               {money(sampleAmount)} → {previewPercent}% · шимтгэл {money(previewFee)}
             </div>
           </div>
+          {previewPlan && <LeasingPaySchedule plan={previewPlan} />}
         </Card>
 
         {error && <ErrorNote>{error}</ErrorNote>}

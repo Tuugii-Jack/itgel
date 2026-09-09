@@ -19,7 +19,8 @@ import {
   type QpayAccountKind,
   type QpayInvoice,
 } from '../../services/qpay.js';
-import { leasingView, resolveInvoiceAmount } from '../../lib/leasing.js';
+import { buildLeasingPayPlan, leasingView, resolveInvoiceAmount } from '../../lib/leasing.js';
+import { currentLeasingPayGaps } from '../../services/settings.js';
 
 export const publicQpayRouter = Router();
 
@@ -150,7 +151,11 @@ publicQpayRouter.post(
 
     const leasing = leasingView(order);
     const requested = (req.body as { amount?: number } | undefined)?.amount;
-    const resolved = resolveInvoiceAmount(leasing, requested);
+    const plan = buildLeasingPayPlan({
+      ...order,
+      payGaps: await currentLeasingPayGaps(),
+    });
+    const resolved = resolveInvoiceAmount(leasing, requested, plan?.nextAmount);
     if (resolved.amount <= 0) {
       if (order.isLeasing && leasing.nextPayKind === 'PRINCIPAL') {
         throw conflict('Төлөх дүнгээ сонгоно уу.');

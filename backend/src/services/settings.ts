@@ -4,6 +4,7 @@ import {
   leasingCopyOf,
   leasingFeeOf,
   parseLeasingFeeTiers,
+  parseLeasingPayGaps,
   type LeasingFeeTier,
 } from '../lib/leasing.js';
 
@@ -71,10 +72,19 @@ export async function leasingFeeFromSettings(subtotal: number): Promise<number> 
   return leasingFeeOf(subtotal, leasingTiersOf(await getSettingsCached()));
 }
 
+export function leasingPayGapsOf(settings: Setting): number[] {
+  return parseLeasingPayGaps(settings.leasingPayGaps);
+}
+
+export async function currentLeasingPayGaps(): Promise<number[]> {
+  return leasingPayGapsOf(await getSettingsCached());
+}
+
 export function publicLeasingOf(settings: Setting) {
   const copy = leasingCopyOf(settings);
   return {
     feeTiers: leasingTiersOf(settings),
+    payGaps: leasingPayGapsOf(settings),
     choiceHint: copy.choiceHint,
     termsTitle: copy.termsTitle,
     termsBody: copy.termsBody,

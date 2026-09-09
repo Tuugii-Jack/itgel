@@ -129,18 +129,10 @@ function Pending({
 }) {
   return (
     <div className="px-4 pt-8 lg:mx-auto lg:max-w-[1000px] lg:px-10">
-      <div className="flex flex-col items-center gap-3 lg:items-start lg:gap-2">
-        {/* <div className="flex items-center gap-2 lg:gap-2.5">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#B45309" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="10" cy="10" r="8.2" />
-            <path d="M10 5.6 V10 L13.2 11.8" />
-          </svg>
-          <span className="text-[17px] text-warn lg:text-[20px]">Төлбөр хүлээгдэж байна</span>
-        </div>
-        <p className="m-0 max-w-[300px] text-center text-[15px] leading-[1.6] text-ink-2 lg:max-w-[560px] lg:text-left">
-          QPay-ээр төлнө үү. Төлбөр орсны дараа захиалга баталгаажна.
-        </p> */}
-      </div>
+      <div className="text-[20px] font-medium lg:text-[24px]">Захиалга үүслээ</div>
+      <p className="mt-1 mb-0 max-w-[560px] text-[14px] leading-[1.6] text-ink-2">
+        Төлбөрийн хураангуй, хуваарь, QPay энд байна. Төлсний дараа захиалга баталгаажна.
+      </p>
 
       <div className="mt-5 flex flex-col gap-5 lg:mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8">
         <div className="flex flex-col gap-5">
@@ -239,13 +231,17 @@ function OrderSummary({ order }: { order: PublicOrder }) {
               <span>
                 {!order.leasingFeePaid
                   ? `Одоо төлөх (${formatLeasingPercent(leasingFeePercentOf(order.leasingFee ?? 0, order.subtotal))}%)`
-                  : "Үлдэгдэл — хувааж төлнө"}
+                  : order.payPlan?.overdue
+                    ? "Хоцорсон төлөлт"
+                    : order.payPlan?.dueToday
+                      ? "Өнөөдөр төлөх"
+                      : "Дараагийн төлөлт"}
               </span>
               <span>
                 {money(
                   !order.leasingFeePaid
                     ? (order.leasingFee ?? 0)
-                    : (order.leasingPrincipalDue ?? order.dueAmount),
+                    : (order.payPlan?.nextAmount ?? order.nextPayAmount ?? order.leasingPrincipalDue ?? order.dueAmount),
                 )}
               </span>
             </div>

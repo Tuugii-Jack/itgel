@@ -22,7 +22,8 @@ import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { downloadOrdersExcel, printOrders, type OrderExportSelection } from "@/lib/orderExport";
 import { PAYMENT_TONE } from "@/lib/payment";
-import { leasingGoodsArrived, leasingPercentTag } from "@/lib/leasing";
+import { leasingGoodsArrived, leasingPercentTag, leasingScheduleAlert } from "@/lib/leasing";
+import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import { useToast } from "@/lib/toast";
 import type {
   AdminOrderDetail,
@@ -531,6 +532,19 @@ export function OrderDetail({
                 />
                 <SumRow label="Төлсөн дүн" value={money(order.paidAmount)} />
                 <SumRow label="Үлдэгдэл" value={money(Math.max(0, order.dueAmount))} />
+                {leasingScheduleAlert(order.payPlan) === "overdue" && (
+                  <div className="rounded-[8px] border border-danger bg-danger-bg px-3 py-2 text-[13px] text-danger">
+                    Хуваарьт төлөлт хоцорсон — өнөөдөр төлөгдөөгүй.
+                  </div>
+                )}
+                {leasingScheduleAlert(order.payPlan) === "due_today" && (
+                  <div className="rounded-[8px] border border-warn bg-warn-bg px-3 py-2 text-[13px] text-warn">
+                    Өнөөдрийн хуваарьт төлөлт төлөгдөөгүй байна.
+                  </div>
+                )}
+                {order.payPlan && (
+                  <LeasingPaySchedule plan={order.payPlan} compact />
+                )}
                 <div className="flex items-baseline justify-between gap-2 text-[14px]">
                   <span className="text-ink-2">Төлөлтийн статус</span>
                   <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
@@ -578,11 +592,9 @@ export function OrderDetail({
           {canWritePayments && totals.dueAmount > 0 && (
             <RecordPayment
               suggested={
-                order.isLeasing && !order.leasingFeePaid
-                  ? (order.leasingFee ?? totals.dueAmount)
-                  : order.isLeasing && (order.leasingPrincipalDue ?? 0) > 0
-                    ? (order.leasingPrincipalDue ?? totals.dueAmount)
-                    : totals.dueAmount
+                order.isLeasing && (order.nextPayAmount ?? 0) > 0
+                  ? (order.nextPayAmount ?? totals.dueAmount)
+                  : totals.dueAmount
               }
               disabled={busy}
               loading={busyKey === "payment"}

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { profitOf } from '../../lib/money.js';
-import { serializeLeasing, leasingGoodsWhere } from '../../lib/leasing.js';
+import { serializeLeasing, leasingGoodsWhere, buildLeasingPayPlan } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { adminPaymentsRouter } from '../admin/payments.js';
@@ -20,6 +20,7 @@ import {
 import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { syncOrderStorageFee } from '../../services/storageFee.js';
+import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
 
 export const leasingOrdersRouter = Router();
 
@@ -63,7 +64,15 @@ const listQuery = z.object({
   q: z.string().trim().min(1).max(60).optional(),
   deleted: z.coerce.boolean().optional(),
   goods: z
-    .enum(['all', 'arrived', 'not_arrived', 'arrived_unpaid', 'arrived_paid'])
+    .enum([
+      'all',
+      'arrived',
+      'not_arrived',
+      'arrived_unpaid',
+      'arrived_paid',
+      'pay_due_today',
+      'pay_overdue',
+    ])
     .optional()
     .default('arrived_unpaid'),
   page: z.coerce.number().int().min(1).default(1),
@@ -76,7 +85,8 @@ leasingOrdersRouter.get(
     const where: Prisma.OrderWhereInput = { isLeasing: true, deletedAt: null };
     const arrived = leasingGoodsWhere('arrived') as Prisma.OrderWhereInput;
     const notArrived = leasingGoodsWhere('not_arrived') as Prisma.OrderWhereInput;
-    const [total, notArrivedCount, arrivedUnpaid, arrivedPaid] = await Promise.all([
+    const gaps = leasingPayGapsOf(await getSettingsCached());
+    const [total, notArrivedCount, arrivedUnpaid, arrivedPaid, open] = await Promise.all([
       prisma.order.count({ where }),
       prisma.order.count({ where: { ...where, ...notArrived } }),
       prisma.order.count({
@@ -85,13 +95,33 @@ leasingOrdersRouter.get(
       prisma.order.count({
         where: { ...where, ...arrived, dueAmount: { lte: 0 } },
       }),
+      prisma.order.findMany({
+        where: { ...where, status: { not: 'CANCELLED' }, dueAmount: { gt: 0 } },
+        select: {
+          createdAt: true,
+          subtotal: true,
+          leasingFee: true,
+          paidAmount: true,
+          refundedAmount: true,
+          isLeasing: true,
+        },
+      }),
     ]);
+    let payDueToday = 0;
+    let payOverdue = 0;
+    for (const order of open) {
+      const plan = buildLeasingPayPlan({ ...order, payGaps: gaps });
+      if (plan?.dueToday) payDueToday += 1;
+      if (plan?.overdue) payOverdue += 1;
+    }
     res.json({
       data: {
         total,
         notArrived: notArrivedCount,
         arrivedUnpaid,
         arrivedPaid,
+        payDueToday,
+        payOverdue,
       },
     });
   }),
@@ -102,11 +132,17 @@ leasingOrdersRouter.get(
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
+    const gaps = leasingPayGapsOf(await getSettingsCached());
+    const scheduleFilter = q.goods === 'pay_due_today' || q.goods === 'pay_overdue';
 
     const where: Prisma.OrderWhereInput = {
       isLeasing: true,
       deletedAt: q.deleted ? { not: null } : null,
-      ...(leasingGoodsWhere(q.goods) as Prisma.OrderWhereInput),
+      ...(scheduleFilter
+        ? { status: { not: 'CANCELLED' }, dueAmount: { gt: 0 } }
+        : (leasingGoodsWhere(
+            q.goods as 'all' | 'arrived' | 'not_arrived' | 'arrived_unpaid' | 'arrived_paid',
+          ) as Prisma.OrderWhereInput)),
       ...(q.q
         ? {
             OR: [
@@ -119,22 +155,30 @@ leasingOrdersRouter.get(
         : {}),
     };
 
-    const [total, orders] = await Promise.all([
-      prisma.order.count({ where }),
-      prisma.order.findMany({
-        where,
-        orderBy: q.deleted ? { deletedAt: 'desc' } : { createdAt: 'desc' },
-        skip: (q.page - 1) * q.pageSize,
-        take: q.pageSize,
-        include: {
-          customer: { select: { id: true, name: true, phone: true, email: true } },
-          items: {
-            select: { qty: true, unitPrice: true, costPriceSnapshot: true, cancelledAt: true },
-          },
-          batch: true,
-        },
-      }),
-    ]);
+    const include = {
+      customer: { select: { id: true, name: true, phone: true, email: true } },
+      items: {
+        select: { qty: true, unitPrice: true, costPriceSnapshot: true, cancelledAt: true },
+      },
+      batch: true,
+    } as const;
+
+    let orders = await prisma.order.findMany({
+      where,
+      orderBy: q.deleted ? { deletedAt: 'desc' } : { createdAt: 'desc' },
+      include,
+      ...(scheduleFilter ? {} : { skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
+    });
+    let total = scheduleFilter ? orders.length : await prisma.order.count({ where });
+    if (scheduleFilter) {
+      orders = orders.filter((order) => {
+        const plan = buildLeasingPayPlan({ ...order, payGaps: gaps });
+        if (q.goods === 'pay_due_today') return Boolean(plan?.dueToday);
+        return Boolean(plan?.overdue);
+      });
+      total = orders.length;
+      orders = orders.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
+    }
 
     res.json({
       data: orders.map((order) => ({
@@ -159,7 +203,7 @@ leasingOrdersRouter.get(
         refundedAmount: order.refundedAmount,
         dueAmount: order.dueAmount,
         paymentState: paymentState(computeTotals(order)),
-        ...serializeLeasing(order),
+        ...serializeLeasing(order, gaps),
         paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         profit: profitOf(order.items.filter((i) => i.cancelledAt === null)),
         fulfilment: order.fulfilment,
@@ -190,8 +234,9 @@ leasingOrdersRouter.get(
       },
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
+    const gaps = leasingPayGapsOf(await getSettingsCached());
 
-    res.json({ data: { ...adminOrderDetail(order), timeline: buildTimeline(order) } });
+    res.json({ data: { ...adminOrderDetail(order, gaps), timeline: buildTimeline(order) } });
   }),
 );
 
@@ -242,7 +287,9 @@ leasingOrdersRouter.patch(
       },
     });
 
-    res.json({ data: adminOrderDetail(order) });
+    res.json({
+      data: adminOrderDetail(order, leasingPayGapsOf(await getSettingsCached())),
+    });
   }),
 );
 
@@ -272,7 +319,9 @@ leasingOrdersRouter.post(
       },
     });
 
-    res.json({ data: adminOrderDetail(order) });
+    res.json({
+      data: adminOrderDetail(order, leasingPayGapsOf(await getSettingsCached())),
+    });
   }),
 );
 

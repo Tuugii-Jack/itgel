@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PayMethodChoice } from "@/components/PayMethodChoice";
+import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import { Qr } from "@/components/Qr";
 import { Button, Card, Divider, Input } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
@@ -66,7 +67,7 @@ export function PaymentPanel({
 
   return (
     <Card className="w-full p-4">
-      <div className="text-[15px] font-medium">Төлбөр хүлээгдэж байна</div>
+      <div className="text-[15px] font-medium">Төлбөрийн хураангуй</div>
 
       {unpaid ? (
         <>
@@ -90,6 +91,8 @@ export function PaymentPanel({
               disabled={switching}
               subtotal={order.subtotal}
               feeTiers={store.leasing?.feeTiers}
+              payGaps={store.leasing?.payGaps}
+              payPlan={order.isLeasing ? order.payPlan : null}
               choiceHint={store.leasing?.choiceHint}
               termsTitle={store.leasing?.termsTitle}
               termsBody={store.leasing?.termsBody}
@@ -97,7 +100,7 @@ export function PaymentPanel({
           </div>
           <p className="mt-3 mb-0 text-[13px] leading-[1.6] text-ink-2">
             {leasing
-              ? "Эхлээд лизингийн шимтгэлийг лизингийн QPay-ээр төлнө. Төлсний дараа захиалга үргэлжилнэ."
+              ? "Эхлээд лизингийн шимтгэлийг лизингийн QPay-ээр төлнө. Үндсэн төлбөрийг хуваарьтай төлнө."
               : "Төлбөрийг QPay-ээр төлнө. Төлсний дараа захиалга баталгаажна."}
           </p>
         </>
@@ -106,7 +109,7 @@ export function PaymentPanel({
           <p className="mt-1 mb-0 text-[13px] leading-[1.5] text-ink-2">
             {leasingPaid
               ? isLeasingSplitPay(order)
-                ? "Үндсэн төлбөрөө хүссэн дүнгээрээ хувааж төлнө үү."
+                ? "Хуваарьт төлөлтөө төлнө үү. Сүүлийн төлөлт бараа ирэх үетэй давхцана."
                 : "Үлдэгдлийг лизингийн QPay-ээр төлнө үү."
               : "Үлдэгдлийг QPay-ээр төлнө үү."}
           </p>
@@ -127,6 +130,11 @@ export function PaymentPanel({
                 <Row label="Карго" value={money(order.cargoFee)} />
               )}
               <Row label="Нийт үлдэгдэл" value={money(order.dueAmount)} big />
+            </div>
+          )}
+          {order.isLeasing && order.payPlan && (
+            <div className="mt-3">
+              <LeasingPaySchedule plan={order.payPlan} />
             </div>
           )}
         </>
@@ -172,11 +180,14 @@ function QpayPay({
     order.isLeasing && (order.nextPayKind === "FEE" || !order.leasingFeePaid),
   );
   const splitPay = isLeasingSplitPay(order);
-  const maxSplit = leasingNowPayAmount(order);
+  const maxSplit = order.leasingPrincipalDue ?? order.dueAmount;
+  const suggestedSplit = order.payPlan?.nextAmount ?? order.nextPayAmount ?? 0;
   const feePercent = formatLeasingPercent(
     leasingFeePercentOf(order.leasingFee ?? 0, order.subtotal),
   );
-  const [splitAmount, setSplitAmount] = useState("");
+  const [splitAmount, setSplitAmount] = useState(
+    suggestedSplit > 0 ? String(suggestedSplit) : "",
+  );
   const chosenSplit = Number(splitAmount.replace(/\D/g, "")) || 0;
   const payAmount = feeFirst
     ? leasingNowPayAmount(order)
@@ -188,7 +199,7 @@ function QpayPay({
     : splitPay
       ? "Энэ удаагийн төлөлт"
       : "Төлөх дүн";
-  const presets = splitPresets(maxSplit);
+  const presets = splitPresets(maxSplit, suggestedSplit);
 
   const loadInvoice = async (amount?: number) => {
     setBusy(true);
@@ -214,16 +225,19 @@ function QpayPay({
   useEffect(() => {
     if (!ready) return;
     setInvoice(null);
-    if (splitPay) return;
+    if (splitPay) {
+      const next = suggestedSplit > 0 ? suggestedSplit : 0;
+      if (next > 0) void loadInvoice(next);
+      return;
+    }
     void loadInvoice(feeFirst ? leasingNowPayAmount(order) : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, order.code, order.nextPayKind, order.leasingFeePaid, splitPay]);
+  }, [ready, order.code, order.nextPayKind, order.leasingFeePaid, splitPay, suggestedSplit]);
 
   useEffect(() => {
     if (!splitPay) return;
-    setSplitAmount("");
-    setInvoice(null);
-  }, [order.code, splitPay, order.leasingPrincipalDue]);
+    setSplitAmount(suggestedSplit > 0 ? String(suggestedSplit) : "");
+  }, [order.code, splitPay, suggestedSplit]);
 
   const verifyPaid = async () => {
     setChecking(true);
@@ -290,7 +304,9 @@ function QpayPay({
       {splitPay && (
         <>
           <div>
-            <div className="mb-2 text-[13px] text-ink-2">Энэ удаа хэдэн төгрөг төлнө вэ?</div>
+            <div className="mb-2 text-[13px] text-ink-2">
+              Хуваарьт дүн {money(suggestedSplit || maxSplit)}. Хүсвэл өөр дүн оруулж болно.
+            </div>
             <div className="mb-2 flex flex-wrap gap-2">
               {presets.map((n) => (
                 <button
@@ -306,7 +322,7 @@ function QpayPay({
                       : "border-line bg-bg text-ink"
                   }`}
                 >
-                  {n === maxSplit ? "Бүгд" : money(n)}
+                  {n === maxSplit ? "Бүгд" : n === suggestedSplit && n !== maxSplit ? "Хуваарь" : money(n)}
                 </button>
               ))}
             </div>
@@ -440,10 +456,11 @@ function QpayPay({
   );
 }
 
-function splitPresets(max: number): number[] {
+function splitPresets(max: number, scheduled = 0): number[] {
   if (max <= 1) return max > 0 ? [max] : [];
+  const extra = scheduled > 0 && scheduled < max ? [scheduled] : [];
   const raw = [0.25, 0.5, 1].map((p) => Math.max(1, Math.round(max * p)));
-  return [...new Set(raw.filter((n) => n <= max))];
+  return [...new Set([...extra, ...raw.filter((n) => n <= max)])];
 }
 
 function BankLogo({ name, logo }: { name: string; logo: string | null }) {

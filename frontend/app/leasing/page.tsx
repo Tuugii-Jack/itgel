@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   LeasingBadge,
   LeasingGoodsBadge,
+  LeasingPayBadge,
   Metric,
   PageHead,
   Table,
@@ -19,7 +20,13 @@ import type { AdminOrderRow } from "@/lib/types";
 
 const PAGE_SIZE = 100;
 
-type GoodsFilter = "arrived_unpaid" | "arrived" | "not_arrived" | "all";
+type GoodsFilter =
+  | "arrived_unpaid"
+  | "arrived"
+  | "not_arrived"
+  | "all"
+  | "pay_due_today"
+  | "pay_overdue";
 
 export default function LeasingOrdersPage() {
   const [summary, setSummary] = useState<{
@@ -27,6 +34,8 @@ export default function LeasingOrdersPage() {
     notArrived: number;
     arrivedUnpaid: number;
     arrivedPaid: number;
+    payDueToday: number;
+    payOverdue: number;
   } | null>(null);
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [pageMeta, setPageMeta] = useState({ page: 1, pages: 1, total: 0 });
@@ -113,17 +122,39 @@ export default function LeasingOrdersPage() {
         ? "Ирсэн бараатай захиалга алга."
         : goods === "not_arrived"
           ? "Ирээгүй захиалга алга."
-          : "Лизинг захиалга олдсонгүй.";
+          : goods === "pay_due_today"
+            ? "Өнөөдөр төлөгдөх хуваарь алга."
+            : goods === "pay_overdue"
+              ? "Хоцорсон хуваарь алга."
+              : "Лизинг захиалга олдсонгүй.";
 
   return (
     <div>
       <PageHead
         title="Лизинг захиалга"
-        hint="Бараа ирсэн эсэхээр ялгана. Ирсэн ч мөнгө дутуу бол улаан."
+        hint="Өнөөдрийн хуваарь болон хоцорсон төлөлтийг эндээс хар. Бараа ирсэн эсэхээр ч шүүнэ."
       />
 
       {summary && (
-        <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+          <button type="button" className="text-left" onClick={() => setGoods("pay_due_today")}>
+            <div className={goods === "pay_due_today" ? "rounded-[12px] ring-2 ring-ink" : ""}>
+              <Metric
+                label="Өнөөдөр төлөгдөөгүй"
+                value={String(summary.payDueToday ?? 0)}
+                tone="warn"
+              />
+            </div>
+          </button>
+          <button type="button" className="text-left" onClick={() => setGoods("pay_overdue")}>
+            <div className={goods === "pay_overdue" ? "rounded-[12px] ring-2 ring-ink" : ""}>
+              <Metric
+                label="Хуваарь хоцорсон"
+                value={String(summary.payOverdue ?? 0)}
+                tone="danger"
+              />
+            </div>
+          </button>
           <button type="button" className="text-left" onClick={() => setGoods("arrived_unpaid")}>
             <div className={goods === "arrived_unpaid" ? "rounded-[12px] ring-2 ring-ink" : ""}>
               <Metric
@@ -191,8 +222,21 @@ export default function LeasingOrdersPage() {
               <tbody>
                 {orders.map((order) => {
                   const unpaidArrived = leasingArrivalUnpaid(order.status, order.dueAmount);
+                  const overdue = Boolean(order.payPlan?.overdue);
+                  const dueToday = Boolean(order.payPlan?.dueToday);
                   return (
-                    <tr key={order.id} className={unpaidArrived ? "bg-danger-bg" : undefined}>
+                    <tr
+                      key={order.id}
+                      className={
+                        overdue
+                          ? "bg-danger-bg"
+                          : dueToday
+                            ? "bg-warn-bg"
+                            : unpaidArrived
+                              ? "bg-danger-bg"
+                              : undefined
+                      }
+                    >
                       <Td className="whitespace-nowrap">
                         <button
                           type="button"
@@ -201,8 +245,9 @@ export default function LeasingOrdersPage() {
                         >
                           {order.code}
                         </button>
-                        <div className="mt-1">
+                        <div className="mt-1 flex flex-wrap gap-1">
                           <LeasingBadge />
+                          <LeasingPayBadge overdue={overdue} dueToday={dueToday} />
                         </div>
                       </Td>
                       <Td>
@@ -245,10 +290,20 @@ export default function LeasingOrdersPage() {
           <div className="flex flex-col gap-3 md:hidden">
             {orders.map((order) => {
               const unpaidArrived = leasingArrivalUnpaid(order.status, order.dueAmount);
+              const overdue = Boolean(order.payPlan?.overdue);
+              const dueToday = Boolean(order.payPlan?.dueToday);
               return (
                 <Card
                   key={order.id}
-                  className={`p-4 ${unpaidArrived ? "border-danger bg-danger-bg" : ""}`}
+                  className={`p-4 ${
+                    overdue
+                      ? "border-danger bg-danger-bg"
+                      : dueToday
+                        ? "border-warn bg-warn-bg"
+                        : unpaidArrived
+                          ? "border-danger bg-danger-bg"
+                          : ""
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <button
@@ -261,8 +316,9 @@ export default function LeasingOrdersPage() {
                     <LeasingGoodsBadge status={order.status} dueAmount={order.dueAmount} />
                   </div>
                   <div className="mt-2 text-[14px]">{order.customer.name ?? "Нэргүй"}</div>
-                  <div className="mt-2">
+                  <div className="mt-2 flex flex-wrap gap-1">
                     <LeasingBadge />
+                    <LeasingPayBadge overdue={overdue} dueToday={dueToday} />
                   </div>
                   <div
                     className={`mt-2 tnum text-[13px] ${unpaidArrived ? "text-danger" : "text-ink-2"}`}

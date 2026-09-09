@@ -6,6 +6,7 @@ import { audit } from '../../lib/audit.js';
 import {
   SUGGESTED_LEASING_FEE_TIERS,
   assertLeasingFeeTiers,
+  assertLeasingPayGaps,
   leasingCopyOf,
 } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
@@ -13,6 +14,7 @@ import { asyncHandler, validate } from '../../middleware/validate.js';
 import {
   getSettings,
   invalidateSettingsCache,
+  leasingPayGapsOf,
   leasingTiersOf,
 } from '../../services/settings.js';
 
@@ -25,6 +27,7 @@ const tierBody = z.object({
 
 const patchBody = z.object({
   feeTiers: z.array(tierBody).min(1).max(12).optional(),
+  payGaps: z.array(z.coerce.number().int().min(1).max(60)).min(2).max(3).optional(),
   choiceHint: z.string().max(400).optional(),
   termsTitle: z.string().max(80).optional(),
   termsBody: z.string().max(2000).optional(),
@@ -35,6 +38,7 @@ function serializeLeasingSettings(settings: Awaited<ReturnType<typeof getSetting
   return {
     feeTiers: leasingTiersOf(settings),
     suggestedFeeTiers: SUGGESTED_LEASING_FEE_TIERS,
+    payGaps: leasingPayGapsOf(settings),
     choiceHint: copy.choiceHint,
     termsTitle: copy.termsTitle,
     termsBody: copy.termsBody,
@@ -56,11 +60,13 @@ leasingSettingsRouter.patch(
     const body = req.body as z.infer<typeof patchBody>;
     const before = await getSettings();
     const feeTiers = body.feeTiers ? assertLeasingFeeTiers(body.feeTiers) : undefined;
+    const payGaps = body.payGaps ? assertLeasingPayGaps(body.payGaps) : undefined;
 
     const after = await prisma.setting.update({
       where: { id: 1 },
       data: {
         ...(feeTiers ? { leasingFeeTiers: feeTiers as unknown as Prisma.InputJsonValue } : {}),
+        ...(payGaps ? { leasingPayGaps: payGaps as unknown as Prisma.InputJsonValue } : {}),
         ...(body.choiceHint != null ? { leasingChoiceHint: body.choiceHint.trim() } : {}),
         ...(body.termsTitle != null ? { leasingTermsTitle: body.termsTitle.trim() } : {}),
         ...(body.termsBody != null ? { leasingTermsBody: body.termsBody.trim() } : {}),

@@ -29,6 +29,7 @@ import {
 } from '../../services/serialize.js';
 import { syncOrderStorageFee } from '../../services/storageFee.js';
 import { listOrdersByProduct, ordersByProductDates } from '../../services/ordersByProduct.js';
+import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
 
 export const adminOrdersRouter = Router();
 
@@ -84,7 +85,7 @@ adminOrdersRouter.get(
         : {}),
     };
 
-    const [total, orders] = await Promise.all([
+    const [total, orders, settings] = await Promise.all([
       prisma.order.count({ where }),
       prisma.order.findMany({
         where,
@@ -99,7 +100,9 @@ adminOrdersRouter.get(
           batch: true,
         },
       }),
+      getSettingsCached(),
     ]);
+    const gaps = leasingPayGapsOf(settings);
 
     // Агуулахын хураамж — жагсаалт дээр sync хийхгүй (N+1 удаашрал).
     // Cron + захиалга/хүлээлгэн өгөх нээхэд шинэчлэгдэнэ.
@@ -138,7 +141,7 @@ adminOrdersRouter.get(
           dueAmount: order.dueAmount,
           shopDueAmount: shopDueAmount(order),
           paymentState: paymentState(computeTotals(order)),
-          ...serializeLeasing(order),
+          ...serializeLeasing(order, gaps),
           paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
           profit: profitOf(order.items.filter((i) => i.cancelledAt === null)),
           fulfilment: order.fulfilment,
@@ -217,8 +220,9 @@ adminOrdersRouter.get(
       ? ids.map((id) => byId.get(id)).filter((o): o is (typeof orders)[number] => Boolean(o))
       : orders;
 
+    const gaps = leasingPayGapsOf(await getSettingsCached());
     res.json({
-      data: sorted.map((order) => adminOrderDetail(order)),
+      data: sorted.map((order) => adminOrderDetail(order, gaps)),
       meta: { total: sorted.length, limit: q.limit },
     });
   }),
@@ -421,7 +425,9 @@ adminOrdersRouter.post(
       },
     });
 
-    res.status(201).json({ data: adminOrderDetail(full) });
+    res.status(201).json({
+      data: adminOrderDetail(full, leasingPayGapsOf(await getSettingsCached())),
+    });
   }),
 );
 
@@ -443,7 +449,9 @@ adminOrdersRouter.get(
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
-    res.json({ data: adminOrderDetail(order) });
+    res.json({
+      data: adminOrderDetail(order, leasingPayGapsOf(await getSettingsCached())),
+    });
   }),
 );
 
@@ -500,7 +508,9 @@ adminOrdersRouter.patch(
       },
     });
 
-    res.json({ data: adminOrderDetail(order) });
+    res.json({
+      data: adminOrderDetail(order, leasingPayGapsOf(await getSettingsCached())),
+    });
   }),
 );
 
@@ -537,7 +547,9 @@ adminOrdersRouter.post(
       },
     });
 
-    res.json({ data: adminOrderDetail(order) });
+    res.json({
+      data: adminOrderDetail(order, leasingPayGapsOf(await getSettingsCached())),
+    });
   }),
 );
 
@@ -629,7 +641,7 @@ type OrderDetail = Prisma.OrderGetPayload<{
   };
 }>;
 
-export function adminOrderDetail(order: OrderDetail) {
+export function adminOrderDetail(order: OrderDetail, payGaps?: number[] | null) {
   // Цуцлагдсан мөр ашгийн тооцоонд ордоггүй.
   const activeItems = order.items.filter((i) => i.cancelledAt === null);
   const totals = computeTotals(order);
@@ -660,7 +672,7 @@ export function adminOrderDetail(order: OrderDetail) {
     netPaid: totals.netPaid,
     paymentState: state,
     paymentStateLabel: PAYMENT_STATE_LABEL[state],
-    ...serializeLeasing(order),
+    ...serializeLeasing(order, payGaps),
     paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
     qpayInvoiceId: order.qpayInvoiceId,
     qpayInvoiceAt: order.qpayInvoiceAt?.toISOString() ?? null,

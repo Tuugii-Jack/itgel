@@ -8,6 +8,7 @@ import { toIso } from '../../lib/date.js';
 import { serializeLeasing } from '../../lib/leasing.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { orderStatusLabel, publicOrderItem } from '../../services/serialize.js';
+import { currentLeasingPayGaps } from '../../services/settings.js';
 
 export const leasingCustomersRouter = Router();
 
@@ -146,6 +147,7 @@ leasingCustomersRouter.get(
     if (!customer) throw notFound('Хэрэглэгч олдсонгүй.');
 
     const active = customer.orders.filter((o) => o.status !== 'CANCELLED');
+    const gaps = await currentLeasingPayGaps();
 
     res.json({
       data: {
@@ -165,7 +167,7 @@ leasingCustomersRouter.get(
           subtotal: order.subtotal,
           dueAmount: order.dueAmount,
           fulfilment: order.fulfilment,
-          ...serializeLeasing(order),
+          ...serializeLeasing(order, gaps),
           items: order.items.map((item) => publicOrderItem(item)),
           createdAt: order.createdAt.toISOString(),
         })),

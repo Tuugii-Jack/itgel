@@ -19,7 +19,7 @@ import { useCart, type CartLine } from "@/lib/cart";
 import { useSession } from "@/lib/session";
 import { money, relativeDay } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
-import { leasingFeeCaption, leasingFeeOf } from "@/lib/leasing";
+import { leasingFeeOf } from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
 import type { Store } from "@/lib/types";
 
@@ -128,7 +128,6 @@ export default function CartPage() {
     .reduce((sum, l) => sum + l.price * l.qty, 0);
   const readyTotal = cart.subtotal - orderTotal;
   const fee = leasing ? leasingFeeOf(cart.subtotal, store?.leasing?.feeTiers) : 0;
-  const firstPay = leasing ? fee : cart.subtotal;
 
   return (
     <div className='screen flex flex-col pb-28 lg:pb-12'>
@@ -246,51 +245,39 @@ export default function CartPage() {
           </div>
         </div>
 
-        {/* Төлбөрийн хураангуй — laptop дээр баруун талд наалдана */}
+        {/* Сагс — нийт ба төлбөрийн хэлбэр. Хураангуй захиалсны дараа. */}
         <div className='px-4 pb-6 pt-6 lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-4 lg:rounded-[12px] lg:border lg:border-line lg:p-6'>
-          <div className='mb-3 text-[15px] font-medium lg:mb-0 lg:text-[17px]'>
-            Төлбөрийн хураангуй
-          </div>
           <div className='tnum flex flex-col gap-2.5 text-[14px]'>
-            {orderTotal > 0 && (
-              <SumRow label='Захиалгын бараа' value={money(orderTotal)} />
-            )}
-            {readyTotal > 0 && (
-              <SumRow label='Бэлэн бараа' value={money(readyTotal)} />
-            )}
-            <div className='h-px bg-line' />
-            {leasing ? (
+            {orderTotal > 0 && readyTotal > 0 && (
               <>
-                <SumRow label='Барааны үнэ' value={money(cart.subtotal)} />
-                <SumRow label={leasingFeeCaption(fee, cart.subtotal)} value={money(fee)} />
+                <SumRow label='Захиалгын бараа' value={money(orderTotal)} />
+                <SumRow label='Бэлэн бараа' value={money(readyTotal)} />
                 <div className='h-px bg-line' />
-                <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
-                  <span>Эхний төлөлт</span>
-                  <span>{money(firstPay)}</span>
-                </div>
-                <SumRow label='Дараа төлнө (үндсэн)' value={money(cart.subtotal)} />
               </>
-            ) : (
-              <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
-                <span>Одоо төлөх</span>
-                <span>{money(cart.subtotal)}</span>
-              </div>
+            )}
+            <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
+              <span>Нийт</span>
+              <span>{money(cart.subtotal)}</span>
+            </div>
+            {leasing && fee > 0 && (
+              <p className='m-0 text-[13px] font-normal leading-[1.5] text-ink-2'>
+                Лизингээр захиалбал эхлээд шимтгэл {money(fee)}. Хуваарийг дараагийн
+                дэлгэцэн дээр харна.
+              </p>
             )}
           </div>
 
           <div className='mt-4'>
             <PayMethodChoice
+              compact
               leasing={leasing}
               onChange={setLeasing}
               subtotal={cart.subtotal}
               feeTiers={store?.leasing?.feeTiers}
               choiceHint={store?.leasing?.choiceHint}
-              termsTitle={store?.leasing?.termsTitle}
-              termsBody={store?.leasing?.termsBody}
             />
           </div>
 
-          {/* Laptop дээр товч хураангуйн дотор — тогтмол доод мөр хэрэггүй. */}
           <div className='hidden lg:block'>
             <Button
               full
@@ -302,12 +289,6 @@ export default function CartPage() {
               Захиалах
             </Button>
           </div>
-
-          <p className='mt-4 mb-0 text-[13px] leading-[1.6] text-ink-2 lg:mt-0'>
-            {leasing
-              ? "Эхлээд лизингийн шимтгэлийг QPay-ээр төлнө. Төлсний дараа захиалга үргэлжилнэ."
-              : "Төлбөрийг QPay-ээр төлнө. Төлсний дараа захиалга баталгаажна."}
-          </p>
         </div>
       </div>
 

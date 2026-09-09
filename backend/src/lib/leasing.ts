@@ -1,4 +1,5 @@
 import { badRequest, forbidden } from './errors.js';
+import { addDays, diffUbDays, startOfUbDay, ubDateString } from './date.js';
 
 /**
  * Лизингийн төлбөр — үнийн шатлалаар шимтгэл + үндсэн 100%.
@@ -28,10 +29,13 @@ export const SUGGESTED_LEASING_FEE_TIERS: LeasingFeeTier[] = [
 ];
 
 export const DEFAULT_LEASING_CHOICE_HINT =
-  'Эхлээд {percent}% шимтгэл, дараа нь үндсэн 100%-ийг хувааж төлнө.';
+  'Эхлээд {percent}% шимтгэл, дараа нь үндсэн 100%-ийг хуваарьтай төлнө.';
 export const DEFAULT_LEASING_TERMS_TITLE = 'Лизингийн нөхцөл';
 export const DEFAULT_LEASING_TERMS_BODY =
-  'Эхний төлөлт нь барааны үнийн {percent}% — лизингийн шимтгэл. Шимтгэл төлөгдсөний дараа барааны үндсэн 100%-ийг нэг удаа эсвэл хувааж төлнө. Шимтгэл нь барааны үнээс тусдаа.';
+  'Эхний төлөлт нь барааны үнийн {percent}% — лизингийн шимтгэл. Шимтгэл төлөгдсөний дараа барааны үндсэн 100%-ийг хуваарьтай төлнө. Сүүлийн төлөлт бараа ирэх үетэй давхцана. Шимтгэл нь барааны үнээс тусдаа.';
+
+/** Үндсэн төлбөрийг 2–3 хуваах хоногийн зай. 5+8+8 = 21 хоног ≈ ирэх хугацаа. */
+export const DEFAULT_LEASING_PAY_GAPS = [5, 8, 8];
 
 export function leasingCopyOf(input: {
   leasingChoiceHint?: string | null;
@@ -181,6 +185,7 @@ export function leasingView(order: {
   storageFee?: number | null;
   cargoFee?: number | null;
   dueAmount?: number | null;
+  createdAt?: Date | string | null;
 }): LeasingView {
   const isLeasing = Boolean(order.isLeasing);
   const stored = order.leasingFee ?? 0;
@@ -233,8 +238,132 @@ export function leasingView(order: {
   };
 }
 
-export function serializeLeasing(order: Parameters<typeof leasingView>[0]) {
+export function parseLeasingPayGaps(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length < 2) return [...DEFAULT_LEASING_PAY_GAPS];
+  const gaps = raw
+    .map((n) => Math.round(Number(n)))
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 60);
+  if (gaps.length < 2 || gaps.length > 3) return [...DEFAULT_LEASING_PAY_GAPS];
+  return gaps;
+}
+
+export function assertLeasingPayGaps(raw: unknown): number[] {
+  if (!Array.isArray(raw) || raw.length < 2 || raw.length > 3) {
+    throw badRequest('Үндсэн төлбөрийг 2 эсвэл 3 хуваана. Хоногийн зайг оруулна уу.');
+  }
+  const gaps = raw.map((n) => Math.round(Number(n)));
+  if (gaps.some((n) => !Number.isInteger(n) || n < 1 || n > 60)) {
+    throw badRequest('Хоногийн зай 1–60 хоног байна.');
+  }
+  const sum = gaps.reduce((a, b) => a + b, 0);
+  if (sum < 7 || sum > 90) throw badRequest('Нийт хугацаа 7–90 хоног байна.');
+  return gaps;
+}
+
+/** Нийт дүнг n хуваарьт хуваана. Үлдэгдэл сүүлийн төлөлт дээр. */
+export function splitEven(total: number, parts: number): number[] {
+  if (parts < 1 || total <= 0) return [];
+  const base = Math.floor(total / parts);
+  const rem = total - base * parts;
+  return Array.from({ length: parts }, (_, i) => base + (i === parts - 1 ? rem : 0));
+}
+
+export type LeasingPlanStepStatus = 'paid' | 'due_today' | 'overdue' | 'upcoming';
+
+export interface LeasingPlanStep {
+  kind: 'FEE' | 'INSTALLMENT';
+  index: number;
+  daysFromStart: number;
+  dueDay: string;
+  amount: number;
+  paidAmount: number;
+  remaining: number;
+  status: LeasingPlanStepStatus;
+  isLast: boolean;
+}
+
+export interface LeasingPayPlan {
+  gaps: number[];
+  totalDays: number;
+  steps: LeasingPlanStep[];
+  overdue: boolean;
+  dueToday: boolean;
+  nextAmount: number;
+}
+
+export function buildLeasingPayPlan(input: {
+  isLeasing?: boolean | null;
+  createdAt?: Date | string | null;
+  subtotal: number;
+  leasingFee?: number | null;
+  paidAmount: number;
+  refundedAmount: number;
+  payGaps?: number[] | null;
+  now?: Date;
+}): LeasingPayPlan | null {
+  if (!input.isLeasing) return null;
+  const gaps = parseLeasingPayGaps(input.payGaps);
+  const start = startOfUbDay(input.createdAt ? new Date(input.createdAt) : (input.now ?? new Date()));
+  const today = startOfUbDay(input.now ?? new Date());
+  const view = leasingView(input);
+  const parts = splitEven(input.subtotal, gaps.length);
+  const raw: Omit<LeasingPlanStep, 'paidAmount' | 'remaining' | 'status'>[] = [
+    {
+      kind: 'FEE',
+      index: 0,
+      daysFromStart: 0,
+      dueDay: ubDateString(start),
+      amount: view.leasingFee,
+      isLast: false,
+    },
+  ];
+  let acc = 0;
+  for (let i = 0; i < gaps.length; i++) {
+    acc += gaps[i]!;
+    raw.push({
+      kind: 'INSTALLMENT',
+      index: i + 1,
+      daysFromStart: acc,
+      dueDay: ubDateString(addDays(start, acc)),
+      amount: parts[i] ?? 0,
+      isLast: i === gaps.length - 1,
+    });
+  }
+
+  let leftover = Math.max(0, input.paidAmount - input.refundedAmount);
+  const steps: LeasingPlanStep[] = raw.map((step) => {
+    const paidAmount = Math.min(leftover, step.amount);
+    leftover -= paidAmount;
+    const remaining = step.amount - paidAmount;
+    let status: LeasingPlanStepStatus = 'upcoming';
+    if (remaining <= 0) status = 'paid';
+    else {
+      const due = startOfUbDay(new Date(`${step.dueDay}T12:00:00+08:00`));
+      const diff = diffUbDays(today, due);
+      if (diff > 0) status = 'overdue';
+      else if (diff === 0) status = 'due_today';
+      else status = 'upcoming';
+    }
+    return { ...step, paidAmount, remaining, status };
+  });
+
+  const next = steps.find((s) => s.remaining > 0);
+  return {
+    gaps,
+    totalDays: acc,
+    steps,
+    overdue: steps.some((s) => s.status === 'overdue'),
+    dueToday: steps.some((s) => s.status === 'due_today'),
+    nextAmount: next?.remaining ?? 0,
+  };
+}
+
+export function serializeLeasing(
+  order: Parameters<typeof leasingView>[0],
+  payGaps?: number[] | null,
+) {
   const view = leasingView(order);
+  const payPlan = view.isLeasing ? buildLeasingPayPlan({ ...order, payGaps }) : null;
   return {
     isLeasing: view.isLeasing,
     leasingFee: view.leasingFee,
@@ -243,8 +372,11 @@ export function serializeLeasing(order: Parameters<typeof leasingView>[0]) {
     leasingPrincipalPaid: view.principalPaid,
     leasingPrincipalDue: view.principalDue,
     leasingDueAmount: view.feeDue + view.principalDue,
-    nextPayAmount: view.nextPayAmount,
+    nextPayAmount: view.nextPayKind === 'PRINCIPAL' && payPlan?.nextAmount
+      ? Math.min(view.nextPayAmount, payPlan.nextAmount)
+      : view.nextPayAmount,
     nextPayKind: view.nextPayKind,
+    payPlan,
   };
 }
 
@@ -256,6 +388,7 @@ export function serializeLeasing(order: Parameters<typeof leasingView>[0]) {
 export function resolveInvoiceAmount(
   view: LeasingView,
   requested?: number | null,
+  scheduledNext?: number | null,
 ): { amount: number; kind: LeasingPayKind } {
   if (view.nextPayAmount <= 0 || view.nextPayKind === 'NONE') {
     return { amount: 0, kind: 'NONE' };
@@ -268,7 +401,11 @@ export function resolveInvoiceAmount(
   }
   const max = view.nextPayAmount;
   if (requested == null || !Number.isFinite(requested)) {
-    return { amount: 0, kind: view.nextPayKind };
+    const scheduled = scheduledNext != null ? Math.round(scheduledNext) : 0;
+    return {
+      amount: scheduled > 0 ? Math.min(scheduled, max) : 0,
+      kind: view.nextPayKind,
+    };
   }
   const n = Math.round(requested);
   if (n < 1) return { amount: 0, kind: view.nextPayKind };

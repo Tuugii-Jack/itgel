@@ -17,7 +17,7 @@ import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refund
 import { paidPayoutDaySet } from '../../services/returns.js';
 import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
 import { syncOrderCargoFee, lineCargoFee } from '../../services/cargoFee.js';
-import { getSettings, getSettingsCached, districtNames, leasingFeeFromSettings, leasingTiersOf } from '../../services/settings.js';
+import { getSettings, getSettingsCached, districtNames, leasingFeeFromSettings, leasingTiersOf, leasingPayGapsOf } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { sms, smsTemplates } from '../../services/sms.js';
 import { resolveOptionPrice } from '../../lib/optionPrices.js';
@@ -315,7 +315,10 @@ publicOrdersRouter.get(
       refundedAmount,
     });
     const dueAmount = totals.dueAmount;
-    const leasing = serializeLeasing({ ...order, subtotal, storageFee, cargoFee, dueAmount });
+    const leasing = serializeLeasing(
+      { ...order, subtotal, storageFee, cargoFee, dueAmount },
+      leasingPayGapsOf(settings),
+    );
 
     const persistStorage = storageFee !== order.storageFee;
     const persistCargo = !frozen && expectedCargo !== order.cargoFee;
@@ -451,15 +454,17 @@ publicOrdersRouter.patch(
       throw conflict('Төлбөр орсон тул төлбөрийн хэлбэр солих боломжгүй.');
     }
 
+    const settings = await getSettingsCached();
     const flag = leasingFlagOf(
       order.subtotal,
       leasing,
-      leasingTiersOf(await getSettingsCached()),
+      leasingTiersOf(settings),
     );
+    const gaps = leasingPayGapsOf(settings);
     if (order.isLeasing === flag.isLeasing) {
       res.json({
         data: {
-          ...serializeLeasing(order),
+          ...serializeLeasing(order, gaps),
           dueAmount: order.dueAmount,
           subtotal: order.subtotal,
         },
@@ -498,7 +503,7 @@ publicOrdersRouter.patch(
     const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
     res.json({
       data: {
-        ...serializeLeasing(updated),
+        ...serializeLeasing(updated, gaps),
         dueAmount: updated.dueAmount,
         subtotal: updated.subtotal,
       },

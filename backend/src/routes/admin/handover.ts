@@ -16,6 +16,7 @@ import { adminOrderItem, publicOrderItem } from '../../services/serialize.js';
 import { syncOrderCargoFee, syncOrdersCargoFees } from '../../services/cargoFee.js';
 import { syncOrderStorageFee, syncOrdersStorageFees } from '../../services/storageFee.js';
 import { adminOrderDetail } from './orders.js';
+import { currentLeasingPayGaps } from '../../services/settings.js';
 
 export const adminHandoverRouter = Router();
 
@@ -83,10 +84,11 @@ adminHandoverRouter.get(
       (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt && i.fulfilment === 'DELIVERY',
     );
     const leasingHeld = leasingHoldsGoods(fresh);
+    const gaps = await currentLeasingPayGaps();
 
     res.json({
       data: {
-        ...adminOrderDetail(fresh),
+        ...adminOrderDetail(fresh, gaps),
         canHandOver:
           pickable.length > 0 && fresh.status !== 'CANCELLED' && !leasingHeld,
         blockReason:
@@ -440,6 +442,6 @@ adminHandoverRouter.post(
       },
     });
 
-    res.json({ data: adminOrderDetail(updated) });
+    res.json({ data: adminOrderDetail(updated, await currentLeasingPayGaps()) });
   }),
 );

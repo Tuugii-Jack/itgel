@@ -1452,6 +1452,8 @@ export const leasingApi = {
       notArrived: number;
       arrivedUnpaid: number;
       arrivedPaid: number;
+      payDueToday: number;
+      payOverdue: number;
     }>("/leasing/orders/summary", adminAuth).then((r) => r.data),
 
   orders: (query?: Query) =>
@@ -1615,6 +1617,7 @@ export const leasingApi = {
 
   updateSettings: (body: {
     feeTiers?: { minAmount: number; ratePercent: number }[];
+    payGaps?: number[];
     choiceHint?: string;
     termsTitle?: string;
     termsBody?: string;

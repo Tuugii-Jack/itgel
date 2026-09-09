@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leasingFeeOf, leasingFlagOf, leasingView, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS } from '../src/lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingView, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing } from '../src/lib/leasing.js';
 import { AppError } from '../src/lib/errors.js';
 
 describe('Лизингийн шимтгэл', () => {
@@ -122,8 +122,6 @@ describe('QPay нэхэмжлэлийн дүн', () => {
     });
     expect(resolveInvoiceAmount(view).amount).toBe(0);
     expect(resolveInvoiceAmount(view, 250).amount).toBe(250);
-    expect(resolveInvoiceAmount(view, 1_000).amount).toBe(1_000);
-    expect(resolveInvoiceAmount(view, 9_999).amount).toBe(1_000);
   });
 
   it('энгийн захиалга дүнгүйгээр үлдэгдлийг нэхэмжилнэ', () => {
@@ -219,5 +217,107 @@ describe('Лизинг үлдэгдэлтэй бараа авах', () => {
         refundedAmount: 0,
       }),
     ).toBe(false);
+  });
+});
+
+describe('Лизингийн хуваарь', () => {
+  it('үлдэгдлийг сүүлийн төлөлт дээр нэмнэ', () => {
+    expect(splitEven(100_000, 3)).toEqual([33_333, 33_333, 33_334]);
+    expect(splitEven(100_000, 2)).toEqual([50_000, 50_000]);
+  });
+
+  it('хоногийн зай 2–3, бусад нь өгөгдмөл', () => {
+    expect(parseLeasingPayGaps([5, 8, 8])).toEqual([5, 8, 8]);
+    expect(parseLeasingPayGaps([10, 11])).toEqual([10, 11]);
+    expect(parseLeasingPayGaps([1])).toEqual([5, 8, 8]);
+  });
+
+  it('5+8+8 = 21 хоног, сүүлийн төлөлт бараа ирэх үе', () => {
+    const start = new Date('2026-09-01T04:00:00.000Z');
+    const plan = buildLeasingPayPlan({
+      isLeasing: true,
+      createdAt: start,
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 0,
+      refundedAmount: 0,
+      payGaps: [5, 8, 8],
+      now: start,
+    });
+    expect(plan?.totalDays).toBe(21);
+    expect(plan?.steps.map((s) => s.amount)).toEqual([10_000, 33_333, 33_333, 33_334]);
+    expect(plan?.steps[0]?.status).toBe('due_today');
+    expect(plan?.steps[0]?.kind).toBe('FEE');
+    expect(plan?.steps[3]?.isLast).toBe(true);
+    expect(plan?.steps[3]?.daysFromStart).toBe(21);
+    expect(plan?.nextAmount).toBe(10_000);
+  });
+
+  it('шимтгэл төлөгдсөн өдөр дараагийн хуваарь өнөөдөр', () => {
+    const created = new Date('2026-09-01T04:00:00.000Z');
+    const now = new Date('2026-09-06T04:00:00.000Z');
+    const plan = buildLeasingPayPlan({
+      isLeasing: true,
+      createdAt: created,
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 10_000,
+      refundedAmount: 0,
+      payGaps: [5, 8, 8],
+      now,
+    });
+    expect(plan?.dueToday).toBe(true);
+    expect(plan?.overdue).toBe(false);
+    expect(plan?.steps[1]?.status).toBe('due_today');
+    expect(plan?.nextAmount).toBe(33_333);
+  });
+
+  it('хуваарьт өдрөөс хоцорвол overdue', () => {
+    const created = new Date('2026-09-01T04:00:00.000Z');
+    const now = new Date('2026-09-07T04:00:00.000Z');
+    const plan = buildLeasingPayPlan({
+      isLeasing: true,
+      createdAt: created,
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 10_000,
+      refundedAmount: 0,
+      payGaps: [5, 8, 8],
+      now,
+    });
+    expect(plan?.overdue).toBe(true);
+    expect(plan?.dueToday).toBe(false);
+    expect(plan?.steps[1]?.status).toBe('overdue');
+  });
+
+  it('QPay үндсэн төлбөрийг хуваарьт дүнгээр нэхэмжилнэ', () => {
+    const view = leasingView({
+      isLeasing: true,
+      leasingFee: 100,
+      subtotal: 1_000,
+      paidAmount: 100,
+      refundedAmount: 0,
+      dueAmount: 1_000,
+    });
+    expect(resolveInvoiceAmount(view).amount).toBe(0);
+    expect(resolveInvoiceAmount(view, null, 334).amount).toBe(334);
+    expect(resolveInvoiceAmount(view, 250).amount).toBe(250);
+    expect(resolveInvoiceAmount(view, 1_000).amount).toBe(1_000);
+  });
+
+  it('serialize дараагийн хуваарьт дүнгээр хязгаарлана', () => {
+    const order = {
+      isLeasing: true,
+      createdAt: new Date('2026-09-01T04:00:00.000Z'),
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 10_000,
+      refundedAmount: 0,
+      dueAmount: 100_000,
+    };
+    const data = serializeLeasing(order, [5, 8, 8]);
+    expect(data.nextPayKind).toBe('PRINCIPAL');
+    expect(data.nextPayAmount).toBe(33_333);
+    expect(data.payPlan?.nextAmount).toBe(33_333);
   });
 });

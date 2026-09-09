@@ -90,6 +90,18 @@ export function LeasingGoodsBadge({
   return <Badge tone="ok">Ирсэн · төлсөн</Badge>;
 }
 
+export function LeasingPayBadge({
+  overdue,
+  dueToday,
+}: {
+  overdue?: boolean;
+  dueToday?: boolean;
+}) {
+  if (overdue) return <Badge tone="danger">Хуваарь хоцорсон</Badge>;
+  if (dueToday) return <Badge tone="warn">Өнөөдөр төлөгдөөгүй</Badge>;
+  return null;
+}
+
 export function PageHead({
   title,
   hint,
