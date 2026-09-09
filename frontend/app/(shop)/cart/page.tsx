@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { EmailAuthForm } from "@/components/EmailAuthForm";
+import { PayMethodChoice } from "@/components/PayMethodChoice";
 import {
   Button,
   Empty,
@@ -19,6 +20,7 @@ import { useSession } from "@/lib/session";
 import { money, relativeDay } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { useToast } from "@/lib/toast";
+import { leasingFeeOf } from "@/lib/leasing";
 
 /**
  * 03 Сагс ба захиалга — дизайны хэмжээг яг барина.
@@ -35,6 +37,7 @@ export default function CartPage() {
   const [buyerName, setBuyerName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [note, setNote] = useState("");
+  const [leasing, setLeasing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -90,6 +93,7 @@ export default function CartPage() {
       const order = await api.createOrder({
         name: buyerName.trim() || undefined,
         note: note.trim() || undefined,
+        leasing,
         items: cart.lines.map((line) => ({
           productId: line.productId,
           qty: line.qty,
@@ -114,6 +118,8 @@ export default function CartPage() {
     .filter((l) => l.type === "order")
     .reduce((sum, l) => sum + l.price * l.qty, 0);
   const readyTotal = cart.subtotal - orderTotal;
+  const fee = leasing ? leasingFeeOf(cart.subtotal) : 0;
+  const firstPay = leasing ? fee : cart.subtotal;
 
   return (
     <div className='screen flex flex-col pb-28 lg:pb-12'>
@@ -244,10 +250,27 @@ export default function CartPage() {
               <SumRow label='Бэлэн бараа' value={money(readyTotal)} />
             )}
             <div className='h-px bg-line' />
-            <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
-              <span>Одоо төлөх</span>
-              <span>{money(cart.subtotal)}</span>
-            </div>
+            {leasing ? (
+              <>
+                <SumRow label='Барааны үнэ' value={money(cart.subtotal)} />
+                <SumRow label='Лизингийн шимтгэл (10%)' value={money(fee)} />
+                <div className='h-px bg-line' />
+                <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
+                  <span>Эхний төлөлт</span>
+                  <span>{money(firstPay)}</span>
+                </div>
+                <SumRow label='Дараа төлнө (үндсэн)' value={money(cart.subtotal)} />
+              </>
+            ) : (
+              <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
+                <span>Одоо төлөх</span>
+                <span>{money(cart.subtotal)}</span>
+              </div>
+            )}
+          </div>
+
+          <div className='mt-4'>
+            <PayMethodChoice leasing={leasing} onChange={setLeasing} />
           </div>
 
           {/* Laptop дээр товч хураангуйн дотор — тогтмол доод мөр хэрэггүй. */}
@@ -264,7 +287,9 @@ export default function CartPage() {
           </div>
 
           <p className='mt-4 mb-0 text-[13px] leading-[1.6] text-ink-2 lg:mt-0'>
-            Төлбөрийг QPay-ээр төлнө. Төлсний дараа захиалга баталгаажна.
+            {leasing
+              ? "Эхлээд лизингийн шимтгэлийг QPay-ээр төлнө. Төлсний дараа захиалга үргэлжилнэ."
+              : "Төлбөрийг QPay-ээр төлнө. Төлсний дараа захиалга баталгаажна."}
           </p>
         </div>
       </div>

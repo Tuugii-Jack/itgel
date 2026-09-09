@@ -10,12 +10,14 @@ import { asyncHandler, param, query, validate } from '../../middleware/validate.
 import { createOrder } from '../../services/createOrder.js';
 import { adminPaymentsRouter } from './payments.js';
 import { adminOrderQpayRouter } from './orderQpay.js';
+import { serializeLeasing } from '../../lib/leasing.js';
 import {
   computeTotals,
   fullyPaid,
   loadOrderTotals,
   PAYMENT_STATE_LABEL,
   paymentState,
+  confirmThreshold,
 } from '../../services/money.js';
 import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
 import {
@@ -134,6 +136,7 @@ adminOrdersRouter.get(
           refundedAmount: order.refundedAmount,
           dueAmount: order.dueAmount,
           paymentState: paymentState(computeTotals(order)),
+          ...serializeLeasing(order),
           paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
           profit: profitOf(order.items.filter((i) => i.cancelledAt === null)),
           fulfilment: order.fulfilment,
@@ -467,13 +470,17 @@ adminOrdersRouter.patch(
     if (status === 'CONFIRMED' && !force) {
       const totals = await loadOrderTotals(orderId);
       if (!fullyPaid(totals)) {
+        const need = confirmThreshold(totals);
         throw conflict(
-          `Төлбөр бүрэн ороогүй байна. ${totals.subtotal}₮-с ${totals.netPaid}₮ орсон. ` +
-            'Төлбөрийг эхлээд бүртгэнэ үү.',
+          totals.leasingFee > 0
+            ? `Лизингийн шимтгэл ороогүй байна. ${need}₮-с ${totals.netPaid}₮ орсон. Төлбөрийг эхлээд бүртгэнэ үү.`
+            : `Төлбөр бүрэн ороогүй байна. ${totals.subtotal}₮-с ${totals.netPaid}₮ орсон. ` +
+              'Төлбөрийг эхлээд бүртгэнэ үү.',
           {
             subtotal: totals.subtotal,
+            leasingFee: totals.leasingFee,
             netPaid: totals.netPaid,
-            missing: totals.subtotal - totals.netPaid,
+            missing: need - totals.netPaid,
           },
         );
       }
@@ -568,6 +575,7 @@ adminOrdersRouter.post(
         deliveryFee: true,
         paidAmount: true,
         refundedAmount: true,
+        leasingFee: true,
       },
     });
     const byId = new Map(orders.map((o) => [o.id, o]));
@@ -585,7 +593,7 @@ adminOrdersRouter.post(
         if (status === 'CONFIRMED' && !force) {
           const totals = computeTotals(order);
           if (!fullyPaid(totals)) {
-            throw conflict(`Төлбөр дутуу: ${totals.subtotal - totals.netPaid}₮ ороогүй байна.`);
+            throw conflict(`Төлбөр дутуу: ${confirmThreshold(totals) - totals.netPaid}₮ ороогүй байна.`);
           }
         }
         await changeOrderStatus(id, status, { actor, reason });
@@ -649,6 +657,7 @@ export function adminOrderDetail(order: OrderDetail) {
     netPaid: totals.netPaid,
     paymentState: state,
     paymentStateLabel: PAYMENT_STATE_LABEL[state],
+    ...serializeLeasing(order),
     paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
     qpayInvoiceId: order.qpayInvoiceId,
     qpayInvoiceAt: order.qpayInvoiceAt?.toISOString() ?? null,

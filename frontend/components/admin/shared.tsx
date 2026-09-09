@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Badge, type Tone } from "@/components/ui";
+import { leasingGoodsArrived } from "@/lib/leasing";
 import type { BatchStage, DeliveryStatus, OrderStatus, ProductStatus } from "@/lib/types";
 
 export const ORDER_STATUS_TONE: Record<OrderStatus, Tone> = {
@@ -63,6 +64,30 @@ export function ProductStatusBadge({ status }: { status: ProductStatus }) {
 
 export function OrderBadge({ status }: { status: OrderStatus }) {
   return <Badge tone={ORDER_STATUS_TONE[status]}>{ORDER_STATUS_LABEL[status]}</Badge>;
+}
+
+export function LeasingBadge() {
+  return <Badge tone="info">Лизинг</Badge>;
+}
+
+/** Лизинг портал — барааны статус биш, ирсэн/ирээгүй + төлбөр. */
+export function LeasingGoodsBadge({
+  status,
+  dueAmount,
+}: {
+  status: OrderStatus;
+  dueAmount: number;
+}) {
+  if (status === "CANCELLED") {
+    return <Badge tone="danger">Цуцлагдсан</Badge>;
+  }
+  if (!leasingGoodsArrived(status)) {
+    return <Badge tone="neutral">Ирээгүй</Badge>;
+  }
+  if (dueAmount > 0) {
+    return <Badge tone="danger">Ирсэн · төлөөгүй</Badge>;
+  }
+  return <Badge tone="ok">Ирсэн · төлсөн</Badge>;
 }
 
 export function PageHead({

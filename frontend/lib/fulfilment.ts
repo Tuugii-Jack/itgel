@@ -5,6 +5,19 @@ export const ITEM_FULFILMENT_LABEL: Record<Fulfilment, string> = {
   DELIVERY: "Хүргэлт",
 };
 
+/** Ирсэн, авгаагүй бараа — хүргэлтээр сонгосноос хойш агуулах тооцогдохгүй. */
+export function itemAccruesStorage(item: OrderItem): boolean {
+  if (item.cancelled || item.itemStatus === "cancelled" || item.itemStatus === "handed_over") {
+    return false;
+  }
+  if (item.fulfilment === "DELIVERY") return false;
+  return item.itemStatus === "arrived" || (item.arrivedQty ?? 0) > 0;
+}
+
+export function orderAccruesStorage(order: { items: OrderItem[] }): boolean {
+  return order.items.some(itemAccruesStorage);
+}
+
 /** Ирсэн, авгаагүй, авах арга сонгоогүй мөр. */
 export function itemNeedsFulfilment(item: OrderItem): boolean {
   if (item.cancelled || item.itemStatus === "cancelled" || item.itemStatus === "handed_over") {

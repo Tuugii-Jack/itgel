@@ -10,6 +10,7 @@ import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } fro
 import { consumeReadyStock } from './readyStock.js';
 import { changeOrderStatus } from './orders.js';
 import { recordPayment } from './payments.js';
+import { leasingFeeOf } from '../lib/leasing.js';
 
 export interface CreateOrderItemInput {
   /** Тойргийн id (дэлгүүрийн productId). */
@@ -34,6 +35,8 @@ export interface CreateOrderInput {
   /** Хэрэглэгчийн нэрийг шинэчлэх. */
   customerName?: string;
   now?: Date;
+  /** Лизингээр төлөх. */
+  leasing?: boolean;
 }
 
 export async function createOrder(input: CreateOrderInput): Promise<Order> {
@@ -121,6 +124,8 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   });
 
   const subtotal = subtotalOf(items);
+  const isLeasing = Boolean(input.leasing);
+  const leasingFee = isLeasing ? leasingFeeOf(subtotal) : 0;
 
   const order = await prisma.$transaction(async (tx) => {
     if (input.customerName && input.customerName !== customer.name) {
@@ -139,6 +144,8 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     const created = await createWithUniqueCode(tx, {
       customerId: input.customerId,
       subtotal,
+      isLeasing,
+      leasingFee,
       note: input.note ?? null,
       items,
     });
@@ -149,7 +156,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
         action: 'CREATE',
         entity: 'Order',
         entityId: created.id,
-        after: { code: created.code, subtotal },
+        after: { code: created.code, subtotal, isLeasing, leasingFee },
       },
       tx,
     );
@@ -185,6 +192,8 @@ async function createWithUniqueCode(
   data: {
     customerId: string;
     subtotal: number;
+    isLeasing?: boolean;
+    leasingFee?: number;
     note: string | null;
     items: {
       roundId: string;
@@ -208,9 +217,11 @@ async function createWithUniqueCode(
           code: generateOrderCode(),
           customerId: data.customerId,
           subtotal: data.subtotal,
+          isLeasing: data.isLeasing ?? false,
+          leasingFee: data.leasingFee ?? 0,
           paidAmount: 0,
           refundedAmount: 0,
-          dueAmount: data.subtotal,
+          dueAmount: data.subtotal + (data.leasingFee ?? 0),
           note: data.note,
           items: { create: data.items },
         },

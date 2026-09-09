@@ -178,6 +178,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
     return (
       <OrderDetail
         orderId={openOrderId}
+        workspace="shop"
         onClose={() => setOpenOrderId(null)}
         onChanged={() => void load()}
       />

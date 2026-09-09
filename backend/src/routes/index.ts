@@ -10,6 +10,7 @@ import { publicOrdersRouter } from './public/orders.js';
 import { publicProductsRouter } from './public/products.js';
 import { publicQpayRouter } from './public/qpay.js';
 import { publicStoreRouter } from './public/store.js';
+import { leasingRouter } from './leasing/index.js';
 
 export const apiRouter = Router();
 
@@ -25,4 +26,5 @@ apiRouter.use('/orders', publicOrdersRouter);
 apiRouter.use('/delivery', publicDeliveryRouter);
 apiRouter.use('/store', publicStoreRouter);
 
+apiRouter.use('/leasing', leasingRouter);
 apiRouter.use('/admin', adminRouter);

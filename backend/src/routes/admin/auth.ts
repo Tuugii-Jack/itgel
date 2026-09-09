@@ -5,7 +5,7 @@ import { prisma } from '../../prisma.js';
 import { unauthorized } from '../../lib/errors.js';
 import { signAdminToken } from '../../lib/jwt.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
-import { requireStaff } from '../../middleware/auth.js';
+import { requireAdminUser } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
 
 export const adminAuthRouter = Router();
@@ -40,7 +40,7 @@ adminAuthRouter.post(
 
 adminAuthRouter.get(
   '/me',
-  requireStaff,
+  requireAdminUser,
   asyncHandler(async (req, res) => {
     const user = await prisma.adminUser.findUnique({ where: { id: req.auth!.sub } });
     if (!user?.isActive) throw unauthorized();
@@ -51,7 +51,7 @@ adminAuthRouter.get(
 /** POST /admin/auth/password — админ өөрийн нууц үг солих. */
 adminAuthRouter.post(
   '/password',
-  requireStaff,
+  requireAdminUser,
   validate({
     body: z.object({
       currentPassword: z.string().min(6).max(100),

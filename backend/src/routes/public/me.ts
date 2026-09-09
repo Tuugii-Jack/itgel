@@ -15,6 +15,7 @@ import { orderCanChooseFulfilment } from "../../lib/itemFulfilment.js";
 import { requireCustomer } from "../../middleware/auth.js";
 import { asyncHandler, query, validate } from "../../middleware/validate.js";
 import { computeTotals, paymentState } from "../../services/money.js";
+import { serializeLeasing } from "../../lib/leasing.js";
 import { buildTimeline } from "../../services/orders.js";
 import {
   orderStatusLabel,
@@ -311,6 +312,7 @@ publicMeRouter.get(
           refundedAmount: order.refundedAmount,
           dueAmount: order.dueAmount,
           paymentState: paymentState(computeTotals(order)),
+          ...serializeLeasing(order),
           fulfilment: order.fulfilment,
           canChooseFulfilment: orderCanChooseFulfilment(order),
           itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),

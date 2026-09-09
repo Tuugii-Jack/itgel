@@ -6,6 +6,14 @@ import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, money } from "@/lib/format";
 import type { AdminOrderQpay, QpayPaymentRow } from "@/lib/types";
 
+type OrderQpayApi = {
+  checkOrderQpay: typeof adminApi.checkOrderQpay;
+  orderQpayPayments: typeof adminApi.orderQpayPayments;
+  cancelOrderQpayInvoice: typeof adminApi.cancelOrderQpayInvoice;
+  cancelOrderQpayPayment: typeof adminApi.cancelOrderQpayPayment;
+  refundOrderQpayPayment: typeof adminApi.refundOrderQpayPayment;
+};
+
 export function OrderQpayCard({
   orderId,
   qpay,
@@ -13,6 +21,7 @@ export function OrderQpayCard({
   busyKey,
   onAction,
   readOnly,
+  api = adminApi,
 }: {
   orderId: string;
   qpay: AdminOrderQpay | null;
@@ -24,6 +33,7 @@ export function OrderQpayCard({
     okMessage: string,
   ) => Promise<void>;
   readOnly?: boolean;
+  api?: OrderQpayApi;
 }) {
   const [rows, setRows] = useState<QpayPaymentRow[]>([]);
   const [listError, setListError] = useState<string | null>(null);
@@ -35,13 +45,13 @@ export function OrderQpayCard({
       return;
     }
     try {
-      const list = await adminApi.orderQpayPayments(orderId);
+      const list = await api.orderQpayPayments(orderId);
       setRows(list.rows);
       setListError(null);
     } catch (e) {
       setListError(e instanceof ApiError ? e.message : "Жагсаалт авахад алдаа.");
     }
-  }, [orderId, qpay?.invoiceId, qpay?.ready]);
+  }, [orderId, qpay?.invoiceId, qpay?.ready, api]);
 
   useEffect(() => {
     void loadPayments();
@@ -51,7 +61,9 @@ export function OrderQpayCard({
 
   return (
     <Card className="p-4">
-      <div className="mb-3 text-[15px] font-medium">QPay</div>
+      <div className="mb-3 text-[15px] font-medium">
+        {qpay.account === "leasing" ? "Лизингийн QPay" : "QPay"}
+      </div>
       {!qpay.ready ? (
         <p className="m-0 text-[13px] text-muted">
           {qpay.enabled
@@ -81,7 +93,7 @@ export function OrderQpayCard({
                 onAction(
                   "qpay-check",
                   async () => {
-                    const result = await adminApi.checkOrderQpay(orderId);
+                    const result = await api.checkOrderQpay(orderId);
                     await loadPayments();
                     return result;
                   },
@@ -106,7 +118,7 @@ export function OrderQpayCard({
                 }
                 void onAction(
                   "qpay-cancel-invoice",
-                  () => adminApi.cancelOrderQpayInvoice(orderId),
+                  () => api.cancelOrderQpayInvoice(orderId),
                   "Нэхэмжлэл цуцлагдлаа.",
                 );
               }}
@@ -149,7 +161,7 @@ export function OrderQpayCard({
                           void onAction(
                             `qpay-cancel:${row.paymentId}`,
                             async () => {
-                              const result = await adminApi.cancelQpayPayment(row.paymentId);
+                              const result = await api.cancelOrderQpayPayment(orderId, row.paymentId);
                               await loadPayments();
                               return result;
                             },
@@ -169,7 +181,7 @@ export function OrderQpayCard({
                           void onAction(
                             `qpay-refund:${row.paymentId}`,
                             async () => {
-                              const result = await adminApi.refundQpayPayment(row.paymentId);
+                              const result = await api.refundOrderQpayPayment(orderId, row.paymentId);
                               await loadPayments();
                               return result;
                             },

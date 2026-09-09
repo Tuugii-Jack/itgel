@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { qpayTokenExpiresAtMs, toQpayDateTime } from '../src/services/qpay.js';
+import { qpayTokenExpiresAtMs, toQpayDateTime, qpayAccountForOrder } from '../src/services/qpay.js';
 
 function fakeJwt(exp: number): string {
   const payload = Buffer.from(JSON.stringify({ exp }), 'utf8').toString('base64url');
@@ -21,6 +21,13 @@ describe('qpayTokenExpiresAtMs', () => {
   it('expires_in байхгүй бол JWT exp уншина', () => {
     const exp = 1_700_000_600;
     expect(qpayTokenExpiresAtMs({ access_token: fakeJwt(exp) }, now)).toBe(exp * 1000);
+  });
+});
+
+describe('qpayAccountForOrder', () => {
+  it('шууд төлбөр shop, лизинг leasing — хоёр данс холилдохгүй', () => {
+    expect(qpayAccountForOrder(false)).toBe('shop');
+    expect(qpayAccountForOrder(true)).toBe('leasing');
   });
 });
 

@@ -49,7 +49,7 @@ export function middleware(request: NextRequest) {
   const host = requestHost(request);
   const { pathname, search } = request.nextUrl;
 
-  if (isShopHost(host) && pathname.startsWith("/admin")) {
+  if (isShopHost(host) && (pathname.startsWith("/admin") || pathname.startsWith("/leasing"))) {
     return redirectOnHost(adminOrigin(), pathname, search);
   }
 
@@ -62,18 +62,19 @@ export function middleware(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    if (!pathname.startsWith("/admin")) {
+    if (!pathname.startsWith("/admin") && !pathname.startsWith("/leasing")) {
       return redirectOnHost(shopOrigin(), pathname, search);
     }
   }
 
-  if (!pathname.startsWith("/admin")) return NextResponse.next();
+  const isStaffArea = pathname.startsWith("/admin") || pathname.startsWith("/leasing");
+  if (!isStaffArea) return NextResponse.next();
 
-  if (pathname === "/admin/login") return NextResponse.next();
+  if (pathname === "/admin/login" || pathname === "/leasing/login") return NextResponse.next();
 
   if (!hasAdminSession(request)) {
     const url = request.nextUrl.clone();
-    url.pathname = "/admin/login";
+    url.pathname = pathname.startsWith("/leasing") ? "/leasing/login" : "/admin/login";
     url.search = "";
     return NextResponse.redirect(url);
   }

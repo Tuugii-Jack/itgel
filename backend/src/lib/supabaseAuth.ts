@@ -37,7 +37,7 @@ export async function resolveSupabaseToken(token: string): Promise<TokenPayload 
   if (!claims) return null;
 
   const role = claims.app_metadata?.role?.toUpperCase();
-  if ((role === 'ADMIN' || role === 'STAFF') && claims.email) {
+  if ((role === 'ADMIN' || role === 'STAFF' || role === 'LEASING') && claims.email) {
     const admin = await prisma.adminUser.findFirst({
       where: { email: claims.email.toLowerCase(), isActive: true },
     });

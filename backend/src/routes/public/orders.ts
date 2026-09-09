@@ -25,12 +25,15 @@ import { comboLabel, findSku } from '../../lib/skuStock.js';
 import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } from '../../lib/itemFulfilment.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { itemSelections, normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
+import { leasingFeeOf, leasingFlagOf, serializeLeasing } from '../../lib/leasing.js';
+import { cancelQpayInvoice, qpayAccountForOrder } from '../../services/qpay.js';
 
 export const publicOrdersRouter = Router();
 
 const createBody = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   note: z.string().trim().max(500).optional(),
+  leasing: z.boolean().optional(),
   items: z
     .array(
       z.object({
@@ -143,6 +146,8 @@ publicOrdersRouter.post(
     });
 
     const subtotal = subtotalOf(items);
+    const isLeasing = Boolean(body.leasing);
+    const leasingFee = isLeasing ? leasingFeeOf(subtotal) : 0;
 
     const order = await prisma.$transaction(async (tx) => {
       if (body.name && body.name !== customer.name) {
@@ -158,6 +163,8 @@ publicOrdersRouter.post(
       const created = await createWithUniqueCode(tx, {
         customerId,
         subtotal,
+        isLeasing,
+        leasingFee,
         note: body.note ?? null,
         items,
       });
@@ -168,7 +175,7 @@ publicOrdersRouter.post(
           action: 'CREATE',
           entity: 'Order',
           entityId: created.id,
-          after: { code: created.code, subtotal },
+          after: { code: created.code, subtotal, isLeasing, leasingFee },
         },
         tx,
       );
@@ -191,7 +198,9 @@ publicOrdersRouter.post(
         status: order.status,
         statusLabel: orderStatusLabel(order.status),
         subtotal,
-        dueAmount: subtotal,
+        dueAmount: subtotal + leasingFee,
+        isLeasing,
+        leasingFee,
         createdAt: order.createdAt.toISOString(),
       },
     });
@@ -203,6 +212,8 @@ type TxClient = Prisma.TransactionClient;
 interface NewOrderData {
   customerId: string;
   subtotal: number;
+  isLeasing: boolean;
+  leasingFee: number;
   note: string | null;
   items: {
     roundId: string;
@@ -227,10 +238,12 @@ async function createWithUniqueCode(tx: TxClient, data: NewOrderData) {
           code: generateOrderCode(),
           customerId: data.customerId,
           subtotal: data.subtotal,
+          isLeasing: data.isLeasing,
+          leasingFee: data.leasingFee,
           // Мөнгө ороогүй: төлбөр нь дэвтэрт бүртгэгдэх үед л тоологдоно.
           paidAmount: 0,
           refundedAmount: 0,
-          dueAmount: data.subtotal,
+          dueAmount: data.subtotal + data.leasingFee,
           note: data.note,
           items: { create: data.items },
         },
@@ -297,10 +310,12 @@ publicOrdersRouter.get(
       subtotal,
       storageFee,
       cargoFee,
+      leasingFee: order.leasingFee,
       paidAmount,
       refundedAmount,
     });
     const dueAmount = totals.dueAmount;
+    const leasing = serializeLeasing({ ...order, subtotal, storageFee, cargoFee, dueAmount });
 
     const persistStorage = storageFee !== order.storageFee;
     const persistCargo = !frozen && expectedCargo !== order.cargoFee;
@@ -338,6 +353,7 @@ publicOrdersRouter.get(
         refundedAmount,
         dueAmount,
         paymentState: paymentState(totals),
+        ...leasing,
         paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         fulfilment: order.fulfilment,
         createdAt: order.createdAt.toISOString(),
@@ -409,6 +425,82 @@ publicOrdersRouter.post(
   }),
 );
 
+/**
+ * PATCH /api/orders/:code/pay-method — төлөөгүй үед QPay ↔ лизинг солино.
+ * Лизингийн QPay болон шууд QPay нь тусдаа merchant.
+ */
+publicOrdersRouter.patch(
+  '/:code/pay-method',
+  requireCustomer,
+  ipRateLimit(30, 10 * 60 * 1000),
+  validate({
+    params: z.object({ code: z.string().min(3).max(20) }),
+    body: z.object({ leasing: z.boolean() }),
+  }),
+  asyncHandler(async (req, res) => {
+    const code = param(req, 'code').toUpperCase();
+    const leasing = (req.body as { leasing: boolean }).leasing;
+    const order = await prisma.order.findFirst({
+      where: { code, deletedAt: null, customerId: req.auth!.sub },
+    });
+    if (!order) throw notFound('Захиалга олдсонгүй.');
+    if (order.status === 'CANCELLED') {
+      throw conflict('Цуцлагдсан захиалга дээр төлбөрийн хэлбэр солих боломжгүй.');
+    }
+    if (order.paidAmount - order.refundedAmount > 0) {
+      throw conflict('Төлбөр орсон тул төлбөрийн хэлбэр солих боломжгүй.');
+    }
+
+    const flag = leasingFlagOf(order.subtotal, leasing);
+    if (order.isLeasing === flag.isLeasing) {
+      res.json({
+        data: {
+          ...serializeLeasing(order),
+          dueAmount: order.dueAmount,
+          subtotal: order.subtotal,
+        },
+      });
+      return;
+    }
+
+    if (order.qpayInvoiceId) {
+      await cancelQpayInvoice(order.qpayInvoiceId, {
+        silent: true,
+        kind: qpayAccountForOrder(order.isLeasing),
+      });
+    }
+
+    const totals = await prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          isLeasing: flag.isLeasing,
+          qpayInvoiceId: null,
+          qpayInvoiceAt: null,
+        },
+      });
+      return recalcOrderTotals(tx, order.id);
+    });
+
+    await audit({
+      actor: `customer:${order.customerId}`,
+      action: 'PAY_METHOD',
+      entity: 'Order',
+      entityId: order.id,
+      after: { code: order.code, isLeasing: flag.isLeasing, leasingFee: totals.leasingFee },
+    });
+
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
+    res.json({
+      data: {
+        ...serializeLeasing(updated),
+        dueAmount: updated.dueAmount,
+        subtotal: updated.subtotal,
+      },
+    });
+  }),
+);
+
 const fulfilmentBody = z
   .object({
     type: z.enum(['PICKUP', 'DELIVERY']),
@@ -468,7 +560,11 @@ publicOrdersRouter.post(
         (sum, item) => sum + lineCargoFee(item.qty, item.round, itemSelections(item)),
         0,
       );
-    const cargoDue = unpaidCargoFee({ ...order, cargoFee: allCargo });
+    const cargoDue = unpaidCargoFee({
+      ...order,
+      cargoFee: allCargo,
+      storageFee: body.type === 'DELIVERY' ? 0 : order.storageFee,
+    });
     if (body.type === 'DELIVERY' && cargoDue > 0 && body.payMethod !== 'QPAY') {
       throw badRequest('Хүргэлтээр авахад каргог зөвхөн QPay-ээр төлнө.');
     }
@@ -517,6 +613,7 @@ publicOrdersRouter.post(
 
       await syncOrderFulfilment(tx, order.id);
       await syncOrderCargoFee(tx, order.id);
+      await syncOrderStorageFee(order.id, new Date(), tx);
 
       await tx.order.update({
         where: { id: order.id },
@@ -556,6 +653,7 @@ publicOrdersRouter.post(
         deliveryFee: updated.deliveryFee,
         dueAmount: updated.dueAmount,
         cargoFee: updated.cargoFee,
+        storageFee: updated.storageFee,
         delivery: publicDelivery(updated.delivery),
         canChooseFulfilment: orderCanChooseFulfilment(updated),
       },

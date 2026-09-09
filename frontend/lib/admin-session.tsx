@@ -29,13 +29,25 @@ interface AdminSession {
 const Ctx = createContext<AdminSession | null>(null);
 
 const LOGIN_PATH = "/admin/login";
+const LEASING_LOGIN = "/leasing/login";
 
-export function AdminSessionProvider({ children }: { children: ReactNode }) {
+export function AdminSessionProvider({
+  children,
+  portal = "admin",
+}: {
+  children: ReactNode;
+  portal?: "admin" | "leasing";
+}) {
   const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
-  const onLoginPage = pathname === LOGIN_PATH;
+  const loginPath = portal === "leasing" ? LEASING_LOGIN : LOGIN_PATH;
+  const onLoginPage = pathname === loginPath;
+
+  const homeFor = (role: string) => (role === "LEASING" ? "/leasing" : "/admin");
+  const allowed = (role: string) =>
+    portal === "leasing" ? role === "LEASING" : role === "ADMIN" || role === "STAFF";
 
   useEffect(() => {
     if (!readToken("admin")) {
@@ -58,12 +70,13 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Нэвтрээгүй → зөвхөн login; нэвтэрсэн → login-ээс гар.
+  // Нэвтрээгүй → зөвхөн login; нэвтэрсэн → зөв портал руу.
   useEffect(() => {
     if (loading) return;
-    if (!user && !onLoginPage) router.replace(LOGIN_PATH);
-    if (user && onLoginPage) router.replace("/admin");
-  }, [user, loading, onLoginPage, router]);
+    if (!user && !onLoginPage) router.replace(loginPath);
+    if (user && onLoginPage) router.replace(homeFor(user.role));
+    if (user && !onLoginPage && !allowed(user.role)) router.replace(homeFor(user.role));
+  }, [user, loading, onLoginPage, router, loginPath]);
 
   // Login дээр JWT байхгүй бол cookie-г цэвэрлэ — stale cookie-оос сэргийлнэ.
   useEffect(() => {
@@ -77,7 +90,7 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
       const result = await adminApi.login(email.trim().toLowerCase(), password);
       writeToken("admin", result.token);
       setUser(result.user);
-      router.replace("/admin");
+      router.replace(homeFor(result.user.role));
     },
     [router],
   );
@@ -85,8 +98,8 @@ export function AdminSessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     writeToken("admin", null);
     setUser(null);
-    router.replace(LOGIN_PATH);
-  }, [router]);
+    router.replace(loginPath);
+  }, [router, loginPath]);
 
   const value = useMemo<AdminSession>(
     () => ({ user, loading, signIn, signOut }),

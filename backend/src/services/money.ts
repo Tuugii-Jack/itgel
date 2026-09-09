@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { conflict, notFound } from '../lib/errors.js';
+import { leasingFeeOf } from '../lib/leasing.js';
 
 /**
  * Захиалгын мөнгөн дүнгийн цорын ганц эх сурвалж.
@@ -22,6 +23,8 @@ export interface OrderTotals {
   deliveryFee: number;
   storageFee: number;
   cargoFee: number;
+  /** Лизингийн шимтгэл (10%). Энгийн захиалгад 0. */
+  leasingFee: number;
   /** Нийт төлөх ёстой дүн. */
   total: number;
   paidAmount: number;
@@ -36,7 +39,7 @@ export interface OrderTotals {
 export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderTotals> {
   const order = await tx.order.findUnique({
     where: { id: orderId },
-    select: { id: true, storageFee: true, cargoFee: true },
+    select: { id: true, storageFee: true, cargoFee: true, isLeasing: true },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
 
@@ -55,11 +58,13 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
   const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
   const paidAmount = payments.find((p) => p.kind === 'PAYMENT')?._sum.amount ?? 0;
   const refundedAmount = payments.find((p) => p.kind === 'REFUND')?._sum.amount ?? 0;
+  const leasingFee = order.isLeasing ? leasingFeeOf(subtotal) : 0;
 
   const totals = computeTotals({
     subtotal,
     storageFee: order.storageFee,
     cargoFee: order.cargoFee,
+    leasingFee,
     paidAmount,
     refundedAmount,
   });
@@ -68,6 +73,7 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
     where: { id: orderId },
     data: {
       subtotal: totals.subtotal,
+      leasingFee: totals.leasingFee,
       paidAmount: totals.paidAmount,
       refundedAmount: totals.refundedAmount,
       dueAmount: totals.dueAmount,
@@ -84,18 +90,21 @@ export function computeTotals(input: {
   deliveryFee?: number;
   storageFee?: number;
   cargoFee?: number;
+  leasingFee?: number;
   paidAmount: number;
   refundedAmount: number;
 }): OrderTotals {
   const storageFee = input.storageFee ?? 0;
   const cargoFee = input.cargoFee ?? 0;
-  const total = input.subtotal + storageFee + cargoFee;
+  const leasingFee = input.leasingFee ?? 0;
+  const total = input.subtotal + leasingFee + storageFee + cargoFee;
   const netPaid = input.paidAmount - input.refundedAmount;
   return {
     subtotal: input.subtotal,
     deliveryFee: 0,
     storageFee,
     cargoFee,
+    leasingFee,
     total,
     paidAmount: input.paidAmount,
     refundedAmount: input.refundedAmount,
@@ -117,9 +126,17 @@ export function paymentState(totals: OrderTotals): PaymentState {
   return 'PARTIAL';
 }
 
+/** Баталгаажуулах босго: энгийн захиалгад барааны 100%, лизингт шимтгэл (10%). */
+export function confirmThreshold(totals: {
+  subtotal: number;
+  leasingFee?: number;
+}): number {
+  return (totals.leasingFee ?? 0) > 0 ? totals.leasingFee! : totals.subtotal;
+}
+
 /** Захиалга баталгаажих болзол: бараа бүрэн төлөгдсөн байх (карго/агуулах хамаарахгүй). */
 export function fullyPaid(totals: OrderTotals): boolean {
-  return totals.netPaid >= totals.subtotal;
+  return totals.netPaid >= confirmThreshold(totals);
 }
 
 /** Барааны үнэ төлөгдсөн эсэх — карго/агуулахын үлдэгдэл энд хамаарахгүй. */
@@ -127,8 +144,11 @@ export function isProductPaid(order: {
   subtotal: number;
   paidAmount: number;
   refundedAmount: number;
+  leasingFee?: number | null;
 }): boolean {
-  return order.paidAmount - order.refundedAmount >= order.subtotal;
+  const net = order.paidAmount - order.refundedAmount;
+  if ((order.leasingFee ?? 0) > 0) return net >= order.leasingFee!;
+  return net >= order.subtotal;
 }
 
 /**
@@ -139,13 +159,17 @@ export function unpaidCargoFee(input: {
   subtotal: number;
   storageFee?: number;
   cargoFee?: number;
+  leasingFee?: number;
   paidAmount: number;
   refundedAmount: number;
 }): number {
   const cargoFee = Math.max(0, input.cargoFee ?? 0);
   if (cargoFee <= 0) return 0;
   const netPaid = input.paidAmount - input.refundedAmount;
-  const towardCargo = Math.max(0, netPaid - input.subtotal - (input.storageFee ?? 0));
+  const towardCargo = Math.max(
+    0,
+    netPaid - input.subtotal - (input.leasingFee ?? 0) - (input.storageFee ?? 0),
+  );
   return Math.max(0, cargoFee - towardCargo);
 }
 
@@ -176,6 +200,7 @@ export async function loadOrderTotals(orderId: string): Promise<OrderTotals> {
       subtotal: true,
       storageFee: true,
       cargoFee: true,
+      leasingFee: true,
       paidAmount: true,
       refundedAmount: true,
     },

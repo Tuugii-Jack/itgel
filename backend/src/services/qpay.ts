@@ -42,14 +42,52 @@ export interface QpayCheckResult {
   invoiceId?: string;
 }
 
+export type QpayAccountKind = 'shop' | 'leasing';
+
 interface TokenCache {
   access: string;
   refresh: string | null;
   expiresAt: number;
 }
 
-let tokenCache: TokenCache | null = null;
-let authInflight: Promise<string> | null = null;
+interface AccountState {
+  cache: TokenCache | null;
+  inflight: Promise<string> | null;
+}
+
+const accounts: Record<QpayAccountKind, AccountState> = {
+  shop: { cache: null, inflight: null },
+  leasing: { cache: null, inflight: null },
+};
+
+function accountCreds(kind: QpayAccountKind): {
+  username: string;
+  password: string;
+  invoiceCode: string;
+  callbackUrl: string;
+  baseUrl: string;
+} {
+  if (kind === 'leasing') {
+    return {
+      username: env.LEASING_QPAY_CLIENT_ID ?? '',
+      password: env.LEASING_QPAY_CLIENT_SECRET ?? '',
+      invoiceCode: env.LEASING_QPAY_INVOICE_CODE ?? '',
+      callbackUrl: env.LEASING_QPAY_CALLBACK_URL ?? '',
+      baseUrl: env.LEASING_QPAY_BASE_URL ?? env.QPAY_BASE_URL,
+    };
+  }
+  return {
+    username: env.QPAY_USERNAME ?? '',
+    password: env.QPAY_PASSWORD ?? '',
+    invoiceCode: env.QPAY_INVOICE_CODE ?? '',
+    callbackUrl: env.QPAY_CALLBACK_URL ?? '',
+    baseUrl: env.QPAY_BASE_URL,
+  };
+}
+
+export function qpayAccountForOrder(isLeasing: boolean): QpayAccountKind {
+  return isLeasing ? 'leasing' : 'shop';
+}
 
 /** QPay `expires_in` заримдаа секунд, заримдаа unix timestamp буцаадаг. */
 export function qpayTokenExpiresAtMs(
@@ -98,28 +136,35 @@ async function readJson<T>(res: Response, path: string): Promise<T> {
   }
 }
 
-export function isQpayEnabled(): boolean {
-  return env.QPAY_ENABLED;
+export function isQpayEnabled(kind: QpayAccountKind = 'shop'): boolean {
+  return kind === 'leasing' ? env.LEASING_QPAY_ENABLED : env.QPAY_ENABLED;
 }
 
-export function isQpayReady(): boolean {
+export function isQpayReady(kind: QpayAccountKind = 'shop'): boolean {
+  const creds = accountCreds(kind);
   return Boolean(
-    env.QPAY_ENABLED &&
-      env.QPAY_USERNAME &&
-      env.QPAY_PASSWORD &&
-      env.QPAY_INVOICE_CODE &&
-      env.QPAY_CALLBACK_URL,
+    isQpayEnabled(kind) &&
+      creds.username &&
+      creds.password &&
+      creds.invoiceCode &&
+      creds.callbackUrl,
   );
 }
 
 export function qpayPublicStatus(): { enabled: boolean; ready: boolean } {
-  return { enabled: isQpayEnabled(), ready: isQpayReady() };
+  return { enabled: isQpayEnabled('shop'), ready: isQpayReady('shop') };
 }
 
-function assertReady(): void {
-  if (!isQpayReady()) {
+export function leasingQpayPublicStatus(): { enabled: boolean; ready: boolean } {
+  return { enabled: isQpayEnabled('leasing'), ready: isQpayReady('leasing') };
+}
+
+function assertReady(kind: QpayAccountKind = 'shop'): void {
+  if (!isQpayReady(kind)) {
     throw conflict(
-      'QPay одоогоор идэвхжээгүй. Дансаар шилжүүлэх сонголтыг ашиглана уу.',
+      kind === 'leasing'
+        ? 'Лизингийн QPay одоогоор идэвхжээгүй.'
+        : 'QPay одоогоор идэвхжээгүй. Дансаар шилжүүлэх сонголтыг ашиглана уу.',
       { code: 'QPAY_NOT_READY' },
     );
   }
@@ -131,18 +176,24 @@ type TokenResponse = {
   expires_in?: number;
 };
 
-function storeToken(data: TokenResponse, now = Date.now()): string {
-  tokenCache = {
+function storeToken(
+  kind: QpayAccountKind,
+  data: TokenResponse,
+  now = Date.now(),
+): string {
+  const state = accounts[kind];
+  state.cache = {
     access: data.access_token,
-    refresh: data.refresh_token ?? tokenCache?.refresh ?? null,
+    refresh: data.refresh_token ?? state.cache?.refresh ?? null,
     expiresAt: qpayTokenExpiresAtMs(data, now),
   };
   return data.access_token;
 }
 
-async function fetchAccessToken(): Promise<string> {
-  const basic = Buffer.from(`${env.QPAY_USERNAME}:${env.QPAY_PASSWORD}`).toString('base64');
-  const res = await fetch(`${env.QPAY_BASE_URL}/auth/token`, {
+async function fetchAccessToken(kind: QpayAccountKind): Promise<string> {
+  const creds = accountCreds(kind);
+  const basic = Buffer.from(`${creds.username}:${creds.password}`).toString('base64');
+  const res = await fetch(`${creds.baseUrl}/auth/token`, {
     method: 'POST',
     headers: {
       Authorization: `Basic ${basic}`,
@@ -151,14 +202,15 @@ async function fetchAccessToken(): Promise<string> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error('[qpay] auth failed', res.status, body);
+    console.error(`[qpay:${kind}] auth failed`, res.status, body);
     throw conflict(qpayErrorMessage(res.status, body));
   }
-  return storeToken(await readJson<TokenResponse>(res, '/auth/token'));
+  return storeToken(kind, await readJson<TokenResponse>(res, '/auth/token'));
 }
 
-async function refreshAccessToken(refreshToken: string): Promise<string> {
-  const res = await fetch(`${env.QPAY_BASE_URL}/auth/refresh`, {
+async function refreshAccessToken(kind: QpayAccountKind, refreshToken: string): Promise<string> {
+  const creds = accountCreds(kind);
+  const res = await fetch(`${creds.baseUrl}/auth/refresh`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${refreshToken}`,
@@ -167,39 +219,45 @@ async function refreshAccessToken(refreshToken: string): Promise<string> {
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error('[qpay] refresh failed', res.status, body);
+    console.error(`[qpay:${kind}] refresh failed`, res.status, body);
     throw conflict(qpayErrorMessage(res.status, body));
   }
-  return storeToken(await readJson<TokenResponse>(res, '/auth/refresh'));
+  return storeToken(kind, await readJson<TokenResponse>(res, '/auth/refresh'));
 }
 
-async function getAccessToken(): Promise<string> {
-  assertReady();
+async function getAccessToken(kind: QpayAccountKind): Promise<string> {
+  assertReady(kind);
+  const state = accounts[kind];
   const now = Date.now();
-  if (tokenCache && tokenCache.expiresAt > now + 60_000) return tokenCache.access;
-  if (authInflight) return authInflight;
+  if (state.cache && state.cache.expiresAt > now + 60_000) return state.cache.access;
+  if (state.inflight) return state.inflight;
 
-  authInflight = (async () => {
+  state.inflight = (async () => {
     try {
-      if (tokenCache?.refresh) {
+      if (state.cache?.refresh) {
         try {
-          return await refreshAccessToken(tokenCache.refresh);
+          return await refreshAccessToken(kind, state.cache.refresh);
         } catch {
-          tokenCache = null;
+          state.cache = null;
         }
       }
-      return await fetchAccessToken();
+      return await fetchAccessToken(kind);
     } finally {
-      authInflight = null;
+      state.inflight = null;
     }
   })();
 
-  return authInflight;
+  return state.inflight;
 }
 
-async function qpayFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = await getAccessToken();
-  const res = await fetch(`${env.QPAY_BASE_URL}${path}`, {
+async function qpayFetch<T>(
+  path: string,
+  init: RequestInit = {},
+  kind: QpayAccountKind = 'shop',
+): Promise<T> {
+  const token = await getAccessToken(kind);
+  const creds = accountCreds(kind);
+  const res = await fetch(`${creds.baseUrl}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -210,7 +268,7 @@ async function qpayFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error('[qpay]', path, res.status, body);
+    console.error(`[qpay:${kind}]`, path, res.status, body);
     throw conflict(qpayErrorMessage(res.status, body));
   }
 
@@ -245,14 +303,18 @@ function mapInvoice(
 }
 
 /** POST /v2/invoice — QR + банкны deeplink эндээс ирнэ. sender_invoice_no давтахгүй. */
-export async function createQpayInvoice(input: {
-  orderCode: string;
-  amount: number;
-  description?: string;
-}): Promise<QpayInvoice> {
-  assertReady();
+export async function createQpayInvoice(
+  input: {
+    orderCode: string;
+    amount: number;
+    description?: string;
+  },
+  kind: QpayAccountKind = 'shop',
+): Promise<QpayInvoice> {
+  assertReady(kind);
   if (input.amount <= 0) throw conflict('Төлөх дүн 0-ээс их байх ёстой.');
 
+  const creds = accountCreds(kind);
   const senderInvoiceNo = `${input.orderCode}-${Date.now().toString(36)}${Math.random()
     .toString(36)
     .slice(2, 6)}`;
@@ -265,17 +327,21 @@ export async function createQpayInvoice(input: {
     qpay_short_url?: string;
     urls?: { name?: string; description?: string; logo?: string; link?: string }[];
     amount?: number;
-  }>('/invoice', {
-    method: 'POST',
-    body: JSON.stringify({
-      invoice_code: env.QPAY_INVOICE_CODE,
-      sender_invoice_no: senderInvoiceNo,
-      invoice_receiver_code: 'terminal',
-      invoice_description: input.description ?? `Захиалга ${input.orderCode}`,
-      amount: input.amount,
-      callback_url: env.QPAY_CALLBACK_URL,
-    }),
-  });
+  }>(
+    '/invoice',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        invoice_code: creds.invoiceCode,
+        sender_invoice_no: senderInvoiceNo,
+        invoice_receiver_code: 'terminal',
+        invoice_description: input.description ?? `Захиалга ${input.orderCode}`,
+        amount: input.amount,
+        callback_url: creds.callbackUrl,
+      }),
+    },
+    kind,
+  );
 
   return mapInvoice(data, input.amount);
 }
@@ -283,11 +349,15 @@ export async function createQpayInvoice(input: {
 /** DELETE /v2/invoice/{invoice_id} */
 export async function cancelQpayInvoice(
   invoiceId: string,
-  opts?: { silent?: boolean },
+  opts?: { silent?: boolean; kind?: QpayAccountKind },
 ): Promise<void> {
   if (!invoiceId) return;
   try {
-    await qpayFetch(`/invoice/${encodeURIComponent(invoiceId)}`, { method: 'DELETE' });
+    await qpayFetch(
+      `/invoice/${encodeURIComponent(invoiceId)}`,
+      { method: 'DELETE' },
+      opts?.kind ?? 'shop',
+    );
   } catch (e) {
     if (opts?.silent) return;
     throw e;
@@ -306,21 +376,28 @@ export function toQpayDateTime(value: string): string {
 }
 
 /** POST /v2/payment/check — зөвхөн callback-ийн дараа эсвэл хэрэглэгч гараар шалгахад. */
-export async function checkQpayInvoice(invoiceId: string): Promise<QpayCheckResult> {
-  assertReady();
+export async function checkQpayInvoice(
+  invoiceId: string,
+  kind: QpayAccountKind = 'shop',
+): Promise<QpayCheckResult> {
+  assertReady(kind);
 
   const data = await qpayFetch<{
     count?: number;
     paid_amount?: number;
     rows?: { payment_id?: string; invoice_id?: string }[];
-  }>('/payment/check', {
-    method: 'POST',
-    body: JSON.stringify({
-      object_type: 'INVOICE',
-      object_id: invoiceId,
-      offset: { page_number: 1, page_limit: 10 },
-    }),
-  });
+  }>(
+    '/payment/check',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        object_type: 'INVOICE',
+        object_id: invoiceId,
+        offset: { page_number: 1, page_limit: 10 },
+      }),
+    },
+    kind,
+  );
 
   const rows = data.rows ?? [];
   const paidAmount = Math.round(Number(data.paid_amount ?? 0));
@@ -333,11 +410,15 @@ export async function checkQpayInvoice(invoiceId: string): Promise<QpayCheckResu
 }
 
 /** GET /v2/payment/{payment_id} */
-export async function getQpayPayment(paymentId: string): Promise<QpayPaymentDetail> {
-  assertReady();
+export async function getQpayPayment(
+  paymentId: string,
+  kind: QpayAccountKind = 'shop',
+): Promise<QpayPaymentDetail> {
+  assertReady(kind);
   const data = await qpayFetch<Record<string, unknown>>(
     `/payment/${encodeURIComponent(paymentId)}`,
     { method: 'GET' },
+    kind,
   );
   return mapPaymentDetail(data, paymentId);
 }
@@ -373,15 +454,18 @@ function mapPaymentDetail(data: Record<string, unknown>, fallbackId: string): Qp
 }
 
 /** POST /v2/payment/list */
-export async function listQpayPayments(input: {
-  objectType?: string;
-  objectId?: string;
-  startDate?: string;
-  endDate?: string;
-  page?: number;
-  pageLimit?: number;
-}): Promise<QpayPaymentList> {
-  assertReady();
+export async function listQpayPayments(
+  input: {
+    objectType?: string;
+    objectId?: string;
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    pageLimit?: number;
+  },
+  kind: QpayAccountKind = 'shop',
+): Promise<QpayPaymentList> {
+  assertReady(kind);
   const body: Record<string, unknown> = {
     offset: {
       page_number: input.page ?? 1,
@@ -399,21 +483,36 @@ export async function listQpayPayments(input: {
   const data = await qpayFetch<{ count?: number; rows?: Record<string, unknown>[] }>(
     '/payment/list',
     { method: 'POST', body: JSON.stringify(body) },
+    kind,
   );
   const rows = (data.rows ?? []).map((row) => mapPaymentDetail(row, String(row.payment_id ?? '')));
   return { count: data.count ?? rows.length, rows };
 }
 
 /** DELETE /v2/payment/cancel/{payment_id} */
-export async function cancelQpayPayment(paymentId: string): Promise<void> {
-  assertReady();
-  await qpayFetch(`/payment/cancel/${encodeURIComponent(paymentId)}`, { method: 'DELETE' });
+export async function cancelQpayPayment(
+  paymentId: string,
+  kind: QpayAccountKind = 'shop',
+): Promise<void> {
+  assertReady(kind);
+  await qpayFetch(
+    `/payment/cancel/${encodeURIComponent(paymentId)}`,
+    { method: 'DELETE' },
+    kind,
+  );
 }
 
 /** DELETE /v2/payment/refund/{payment_id} */
-export async function refundQpayPayment(paymentId: string): Promise<void> {
-  assertReady();
-  await qpayFetch(`/payment/refund/${encodeURIComponent(paymentId)}`, { method: 'DELETE' });
+export async function refundQpayPayment(
+  paymentId: string,
+  kind: QpayAccountKind = 'shop',
+): Promise<void> {
+  assertReady(kind);
+  await qpayFetch(
+    `/payment/refund/${encodeURIComponent(paymentId)}`,
+    { method: 'DELETE' },
+    kind,
+  );
 }
 
 /** QPay төлбөрийг дэвтэрт бүртгэнэ — давхар webhook/check-д аюулгүй. */
@@ -470,6 +569,7 @@ export async function findOrderByQpayInvoice(invoiceId: string) {
       paidAmount: true,
       qpayInvoiceId: true,
       qpayInvoiceAt: true,
+      isLeasing: true,
     },
   });
 }
@@ -481,12 +581,14 @@ export async function cancelStoredQpayInvoice(
 ): Promise<{ invoiceId: string }> {
   const order = await prisma.order.findFirst({
     where: { id: orderId, deletedAt: null },
-    select: { id: true, code: true, qpayInvoiceId: true },
+    select: { id: true, code: true, qpayInvoiceId: true, isLeasing: true },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
   if (!order.qpayInvoiceId) throw conflict('QPay нэхэмжлэл алга.');
 
-  await cancelQpayInvoice(order.qpayInvoiceId);
+  await cancelQpayInvoice(order.qpayInvoiceId, {
+    kind: qpayAccountForOrder(order.isLeasing),
+  });
 
   await prisma.order.update({
     where: { id: order.id },
@@ -559,6 +661,7 @@ export async function reverseQpayPayment(input: {
   paymentId: string;
   mode: 'cancel' | 'refund';
   actor: string;
+  kind?: QpayAccountKind;
 }): Promise<{
   payment: QpayPaymentDetail;
   recorded: boolean;
@@ -566,9 +669,10 @@ export async function reverseQpayPayment(input: {
   orderCode: string | null;
   ledgerError: string | null;
 }> {
-  const payment = await getQpayPayment(input.paymentId);
-  if (input.mode === 'cancel') await cancelQpayPayment(input.paymentId);
-  else await refundQpayPayment(input.paymentId);
+  const kind = input.kind ?? 'shop';
+  const payment = await getQpayPayment(input.paymentId, kind);
+  if (input.mode === 'cancel') await cancelQpayPayment(input.paymentId, kind);
+  else await refundQpayPayment(input.paymentId, kind);
 
   const ledger = await recordQpayRefund({
     invoiceId: payment.invoiceId,

@@ -10,7 +10,13 @@ import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
-import { orderHasPickup, ITEM_FULFILMENT_LABEL, itemNeedsFulfilment } from "@/lib/fulfilment";
+import { leasingDueHeadline } from "@/lib/leasing";
+import {
+  orderHasPickup,
+  orderAccruesStorage,
+  ITEM_FULFILMENT_LABEL,
+  itemNeedsFulfilment,
+} from "@/lib/fulfilment";
 import { usePolling } from "@/lib/usePolling";
 import type { OrderStatus, PublicOrder } from "@/lib/types";
 import {
@@ -83,16 +89,18 @@ export default function TrackPage() {
     order &&
       store &&
       order.status !== "CANCELLED" &&
-      order.fulfilment !== "PICKUP" &&
       awaitingPayment(order.paymentState) &&
       order.dueAmount > 0 &&
       order.cargoPayMethod !== "CASH" &&
-      !(
-        order.paidAmount - order.refundedAmount >= order.subtotal &&
-        (order.status === "IN_BATCH" ||
-          order.status === "IN_TRANSIT" ||
-          (order.status === "ARRIVED" && order.fulfilment === null))
-      ),
+      (order.isLeasing
+        ? true
+        : order.fulfilment !== "PICKUP" &&
+          !(
+            order.paidAmount - order.refundedAmount >= order.subtotal &&
+            (order.status === "IN_BATCH" ||
+              order.status === "IN_TRANSIT" ||
+              (order.status === "ARRIVED" && order.fulfilment === null))
+          )),
   );
 
   // Төлбөр хүлээгдэж байхад төлөвийг автоматаар шинэчилнэ —
@@ -114,6 +122,7 @@ export default function TrackPage() {
     return <TrackDetailSkeleton />;
   }
 
+  const dueHead = leasingDueHeadline(order);
   const stages = buildStages(order);
   const eta = etaOf(order);
   const canCollect =
@@ -149,7 +158,10 @@ export default function TrackPage() {
           </div>
           <div className="tnum text-[13px] text-muted">{dayLabel(order.createdAt)}</div>
         </div>
-        <Badge tone={STATUS_TONE[order.status]}>{order.statusLabel}</Badge>
+        <div className="flex flex-col items-end gap-1">
+          {order.isLeasing && <Badge tone="info">Лизинг</Badge>}
+          <Badge tone={STATUS_TONE[order.status]}>{order.statusLabel}</Badge>
+        </div>
       </div>
 
       {/* Гурван шатны зурвас ба ирэх огноо */}
@@ -194,10 +206,10 @@ export default function TrackPage() {
         </div>
       </div>
 
-      {/* Агуулахын хадгалалт — ирсэн бараанд */}
+      {/* Агуулахын хадгалалт — хүргэлтээр авна гэснээс хойш харагдахгүй */}
       {order.storage &&
         order.storage.feePerDay > 0 &&
-        order.items.some((i) => i.itemStatus === "arrived") && (
+        orderAccruesStorage(order) && (
           <div className="px-4 pt-6 lg:px-0 lg:pt-0">
             <div
               className={`overflow-hidden rounded-[12px] border p-4 ${
@@ -336,9 +348,11 @@ export default function TrackPage() {
         <div className="mb-3 text-[15px] font-medium lg:mb-0 lg:flex lg:items-baseline lg:justify-between lg:gap-4 lg:border-b lg:border-line lg:bg-surface lg:px-5 lg:py-3.5">
           <span>Захиалсан бараа</span>
           <span className="hidden text-[14px] font-normal text-ink-2 lg:inline">
-            {order.dueAmount > 0 ? "Шилжүүлэх үлдэгдэл " : "Төлсөн, бүтнээр "}
-            <span className={`tnum ${order.dueAmount > 0 ? "text-warn" : "text-ok"}`}>
-              {money(order.dueAmount > 0 ? order.dueAmount : order.paidAmount - order.refundedAmount)}
+            {dueHead.label}{" "}
+            <span
+              className={`tnum ${order.dueAmount > 0 ? "text-warn" : "text-ok"}`}
+            >
+              {money(dueHead.amount)}
             </span>
           </span>
         </div>
@@ -434,7 +448,16 @@ export default function TrackPage() {
       {/* Төлбөр — laptop дээр хүснэгтийн толгойд орсон тул зөвхөн мобайлд */}
       <div className="px-4 pt-6 lg:hidden">
         <div className="flex flex-col gap-2.5 rounded-[12px] border border-line p-3.5">
-          {order.storageFee > 0 && (
+          {order.isLeasing && (order.leasingFee ?? 0) > 0 && (
+            <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
+              <span>Лизингийн шимтгэл (10%)</span>
+              <span className="tnum">
+                {money(order.leasingFee ?? 0)}
+                {order.leasingFeePaid ? " · төлсөн" : " · төлөөгүй"}
+              </span>
+            </div>
+          )}
+          {order.storageFee > 0 && orderAccruesStorage(order) && (
             <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
               <span>Агуулахын хураамж</span>
               <span className="tnum">{money(order.storageFee)}</span>
@@ -448,14 +471,22 @@ export default function TrackPage() {
           )}
           <div className="flex items-center justify-between gap-3">
             <span className="text-[14px] text-ink-2">
-              {order.dueAmount > 0 ? "Шилжүүлэх үлдэгдэл" : "Төлсөн, бүтнээр"}
+              {dueHead.label}
             </span>
             <span
               className={`tnum text-[17px] font-medium ${order.dueAmount > 0 ? "text-warn" : "text-ok"}`}
             >
-              {money(order.dueAmount > 0 ? order.dueAmount : order.paidAmount - order.refundedAmount)}
+              {money(dueHead.amount)}
             </span>
           </div>
+          {order.isLeasing &&
+            order.dueAmount > 0 &&
+            order.dueAmount !== dueHead.amount && (
+              <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
+                <span>Нийт үлдэгдэл</span>
+                <span className="tnum">{money(order.dueAmount)}</span>
+              </div>
+            )}
           {order.refundedAmount > 0 && (
             <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
               <span>Буцаасан</span>

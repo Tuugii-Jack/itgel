@@ -4,6 +4,7 @@ import {
   computeTotals,
   paymentState,
   fullyPaid,
+  isProductPaid,
   unpaidCargoFee,
   type OrderTotals,
 } from '../src/services/money.js';
@@ -31,6 +32,14 @@ describe('Захиалгын дүн', () => {
     expect(t.dueAmount).toBe(115_000);
     expect(t.cargoFee).toBe(12_000);
     expect(t.deliveryFee).toBe(0);
+    expect(t.leasingFee).toBe(0);
+  });
+
+  it('лизингийн шимтгэл нийт дүнд орно', () => {
+    const t = totals({ subtotal: 100_000, leasingFee: 10_000 });
+    expect(t.total).toBe(110_000);
+    expect(t.dueAmount).toBe(110_000);
+    expect(t.leasingFee).toBe(10_000);
   });
 
   it('карго нэмэгдэхэд үлдэгдэл өснө', () => {
@@ -101,6 +110,45 @@ describe('Төлбөрийн байдал', () => {
     expect(fullyPaid(totals({ subtotal: 100_000, paidAmount: 100_000 }))).toBe(true);
     const withCargo = totals({ subtotal: 100_000, cargoFee: 8_000, paidAmount: 100_000 });
     expect(fullyPaid(withCargo)).toBe(true);
+  });
+
+  it('лизингт шимтгэл орсон бол баталгаажина', () => {
+    expect(fullyPaid(totals({ subtotal: 100_000, leasingFee: 10_000, paidAmount: 9_999 }))).toBe(
+      false,
+    );
+    expect(fullyPaid(totals({ subtotal: 100_000, leasingFee: 10_000, paidAmount: 10_000 }))).toBe(
+      true,
+    );
+  });
+});
+
+describe('Барааны төлбөр (багц/тойрог)', () => {
+  it('лизингт шимтгэл орсон бол бараа төлөгдсөнд тооцно', () => {
+    expect(
+      isProductPaid({
+        subtotal: 100_000,
+        paidAmount: 10_000,
+        refundedAmount: 0,
+        leasingFee: 10_000,
+      }),
+    ).toBe(true);
+    expect(
+      isProductPaid({
+        subtotal: 100_000,
+        paidAmount: 9_999,
+        refundedAmount: 0,
+        leasingFee: 10_000,
+      }),
+    ).toBe(false);
+  });
+
+  it('энгийн захиалгад барааны 100% шаардана', () => {
+    expect(
+      isProductPaid({ subtotal: 100_000, paidAmount: 10_000, refundedAmount: 0 }),
+    ).toBe(false);
+    expect(
+      isProductPaid({ subtotal: 100_000, paidAmount: 100_000, refundedAmount: 0 }),
+    ).toBe(true);
   });
 });
 

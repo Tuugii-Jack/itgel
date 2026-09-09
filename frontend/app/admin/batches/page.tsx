@@ -108,6 +108,7 @@ export default function BatchesPage() {
     return (
       <OrderDetail
         orderId={openOrderId}
+        workspace="shop"
         onClose={() => setOpenOrderId(null)}
         onChanged={() => void load(true)}
       />

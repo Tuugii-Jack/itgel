@@ -22,7 +22,7 @@ function publicAdmin(user: {
   id: string;
   email: string;
   name: string;
-  role: 'ADMIN' | 'STAFF';
+  role: 'ADMIN' | 'STAFF' | 'LEASING';
   isActive: boolean;
   createdAt: Date;
   lastLoginAt: Date | null;
@@ -57,13 +57,15 @@ adminStaffRouter.post(
       email: emailSchema,
       name: z.string().trim().min(1).max(80),
       password: z.string().min(6).max(100),
+      role: z.enum(['STAFF', 'LEASING']).default('STAFF'),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const { email, name, password } = req.body as {
+    const { email, name, password, role } = req.body as {
       email: string;
       name: string;
       password: string;
+      role: 'STAFF' | 'LEASING';
     };
 
     const taken = await prisma.adminUser.findUnique({ where: { email } });
@@ -74,7 +76,7 @@ adminStaffRouter.post(
         email,
         name,
         passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
-        role: 'STAFF',
+        role,
       },
     });
 

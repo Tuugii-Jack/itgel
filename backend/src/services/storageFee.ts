@@ -11,6 +11,7 @@ export type StorageItemInput = {
   handedOverAt: Date | null;
   cancelledAt: Date | null;
   qty: number;
+  fulfilment?: 'PICKUP' | 'DELIVERY' | null;
 };
 
 export type StorageFeeBreakdown = {
@@ -38,7 +39,8 @@ type OrderForStorage = {
 
 /**
  * Ирснээс хойш `freeDays` үнэгүй; дараагийн хоног бүр `feePerDay × qty`.
- * Хэсэгчилэн авсан мөр (`handedOverAt`) тооцогдохгүй.
+ * Хэсэгчилэн авсан мөр (`handedOverAt`) болон хүргэлтээр сонгосон мөр
+ * (`DELIVERY`) тооцогдохгүй — сонгосноос хойш агуулахын хураамж нэмэгдэхгүй.
  */
 export function computeStorageFee(
   items: StorageItemInput[],
@@ -56,6 +58,7 @@ export function computeStorageFee(
 
   for (const item of items) {
     if (!item.arrivedAt || item.handedOverAt || item.cancelledAt) continue;
+    if (item.fulfilment === 'DELIVERY') continue;
     const storedDays = Math.max(0, diffUbDays(now, item.arrivedAt));
     const freeLeft = Math.max(0, freeDays - storedDays);
     const billable = Math.max(0, storedDays - freeDays);
@@ -67,13 +70,22 @@ export function computeStorageFee(
   return { fee, billableItemDays, freeDaysLeft, freeDays, feePerDay };
 }
 
+function deliveryChosen(items: StorageItemInput[]): boolean {
+  return items.some(
+    (item) =>
+      item.fulfilment === 'DELIVERY' && !item.cancelledAt && !item.handedOverAt,
+  );
+}
+
 function targetStorageFee(
-  order: Pick<OrderForStorage, 'storageFee' | 'status'>,
+  order: Pick<OrderForStorage, 'storageFee' | 'status' | 'items'>,
   breakdown: StorageFeeBreakdown,
 ): number {
   if (order.status === 'HANDED_OVER' || order.status === 'CANCELLED') {
     return order.storageFee;
   }
+  // Хүргэлтээр авна гэж сонгосон мөрийг агуулахад үлдээхгүй — хураамжийг бууруулна.
+  if (deliveryChosen(order.items)) return breakdown.fee;
   return Math.max(order.storageFee, breakdown.fee);
 }
 
@@ -114,7 +126,7 @@ export async function syncOrdersStorageFees(
       storageFee: true,
       status: true,
       items: {
-        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true },
+        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true, fulfilment: true },
       },
     },
   });
@@ -154,7 +166,7 @@ export async function syncOrderStorageFee(
       storageFee: true,
       status: true,
       items: {
-        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true },
+        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true, fulfilment: true },
       },
     },
   });
@@ -195,7 +207,7 @@ export async function syncAllStorageFees(now = new Date()): Promise<number> {
       storageFee: true,
       status: true,
       items: {
-        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true },
+        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true, fulfilment: true },
       },
     },
     take: 500,

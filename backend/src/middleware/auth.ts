@@ -39,12 +39,12 @@ async function authenticate(req: Request): Promise<TokenPayload | null> {
 
   const own = verifyToken(token);
   if (own) {
-    if (own.role === 'ADMIN' || own.role === 'STAFF') return liveAdmin(own);
+    if (own.role === 'ADMIN' || own.role === 'STAFF' || own.role === 'LEASING') return liveAdmin(own);
     return own;
   }
 
   const supabase = supabaseAuthConfigured ? await resolveSupabaseToken(token) : null;
-  if (supabase && (supabase.role === 'ADMIN' || supabase.role === 'STAFF')) {
+  if (supabase && (supabase.role === 'ADMIN' || supabase.role === 'STAFF' || supabase.role === 'LEASING')) {
     return liveAdmin(supabase);
   }
   return supabase;
@@ -93,6 +93,18 @@ export const requireAdmin = guard((payload) =>
 /** Админ эсвэл ажилтан. */
 export const requireStaff = guard((payload) =>
   payload.role === 'ADMIN' || payload.role === 'STAFF' ? null : forbidden('Хандах эрхгүй.'),
+);
+
+/** Админ, туслах, эсвэл лизингийн админ — нэвтрэлт / нууц үг. */
+export const requireAdminUser = guard((payload) =>
+  payload.role === 'ADMIN' || payload.role === 'STAFF' || payload.role === 'LEASING'
+    ? null
+    : forbidden('Хандах эрхгүй.'),
+);
+
+/** Зөвхөн лизингийн админ. */
+export const requireLeasing = guard((payload) =>
+  payload.role === 'LEASING' ? null : forbidden('Зөвхөн лизингийн админ хандах боломжтой.'),
 );
 
 /** GET-ийг туслах админд зөвшөөрнө. Бичих үйлдэл зөвхөн админ. */

@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { notFound } from '../../lib/errors.js';
+import { forbidden, notFound } from '../../lib/errors.js';
+import { assertCanWriteLeasingOrderMoney } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { loadOrderTotals, PAYMENT_STATE_LABEL, paymentState } from '../../services/money.js';
@@ -17,6 +18,15 @@ const idParams = z.object({ id: z.string().min(1) });
 
 const methodEnum = z.enum(['BANK_TRANSFER', 'CASH', 'CARD', 'QPAY', 'OTHER']);
 
+async function loadLiveOrder(orderId: string) {
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, deletedAt: null },
+    select: { id: true, isLeasing: true },
+  });
+  if (!order) throw notFound('Захиалга олдсонгүй.');
+  return order;
+}
+
 /** Захиалгын төлбөрийн түүх ба одоогийн байдал. */
 adminPaymentsRouter.get(
   '/',
@@ -25,12 +35,7 @@ adminPaymentsRouter.get(
     const orderId = param(req, 'id');
     const { syncOrderStorageFee } = await import('../../services/storageFee.js');
     await syncOrderStorageFee(orderId);
-
-    const order = await prisma.order.findFirst({
-      where: { id: orderId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!order) throw notFound('Захиалга олдсонгүй.');
+    await loadLiveOrder(orderId);
 
     const [payments, totals] = await Promise.all([
       listPayments(orderId),
@@ -46,6 +51,7 @@ adminPaymentsRouter.get(
           deliveryFee: totals.deliveryFee,
           storageFee: totals.storageFee,
           cargoFee: totals.cargoFee,
+          leasingFee: totals.leasingFee,
           total: totals.total,
           paidAmount: totals.paidAmount,
           refundedAmount: totals.refundedAmount,
@@ -80,8 +86,11 @@ adminPaymentsRouter.post(
       note?: string;
     };
 
+    const order = await loadLiveOrder(param(req, 'id'));
+    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+
     const { payment, totals } = await recordPayment({
-      orderId: param(req, 'id'),
+      orderId: order.id,
       kind: 'PAYMENT',
       amount: body.amount,
       method: body.method,
@@ -116,8 +125,11 @@ adminPaymentsRouter.post(
       note?: string;
     };
 
+    const order = await loadLiveOrder(param(req, 'id'));
+    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+
     const { payment, totals } = await recordPayment({
-      orderId: param(req, 'id'),
+      orderId: order.id,
       kind: 'REFUND',
       amount: body.amount,
       method: body.method,
@@ -147,9 +159,13 @@ adminPaymentsRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const body = req.body as { reason?: string; refund: boolean };
+    const order = await loadLiveOrder(param(req, 'id'));
+    if (order.isLeasing && req.auth?.role !== 'LEASING' && body.refund) {
+      throw forbidden('Лизинг захиалгын буцаалтыг лизингийн админ хийнэ.');
+    }
 
     const result = await cancelOrderItem({
-      orderId: param(req, 'id'),
+      orderId: order.id,
       itemId: param(req, 'itemId'),
       reason: body.reason ?? null,
       refund: body.refund,

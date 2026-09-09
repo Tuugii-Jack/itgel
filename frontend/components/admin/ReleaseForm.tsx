@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import { OptionPriceEditor, seedOptionPriceDrafts } from "@/components/admin/OptionPriceEditor";
 import { SkuStockEditor, seedSkuStockDrafts } from "@/components/admin/SkuStockEditor";
+import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, ErrorNote, Field, Input, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
@@ -34,13 +35,14 @@ export function ReleaseForm({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
-  const [products, setProducts] = useState<AdminProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [productId, setProductId] = useState(initialProductId ?? "");
-  const product = useMemo(
-    () => products.find((p) => p.id === productId) ?? null,
-    [products, productId],
-  );
+  const [product, setProduct] = useState<AdminProduct | null>(null);
+  const [loading, setLoading] = useState(Boolean(initialProductId));
+  const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<AdminProduct[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(!initialProductId);
+  const productId = product?.id ?? "";
 
   const [sellPrice, setSellPrice] = useState("");
   const [optionRows, setOptionRows] = useState<
@@ -75,28 +77,55 @@ export function ReleaseForm({
   };
 
   useEffect(() => {
+    const timer = setTimeout(() => setQuery(search.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const list = await adminApi.products({ page: 1, pageSize: 100 });
+    setSearching(true);
+    void adminApi
+      .products({ q: query || undefined, page: 1, pageSize: 30 })
+      .then((list) => {
+        if (!cancelled) setHits(list.data);
+      })
+      .catch((e) => {
         if (cancelled) return;
-        setProducts(list.data);
-        const pick =
-          (initialProductId && list.data.some((p) => p.id === initialProductId)
-            ? initialProductId
-            : list.data[0]?.id) ?? "";
-        setProductId(pick);
-        applyProduct(list.data.find((p) => p.id === pick) ?? list.data[0] ?? null);
-      } catch (e) {
-        if (!cancelled) {
-          const message = e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.";
-          setError(message);
-          toast.error(message);
-        }
-      } finally {
+        const message = e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.";
+        setError(message);
+        toast.error(message);
+      })
+      .finally(() => {
+        if (!cancelled) setSearching(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pickerOpen, query, toast]);
+
+  useEffect(() => {
+    if (!initialProductId) return;
+    let cancelled = false;
+    setLoading(true);
+    void adminApi
+      .product(initialProductId)
+      .then((picked) => {
+        if (cancelled) return;
+        setProduct(picked);
+        applyProduct(picked);
+        setPickerOpen(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        const message = e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.";
+        setError(message);
+        toast.error(message);
+        setPickerOpen(true);
+      })
+      .finally(() => {
         if (!cancelled) setLoading(false);
-      }
-    })();
+      });
     return () => {
       cancelled = true;
     };
@@ -127,9 +156,12 @@ export function ReleaseForm({
     (sell > 0 || optionPrices.length > 0) &&
     (kind === "ready" || Boolean(closeAt));
 
-  const onProductChange = (id: string) => {
-    setProductId(id);
-    applyProduct(products.find((p) => p.id === id) ?? null);
+  const pickProduct = (picked: AdminProduct) => {
+    setProduct(picked);
+    applyProduct(picked);
+    setPickerOpen(false);
+    setSearch("");
+    setError(null);
   };
 
   const save = async () => {
@@ -189,20 +221,94 @@ export function ReleaseForm({
         {error && <ErrorNote>{error}</ErrorNote>}
 
         <Card className="flex flex-col gap-3 p-4">
-          <Field label="Бараа" hint="Каталогийн загвар">
-            <Select
-              value={productId}
-              onChange={onProductChange}
-              options={products.map((p) => ({
-                value: p.id,
-                label: p.category?.name ? `${p.name} · ${p.category.name}` : p.name,
-              }))}
-              className="w-full"
-              placeholder={loading ? "Ачаалж байна…" : "Бараа сонгох"}
-            />
+          <Field label="Бараа" hint="Каталогоос нэрээр хайна">
+            {product && !pickerOpen ? (
+              <div className="flex items-center gap-3 rounded-[8px] border border-line bg-surface px-3 py-2.5">
+                {product.images[0] ? (
+                  <ProductImage
+                    src={product.images[0]}
+                    alt=""
+                    className="h-10 w-10 shrink-0 rounded-[6px] object-cover"
+                  />
+                ) : null}
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[15px]">{product.name}</div>
+                  {product.category?.name && (
+                    <div className="truncate text-[13px] text-ink-2">{product.category.name}</div>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setPickerOpen(true);
+                    setSearch("");
+                  }}
+                >
+                  Өөр бараа
+                </Button>
+              </div>
+            ) : (
+              <Input
+                value={search}
+                onChange={setSearch}
+                placeholder={loading ? "Ачаалж байна…" : "Барааны нэрээр хайх"}
+                autoFocus={!initialProductId}
+                disabled={loading}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && hits[0]) {
+                    e.preventDefault();
+                    pickProduct(hits[0]);
+                  }
+                }}
+              />
+            )}
           </Field>
-          {!loading && products.length === 0 && (
-            <p className="m-0 text-[13px] text-muted">Эхлээд каталогт бараа нэмнэ үү.</p>
+
+          {pickerOpen && (
+            <div className="overflow-hidden rounded-[8px] border border-line">
+              {hits.length === 0 ? (
+                <div className="px-3 py-3 text-[13px] text-muted">
+                  {searching
+                    ? "Хайж байна…"
+                    : query
+                      ? `"${query}" нэртэй бараа олдсонгүй.`
+                      : "Эхлээд каталогт бараа нэмнэ үү."}
+                </div>
+              ) : (
+                <ul className="m-0 max-h-[280px] list-none overflow-y-auto p-0">
+                  {hits.map((hit) => (
+                    <li key={hit.id} className="border-b border-line last:border-b-0">
+                      <button
+                        type="button"
+                        onClick={() => pickProduct(hit)}
+                        className={`flex w-full cursor-pointer items-center gap-3 border-0 bg-transparent px-3 py-2.5 text-left hover:bg-surface ${
+                          hit.id === productId ? "bg-primary-soft" : ""
+                        }`}
+                      >
+                        {hit.images[0] ? (
+                          <ProductImage
+                            src={hit.images[0]}
+                            alt=""
+                            className="h-9 w-9 shrink-0 rounded-[6px] object-cover"
+                          />
+                        ) : (
+                          <span className="h-9 w-9 shrink-0 rounded-[6px] bg-surface-2" />
+                        )}
+                        <span className="min-w-0">
+                          <span className="block truncate text-[14px] text-ink">{hit.name}</span>
+                          {hit.category?.name && (
+                            <span className="block truncate text-[12px] text-ink-2">
+                              {hit.category.name}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
         </Card>
 

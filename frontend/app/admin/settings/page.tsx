@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { PageHead } from "@/components/admin/shared";
+import { PageHead, Select } from "@/components/admin/shared";
 import {
   Button,
   Card,
@@ -323,6 +323,7 @@ function StaffAccountsCard() {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [role, setRole] = useState<"STAFF" | "LEASING">("STAFF");
   const [busy, setBusy] = useState(false);
   const [resetId, setResetId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
@@ -350,12 +351,14 @@ function StaffAccountsCard() {
         email: email.trim(),
         name: name.trim(),
         password,
+        role,
       });
       setEmail("");
       setName("");
       setPassword("");
+      setRole("STAFF");
       setCreating(false);
-      toast.success("Туслах админ үүслээ.");
+      toast.success(role === "LEASING" ? "Лизингийн админ үүслээ." : "Туслах админ үүслээ.");
       await load();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Үүсгэж чадсангүй.");
@@ -393,9 +396,9 @@ function StaffAccountsCard() {
     <Card className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-[15px] font-medium">Туслах админ</div>
+          <div className="text-[15px] font-medium">Админ хэрэглэгчид</div>
           <p className="mt-1 mb-0 text-[13px] text-ink-2">
-            Захиалга харах, хүлээлгэн өгөх, хэрэглэгч харах эрхтэй. Өөрчлөлт хийхгүй.
+            Туслах админ захиалга харна. Лизингийн админ зөвхөн лизинг захиалгыг удирдана.
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={() => setCreating((v) => !v)}>
@@ -413,6 +416,17 @@ function StaffAccountsCard() {
           </Field>
           <Field label="Нууц үг">
             <Input value={password} onChange={setPassword} type="password" placeholder="••••••" />
+          </Field>
+          <Field label="Эрх">
+            <Select
+              value={role}
+              onChange={(v) => setRole(v as "STAFF" | "LEASING")}
+              options={[
+                { value: "STAFF", label: "Туслах админ" },
+                { value: "LEASING", label: "Лизингийн админ" },
+              ]}
+              className="w-full"
+            />
           </Field>
           <div>
             <Button
@@ -453,7 +467,7 @@ function StaffAccountsCard() {
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {row.role === "STAFF" && (
+                  {(row.role === "STAFF" || row.role === "LEASING") && (
                     <>
                       <Button
                         size="sm"

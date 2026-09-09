@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ORDER_STATUS_LABEL, OrderBadge, PageHead, Select } from "@/components/admin/shared";
+import { ORDER_STATUS_LABEL, OrderBadge, PageHead, Select, LeasingBadge, LeasingGoodsBadge } from "@/components/admin/shared";
 import { OrderQpayCard } from "@/components/admin/OrderQpay";
 import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
 import {
@@ -22,6 +22,7 @@ import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { downloadOrdersExcel, printOrders, type OrderExportSelection } from "@/lib/orderExport";
 import { PAYMENT_TONE } from "@/lib/payment";
+import { leasingGoodsArrived } from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
 import type {
   AdminOrderDetail,
@@ -65,6 +66,22 @@ const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "OTHER", label: "Бусад" },
 ];
 
+type OrderWorkspaceApi = {
+  order: typeof adminApi.order;
+  ledger: typeof adminApi.ledger;
+  orderQpay: typeof adminApi.orderQpay;
+  setOrderStatus: typeof adminApi.setOrderStatus;
+  revertOrderStatus: typeof adminApi.revertOrderStatus;
+  cancelOrderItem: typeof adminApi.cancelOrderItem;
+  recordPayment: typeof adminApi.recordPayment;
+  recordRefund: typeof adminApi.recordRefund;
+  checkOrderQpay: typeof adminApi.checkOrderQpay;
+  orderQpayPayments: typeof adminApi.orderQpayPayments;
+  cancelOrderQpayInvoice: typeof adminApi.cancelOrderQpayInvoice;
+  cancelOrderQpayPayment: typeof adminApi.cancelOrderQpayPayment;
+  refundOrderQpayPayment: typeof adminApi.refundOrderQpayPayment;
+};
+
 /**
  * Захиалгын дэлгэрэнгүй — төлбөрийн дэвтэр энд байна.
  * Захиалгыг баталгаажуулахын өмнө мөнгө орсныг эндээс бүртгэнэ.
@@ -73,10 +90,16 @@ export function OrderDetail({
   orderId,
   onClose,
   onChanged,
+  api = adminApi,
+  canWrite: canWriteProp,
+  workspace: workspaceProp,
 }: {
   orderId: string;
   onClose: () => void;
   onChanged: () => void;
+  api?: OrderWorkspaceApi;
+  canWrite?: boolean;
+  workspace?: "shop" | "leasing";
 }) {
   const [order, setOrder] = useState<AdminOrderDetail | null>(null);
   const [ledger, setLedger] = useState<PaymentLedger | null>(null);
@@ -87,7 +110,15 @@ export function OrderDetail({
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
   const { user } = useAdminSession();
-  const canWrite = isFullAdmin(user?.role);
+  const workspace = workspaceProp ?? "shop";
+  const canWrite = canWriteProp ?? isFullAdmin(user?.role);
+  const leasingPortal = workspace === "leasing";
+  /** Зөвхөн лизингээр авсан захиалга — QPay захиалгад төлбөр бүртгэх хэвээр. */
+  const leasingOrder = order?.isLeasing === true;
+  const lockShopPayments = !leasingPortal && leasingOrder;
+  const canWritePayments = canWrite && !lockShopPayments;
+  const canWriteStatus = canWrite && !leasingPortal;
+  const canCancelItems = canWrite && !leasingPortal && !lockShopPayments;
   const busy = busyKey !== null;
   /** Төлбөр дутуу гэж 409 өгсөн үед force-оор давах саналыг харуулна. */
   const [shortfall, setShortfall] = useState<{ status: OrderStatus; missing: number } | null>(
@@ -101,9 +132,9 @@ export function OrderDetail({
     setError(null);
     try {
       const [o, l, q] = await Promise.all([
-        adminApi.order(orderId),
-        adminApi.ledger(orderId),
-        adminApi.orderQpay(orderId).catch(() => null),
+        api.order(orderId),
+        api.ledger(orderId),
+        api.orderQpay(orderId).catch(() => null),
       ]);
       setOrder(o);
       setLedger(l);
@@ -113,7 +144,7 @@ export function OrderDetail({
     } finally {
       setLoading(false);
     }
-  }, [orderId]);
+  }, [orderId, api]);
 
   useEffect(() => {
     void load();
@@ -146,7 +177,7 @@ export function OrderDetail({
     setError(null);
     setShortfall(null);
     try {
-      await adminApi.setOrderStatus(orderId, status, undefined, force);
+      await api.setOrderStatus(orderId, status, undefined, force);
       toast.success(`Төлөв «${ORDER_STATUS_LABEL[status]}» боллоо.`);
       await load();
       onChanged();
@@ -173,7 +204,7 @@ export function OrderDetail({
     setError(null);
     setShortfall(null);
     try {
-      await adminApi.revertOrderStatus(orderId);
+      await api.revertOrderStatus(orderId);
       toast.success("Төлөв нэг алхам буцаагдлаа.");
       await load();
       onChanged();
@@ -272,10 +303,17 @@ export function OrderDetail({
       )}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <OrderBadge status={order.status} />
-        <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
+        {leasingPortal ? (
+          <LeasingGoodsBadge status={order.status} dueAmount={order.dueAmount} />
+        ) : (
+          <OrderBadge status={order.status} />
+        )}
+        {order.isLeasing && <LeasingBadge />}
+        {!leasingPortal && (
+          <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
+        )}
         {order.batch &&
-          (canWrite ? (
+          (canWriteStatus ? (
           <Link
             href="/admin/batches"
             className="no-underline"
@@ -296,12 +334,24 @@ export function OrderDetail({
           ))}
       </div>
 
+      {lockShopPayments && (
+        <Card className="mb-4 border-line p-4">
+          <div className="text-[14px] leading-[1.5] text-ink-2">
+            Энэ захиалга <span className="font-medium">лизингээр</span> авсан тул төлбөр
+            бүртгэх, буцаалт, QPay шалгах/цуцлах энд байхгүй. Үүнийг лизингийн админ
+            хийнэ. QPay-ээр авсан захиалга дээр эдгээр үйлдэл хэвээр харагдана.
+          </div>
+        </Card>
+      )}
+
       {order.paymentClaimedAt && order.dueAmount > 0 && (
         <Card className="mb-4 border-info bg-info-bg p-4">
           <div className="text-[14px] leading-[1.5] text-info">
             Хэрэглэгч <span className="tnum">{dayTimeLabel(order.paymentClaimedAt)}</span>-нд
             мөнгө шилжүүлсэн гэж мэдэгдсэн.
-            {canWrite
+            {lockShopPayments
+              ? " Лизингээр авсан тул төлбөрийг лизингийн админ бүртгэнэ."
+              : canWritePayments
               ? " Дансаа шалгаад доор төлбөрийг бүртгэнэ үү — мэдэгдэл нь төлбөр орсны баталгаа биш."
               : " Мэдэгдэл нь төлбөр орсны баталгаа биш."}
           </div>
@@ -314,7 +364,7 @@ export function OrderDetail({
         </div>
       )}
 
-      {canWrite && shortfall && (
+      {canWriteStatus && shortfall && (
         <Card className="mb-4 border-warn bg-warn-bg p-4">
           <div className="text-[14px] leading-[1.5] text-warn">
             <span className="tnum font-medium">{money(shortfall.missing)}</span> ороогүй
@@ -365,7 +415,7 @@ export function OrderDetail({
                   <span className={`tnum text-[15px] ${item.cancelled ? "text-muted line-through" : ""}`}>
                     {money(item.total)}
                   </span>
-                  {!item.cancelled && canWrite && order.status !== "HANDED_OVER" && (
+                  {!item.cancelled && canCancelItems && order.status !== "HANDED_OVER" && (
                     <CancelItem
                       disabled={busy}
                       loading={busyKey === `item:${item.id}`}
@@ -373,7 +423,7 @@ export function OrderDetail({
                         run(
                           `item:${item.id}`,
                           () =>
-                            adminApi.cancelOrderItem(order.id, item.id, { reason, refund }),
+                            api.cancelOrderItem(order.id, item.id, { reason, refund }),
                           "Мөр цуцлагдлаа.",
                         )
                       }
@@ -422,12 +472,13 @@ export function OrderDetail({
             disabled={busy}
             busyKey={busyKey}
             onAction={run}
-            readOnly={!canWrite}
+            readOnly={!canWritePayments}
+            api={api}
           />
         </div>
 
         <div className="flex flex-col gap-4">
-          {canWrite ? (
+          {canWriteStatus ? (
           <StatusActions
             status={order.status}
             disabled={busy}
@@ -435,6 +486,20 @@ export function OrderDetail({
             onChange={changeStatus}
             onRevert={revertStatus}
           />
+          ) : leasingPortal ? (
+            <Card className="flex flex-col gap-3 p-4">
+              <div className="text-[15px] font-medium">Бараа</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <LeasingGoodsBadge status={order.status} dueAmount={order.dueAmount} />
+              </div>
+              <div className="text-[13px] text-ink-2">
+                {leasingGoodsArrived(order.status)
+                  ? order.dueAmount > 0
+                    ? "Бараа ирсэн. Үлдэгдэл төлбөрийг доор бүртгэнэ үү."
+                    : "Бараа ирсэн. Төлбөр гүйцэд орсон."
+                  : "Бараа хараахан ирээгүй байна."}
+              </div>
+            </Card>
           ) : (
             <Card className="flex flex-col gap-3 p-4">
               <div className="text-[15px] font-medium">Төлөв</div>
@@ -453,6 +518,26 @@ export function OrderDetail({
           )}
 
           <Card className="flex flex-col gap-2 p-4">
+            {order.isLeasing && (
+              <>
+                <div className="mb-1 text-[15px] font-medium">Лизинг</div>
+                <SumRow
+                  label="Шимтгэл (10%)"
+                  value={`${money(order.leasingFee ?? 0)}${order.leasingFeePaid ? " · төлсөн" : " · төлөөгүй"}`}
+                />
+                <SumRow
+                  label="Үндсэн төлбөр"
+                  value={`${money(order.leasingPrincipalPaid ?? 0)} / ${money(order.subtotal)}`}
+                />
+                <SumRow label="Төлсөн дүн" value={money(order.paidAmount)} />
+                <SumRow label="Үлдэгдэл" value={money(Math.max(0, order.dueAmount))} />
+                <div className="flex items-baseline justify-between gap-2 text-[14px]">
+                  <span className="text-ink-2">Төлөлтийн статус</span>
+                  <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
+                </div>
+                <Divider />
+              </>
+            )}
             <SumRow label="Барааны дүн" value={money(totals.subtotal)} />
             {totals.deliveryFee > 0 && (
               <SumRow label="Хүргэлт" value={money(totals.deliveryFee)} />
@@ -475,31 +560,45 @@ export function OrderDetail({
                 {totals.dueAmount < 0 ? "Илүү төлсөн" : "Үлдэгдэл"}
               </span>
               <span
-                className={`tnum text-[20px] font-medium ${totals.dueAmount > 0 ? "text-warn" : totals.dueAmount < 0 ? "text-info" : ""}`}
+                className={`tnum text-[20px] font-medium ${
+                  totals.dueAmount > 0
+                    ? leasingPortal && leasingGoodsArrived(order.status)
+                      ? "text-danger"
+                      : "text-warn"
+                    : totals.dueAmount < 0
+                      ? "text-info"
+                      : ""
+                }`}
               >
                 {money(Math.abs(totals.dueAmount))}
               </span>
             </div>
           </Card>
 
-          {canWrite && totals.dueAmount > 0 && (
+          {canWritePayments && totals.dueAmount > 0 && (
             <RecordPayment
-              suggested={totals.dueAmount}
+              suggested={
+                order.isLeasing && !order.leasingFeePaid
+                  ? (order.leasingFee ?? totals.dueAmount)
+                  : order.isLeasing && (order.leasingPrincipalDue ?? 0) > 0
+                    ? (order.leasingPrincipalDue ?? totals.dueAmount)
+                    : totals.dueAmount
+              }
               disabled={busy}
               loading={busyKey === "payment"}
               onSubmit={(body) =>
-                run("payment", () => adminApi.recordPayment(order.id, body), "Төлбөр бүртгэгдлээ.")
+                run("payment", () => api.recordPayment(order.id, body), "Төлбөр бүртгэгдлээ.")
               }
             />
           )}
 
-          {canWrite && ledger.maxRefundable > 0 && (
+          {canWritePayments && ledger.maxRefundable > 0 && (
             <RecordRefund
               max={ledger.maxRefundable}
               disabled={busy}
               loading={busyKey === "refund"}
               onSubmit={(body) =>
-                run("refund", () => adminApi.recordRefund(order.id, body), "Буцаалт бүртгэгдлээ.")
+                run("refund", () => api.recordRefund(order.id, body), "Буцаалт бүртгэгдлээ.")
               }
             />
           )}

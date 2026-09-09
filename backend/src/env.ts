@@ -84,6 +84,23 @@ const schema = z.object({
    * Жишээ: https://api.itgelshop.mn/api/orders/qpay/callback
    */
   QPAY_CALLBACK_URL: z.preprocess(emptyToUndef, z.string().url().optional()),
+
+  /**
+   * Лизингийн QPay — дэлгүүрийн QPay-аас ТУСДАА merchant account.
+   * LEASING_QPAY_ENABLED=true + client_id/secret/invoice_code бөглөгдсөн үед идэвхжинэ.
+   */
+  LEASING_QPAY_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
+  LEASING_QPAY_BASE_URL: z.preprocess(emptyToUndef, z.string().url().optional()),
+  LEASING_QPAY_CLIENT_ID: z.preprocess(emptyToUndef, z.string().optional()),
+  LEASING_QPAY_CLIENT_SECRET: z.preprocess(emptyToUndef, z.string().optional()),
+  LEASING_QPAY_INVOICE_CODE: z.preprocess(emptyToUndef, z.string().optional()),
+  /**
+   * Жишээ: https://api.itgelshop.mn/api/orders/leasing-qpay/callback
+   */
+  LEASING_QPAY_CALLBACK_URL: z.preprocess(emptyToUndef, z.string().url().optional()),
 });
 
 const parsed = schema.safeParse(process.env);

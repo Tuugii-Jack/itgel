@@ -55,6 +55,7 @@ enum DeliveryStatus {
 enum AdminRole {
   ADMIN
   STAFF
+  LEASING
 }
 
 enum PaymentKind {
@@ -349,6 +350,11 @@ model Order {
   qpayInvoiceId String?
   qpayInvoiceAt DateTime?
 
+  /// Лизингээр авсан захиалга. Энгийн QPay захиалгад false.
+  isLeasing  Boolean @default(false)
+  /// Нийт үнийн 10% — лизингийн шимтгэл. Лизинг биш бол 0.
+  leasingFee Int     @default(0)
+
   customer Customer    @relation(fields: [customerId], references: [id])
   batch    Batch?      @relation(fields: [batchId], references: [id])
   items    OrderItem[]
@@ -362,6 +368,7 @@ model Order {
   /// «Төлбөр дутуу захиалга» шүүхэд.
   @@index([dueAmount])
   @@index([deletedAt, status, createdAt])
+  @@index([isLeasing, createdAt])
 }
 
 /// Орлого, буцаалт бүрийн бичилт. Устгагдахгүй — залруулга нь эсрэг мөр.

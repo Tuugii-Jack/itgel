@@ -1,0 +1,150 @@
+import { describe, expect, it } from 'vitest';
+import { leasingFeeOf, leasingFlagOf, leasingView, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere } from '../src/lib/leasing.js';
+
+describe('Лизингийн шимтгэл', () => {
+  it('нийт үнийн 10%', () => {
+    expect(leasingFeeOf(100_000)).toBe(10_000);
+    expect(leasingFeeOf(199_000)).toBe(19_900);
+  });
+
+  it('эерэг биш дүн 0', () => {
+    expect(leasingFeeOf(0)).toBe(0);
+    expect(leasingFeeOf(-1)).toBe(0);
+  });
+
+  it('QPay ↔ лизинг шилжихэд шимтгэл зөв', () => {
+    expect(leasingFlagOf(1_000, true)).toEqual({ isLeasing: true, leasingFee: 100 });
+    expect(leasingFlagOf(1_000, false)).toEqual({ isLeasing: false, leasingFee: 0 });
+  });
+});
+
+describe('Лизингийн төлөлт', () => {
+  it('эхлээд шимтгэлийг нэхэмжилнэ', () => {
+    const view = leasingView({
+      isLeasing: true,
+      leasingFee: 10_000,
+      subtotal: 100_000,
+      paidAmount: 0,
+      refundedAmount: 0,
+    });
+    expect(view.nextPayKind).toBe('FEE');
+    expect(view.nextPayAmount).toBe(10_000);
+    expect(view.feePaid).toBe(false);
+    expect(view.principalDue).toBe(100_000);
+  });
+
+  it('шимтгэл төлөгдсөний дараа үндсэн 100% үлдэнэ', () => {
+    const view = leasingView({
+      isLeasing: true,
+      leasingFee: 10_000,
+      subtotal: 100_000,
+      paidAmount: 10_000,
+      refundedAmount: 0,
+      dueAmount: 100_000,
+    });
+    expect(view.feePaid).toBe(true);
+    expect(view.nextPayKind).toBe('PRINCIPAL');
+    expect(view.nextPayAmount).toBe(100_000);
+    expect(view.principalPaid).toBe(0);
+  });
+
+  it('бүгдийг төлсөн бол дараагийн төлөлтгүй', () => {
+    const view = leasingView({
+      isLeasing: true,
+      leasingFee: 10_000,
+      subtotal: 100_000,
+      paidAmount: 110_000,
+      refundedAmount: 0,
+      dueAmount: 0,
+    });
+    expect(view.nextPayKind).toBe('NONE');
+    expect(view.nextPayAmount).toBe(0);
+    expect(view.principalPaid).toBe(100_000);
+  });
+});
+
+describe('QPay нэхэмжлэлийн дүн', () => {
+  it('шимтгэл төлөгдөөгүй бол 10% — бүтэн дүнг хүссэн ч 10% л гарна', () => {
+    const view = leasingView({
+      isLeasing: true,
+      leasingFee: 100,
+      subtotal: 1_000,
+      paidAmount: 0,
+      refundedAmount: 0,
+    });
+    expect(resolveInvoiceAmount(view).amount).toBe(100);
+    expect(resolveInvoiceAmount(view, 1_100).amount).toBe(100);
+    expect(resolveInvoiceAmount(view).kind).toBe('FEE');
+  });
+
+  it('үндсэн төлбөрийг хувааж нэхэмжилнэ', () => {
+    const view = leasingView({
+      isLeasing: true,
+      leasingFee: 100,
+      subtotal: 1_000,
+      paidAmount: 100,
+      refundedAmount: 0,
+      dueAmount: 1_000,
+    });
+    expect(resolveInvoiceAmount(view).amount).toBe(0);
+    expect(resolveInvoiceAmount(view, 250).amount).toBe(250);
+    expect(resolveInvoiceAmount(view, 1_000).amount).toBe(1_000);
+    expect(resolveInvoiceAmount(view, 9_999).amount).toBe(1_000);
+  });
+
+  it('энгийн захиалга дүнгүйгээр үлдэгдлийг нэхэмжилнэ', () => {
+    const view = leasingView({
+      isLeasing: false,
+      subtotal: 1_000,
+      paidAmount: 0,
+      refundedAmount: 0,
+    });
+    expect(view.nextPayKind).toBe('BALANCE');
+    expect(resolveInvoiceAmount(view).amount).toBe(1_000);
+  });
+
+  it('карго/агуулахын үлдэгдлийг дүнгүйгээр нэхэмжилнэ', () => {
+    const view = leasingView({
+      isLeasing: true,
+      leasingFee: 100,
+      subtotal: 1_000,
+      paidAmount: 1_100,
+      refundedAmount: 0,
+      cargoFee: 50,
+      dueAmount: 50,
+    });
+    expect(view.nextPayKind).toBe('BALANCE');
+    expect(resolveInvoiceAmount(view).amount).toBe(50);
+  });
+});
+
+describe('Лизинг захиалгын мөнгө бичих эрх', () => {
+  it('дэлгүүрийн админ лизинг дээр бүртгэж чадахгүй', () => {
+    expect(canWriteLeasingOrderMoney(true, 'ADMIN')).toBe(false);
+    expect(canWriteLeasingOrderMoney(true, 'STAFF')).toBe(false);
+  });
+
+  it('лизингийн админ л лизинг дээр бүртгэнэ', () => {
+    expect(canWriteLeasingOrderMoney(true, 'LEASING')).toBe(true);
+  });
+
+  it('QPay захиалга дээр дэлгүүрийн админ бүртгэж болно', () => {
+    expect(canWriteLeasingOrderMoney(false, 'ADMIN')).toBe(true);
+    expect(canWriteLeasingOrderMoney(false, 'STAFF')).toBe(true);
+  });
+});
+
+describe('Лизинг бараа ирсэн эсэх', () => {
+  it('ирсэн төлөөгүйг ялгана', () => {
+    expect(leasingGoodsWhere('arrived_unpaid')).toEqual({
+      status: { in: ['ARRIVED', 'HANDED_OVER'] },
+      dueAmount: { gt: 0 },
+    });
+  });
+
+  it('ирээгүйг статус биш ирэлтээр шүүнэ', () => {
+    expect(leasingGoodsWhere('not_arrived').status).toEqual({
+      in: ['NEW', 'CONFIRMED', 'IN_BATCH', 'IN_TRANSIT'],
+    });
+  });
+});

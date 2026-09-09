@@ -3,7 +3,7 @@ import { prisma } from '../prisma.js';
 import { shopRoundWhere } from '../lib/roundShop.js';
 import { publicProduct } from './serialize.js';
 import { districtList, districtNames, getSettingsCached } from './settings.js';
-import { qpayPublicStatus } from './qpay.js';
+import { qpayPublicStatus, leasingQpayPublicStatus } from './qpay.js';
 
 const ORDER_PREVIEW = 8;
 const READY_PAGE = 20;
@@ -171,6 +171,7 @@ export async function publicStorePayload() {
     deliveryFees: districtList(settings),
     bank: null,
     qpay: qpayPublicStatus(),
+    leasingQpay: leasingQpayPublicStatus(),
     unpaidCancelHours: settings.unpaidCancelHours,
     storageFreeDays: settings.storageFreeDays,
     storageFeePerDay: settings.storageFeePerDay,

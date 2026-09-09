@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
-import { badRequest } from '../../lib/errors.js';
+import { badRequest, forbidden } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import {
@@ -58,6 +58,9 @@ adminQpayRouter.post(
     const { invoiceId } = req.body as z.infer<typeof invoiceIdBody>;
     const check = await checkQpayInvoice(invoiceId);
     const order = await findOrderByQpayInvoice(invoiceId);
+    if (order?.isLeasing === true) {
+      throw forbidden('Лизинг захиалгын төлбөрийг зөвхөн лизингийн админ бүртгэнэ.');
+    }
 
     let recorded = false;
     if (order && check.paid && check.paidAmount > 0) {
@@ -140,6 +143,9 @@ adminQpayRouter.delete(
   asyncHandler(async (req, res) => {
     const invoiceId = param(req, 'invoiceId');
     const order = await findOrderByQpayInvoice(invoiceId);
+    if (order?.isLeasing === true) {
+      throw forbidden('Лизинг захиалгын төлбөрийг зөвхөн лизингийн админ бүртгэнэ.');
+    }
     await cancelQpayInvoice(invoiceId);
 
     if (order) {

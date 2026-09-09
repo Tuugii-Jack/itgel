@@ -186,7 +186,7 @@ export async function cancelUnpaidOrdersForRound(
       status: { notIn: ['CANCELLED', 'HANDED_OVER'] },
       items: { some: { roundId, cancelledAt: null } },
     },
-    select: { id: true, code: true, subtotal: true, paidAmount: true, refundedAmount: true },
+    select: { id: true, code: true, subtotal: true, paidAmount: true, refundedAmount: true, leasingFee: true },
     take: 500,
   });
   const unpaid = candidates.filter((o) => !isProductPaid(o));
@@ -243,6 +243,7 @@ export async function promotePaidOrdersInTransitForRound(
       subtotal: true,
       paidAmount: true,
       refundedAmount: true,
+      leasingFee: true,
     },
     take: 500,
   });

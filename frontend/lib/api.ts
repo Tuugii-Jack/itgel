@@ -402,6 +402,7 @@ export const api = {
   createOrder: (body: {
     name?: string;
     note?: string;
+    leasing?: boolean;
     items: {
       productId: string;
       qty: number;
@@ -431,11 +432,25 @@ export const api = {
       { method: "POST", auth: "customer" },
     ).then((r) => r.data),
 
-  /** QPay нэхэмжлэл үүсгэх — QR + deeplink. */
-  createQpayInvoice: (code: string) =>
+  /** Төлөөгүй үед QPay ↔ лизинг солино. */
+  setOrderPayMethod: (code: string, body: { leasing: boolean }) =>
+    request<{
+      isLeasing: boolean;
+      leasingFee: number;
+      dueAmount: number;
+      subtotal: number;
+    }>(`/orders/${code}/pay-method`, {
+      method: "PATCH",
+      auth: "customer",
+      body,
+    }).then((r) => r.data),
+
+  /** QPay нэхэмжлэл үүсгэх — QR + deeplink. Лизингт `amount`-аар хувааж төлнө. */
+  createQpayInvoice: (code: string, body?: { amount?: number }) =>
     request<QpayInvoice>(`/orders/${code}/qpay/invoice`, {
       method: "POST",
       auth: "customer",
+      body: body ?? {},
     }).then((r) => r.data),
 
   /** Манай дэвтэр — QPay-г poll хийхгүй. */
@@ -447,7 +462,7 @@ export const api = {
 
   /** Callback-ийн дараа нэг удаа payment/check. */
   qpayVerify: (code: string) =>
-    request<{ paid: boolean; invoiceId: string | null }>(
+    request<{ paid: boolean; paidAmount: number; invoiceId: string | null }>(
       `/orders/${code}/qpay/verify`,
       { method: "POST", auth: "customer" },
     ).then((r) => r.data),
@@ -470,6 +485,7 @@ export const api = {
       deliveryFee: number;
       dueAmount: number;
       cargoFee?: number;
+      storageFee?: number;
       delivery: PublicOrder["delivery"];
       canChooseFulfilment: boolean;
     }>(`/orders/${code}/fulfilment`, {
@@ -947,6 +963,30 @@ export const adminApi = {
       method: "DELETE",
     }).then((r) => r.data),
 
+  cancelOrderQpayPayment: (orderId: string, paymentId: string) =>
+    request<{
+      payment: QpayPaymentRow;
+      recorded: boolean;
+      orderId: string | null;
+      orderCode: string | null;
+      ledgerError: string | null;
+    }>(`/admin/orders/${orderId}/qpay/payments/${paymentId}/cancel`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
+  refundOrderQpayPayment: (orderId: string, paymentId: string) =>
+    request<{
+      payment: QpayPaymentRow;
+      recorded: boolean;
+      orderId: string | null;
+      orderCode: string | null;
+      ledgerError: string | null;
+    }>(`/admin/orders/${orderId}/qpay/payments/${paymentId}/refund`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
   qpayPayment: (paymentId: string) =>
     request<QpayPaymentRow>(`/admin/qpay/payments/${paymentId}`, adminAuth).then(
       (r) => r.data,
@@ -1380,7 +1420,12 @@ export const adminApi = {
   staffUsers: () =>
     request<AdminStaffUser[]>("/admin/staff", adminAuth).then((r) => r.data),
 
-  createStaffUser: (body: { email: string; name: string; password: string }) =>
+  createStaffUser: (body: {
+    email: string;
+    name: string;
+    password: string;
+    role?: "STAFF" | "LEASING";
+  }) =>
     request<AdminStaffUser>("/admin/staff", {
       ...adminAuth,
       method: "POST",
@@ -1392,6 +1437,173 @@ export const adminApi = {
     body: { name?: string; password?: string; isActive?: boolean },
   ) =>
     request<AdminStaffUser>(`/admin/staff/${id}`, {
+      ...adminAuth,
+      method: "PATCH",
+      body,
+    }).then((r) => r.data),
+};
+
+/** Лизингийн админ — зөвхөн лизинг захиалга. Ижил JWT (admin token). */
+export const leasingApi = {
+  summary: () =>
+    request<{
+      total: number;
+      notArrived: number;
+      arrivedUnpaid: number;
+      arrivedPaid: number;
+    }>("/leasing/orders/summary", adminAuth).then((r) => r.data),
+
+  orders: (query?: Query) =>
+    request<AdminOrderRow[]>("/leasing/orders", { ...adminAuth, query }),
+
+  order: (id: string) =>
+    request<AdminOrderDetail>(`/leasing/orders/${id}`, adminAuth).then((r) => r.data),
+
+  setOrderStatus: (id: string, status: string, reason?: string, force?: boolean) =>
+    request<AdminOrderDetail>(`/leasing/orders/${id}/status`, {
+      ...adminAuth,
+      method: "PATCH",
+      body: { status, reason, force },
+    }).then((r) => r.data),
+
+  revertOrderStatus: (id: string, reason?: string) =>
+    request<AdminOrderDetail>(`/leasing/orders/${id}/status/revert`, {
+      ...adminAuth,
+      method: "POST",
+      body: reason ? { reason } : {},
+    }).then((r) => r.data),
+
+  bulkOrderStatus: (ids: string[], status: string, force?: boolean) =>
+    request<{
+      requested: number;
+      succeeded: number;
+      failed: { id: string; code?: string; message: string }[];
+      status: string;
+    }>("/leasing/orders/bulk-status", {
+      ...adminAuth,
+      method: "POST",
+      body: { ids, status, force },
+    }).then((r) => r.data),
+
+  ledger: (orderId: string) =>
+    request<PaymentLedger>(`/leasing/orders/${orderId}/payments`, adminAuth).then(
+      (r) => r.data,
+    ),
+
+  recordPayment: (
+    orderId: string,
+    body: {
+      amount: number;
+      method?: PaymentMethod;
+      reference?: string;
+      note?: string;
+    },
+  ) =>
+    request<{ payment: Payment; totals: OrderTotals }>(
+      `/leasing/orders/${orderId}/payments`,
+      { ...adminAuth, method: "POST", body },
+    ).then((r) => r.data),
+
+  recordRefund: (
+    orderId: string,
+    body: {
+      amount: number;
+      method?: PaymentMethod;
+      reference?: string;
+      note?: string;
+    },
+  ) =>
+    request<{ payment: Payment; totals: OrderTotals }>(
+      `/leasing/orders/${orderId}/payments/refunds`,
+      { ...adminAuth, method: "POST", body },
+    ).then((r) => r.data),
+
+  cancelOrderItem: (
+    orderId: string,
+    itemId: string,
+    body?: { reason?: string; refund?: boolean },
+  ) =>
+    request<{ totals: OrderTotals; refunded: number; orderCancelled: boolean }>(
+      `/leasing/orders/${orderId}/payments/items/${itemId}/cancel`,
+      { ...adminAuth, method: "POST", body: body ?? {} },
+    ).then((r) => r.data),
+
+  orderQpay: (orderId: string) =>
+    request<AdminOrderQpay>(`/leasing/orders/${orderId}/qpay`, adminAuth).then(
+      (r) => r.data,
+    ),
+
+  checkOrderQpay: (orderId: string) =>
+    request<QpayCheckResult>(`/leasing/orders/${orderId}/qpay/check`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
+  orderQpayPayments: (orderId: string) =>
+    request<{ count: number; rows: QpayPaymentRow[] }>(
+      `/leasing/orders/${orderId}/qpay/payments`,
+      adminAuth,
+    ).then((r) => r.data),
+
+  cancelOrderQpayInvoice: (orderId: string) =>
+    request<{ invoiceId: string }>(`/leasing/orders/${orderId}/qpay/invoice`, {
+      ...adminAuth,
+      method: "DELETE",
+    }).then((r) => r.data),
+
+  cancelOrderQpayPayment: (orderId: string, paymentId: string) =>
+    request<{
+      payment: QpayPaymentRow;
+      recorded: boolean;
+      orderId: string | null;
+      orderCode: string | null;
+      ledgerError: string | null;
+    }>(`/leasing/orders/${orderId}/qpay/payments/${paymentId}/cancel`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
+  refundOrderQpayPayment: (orderId: string, paymentId: string) =>
+    request<{
+      payment: QpayPaymentRow;
+      recorded: boolean;
+      orderId: string | null;
+      orderCode: string | null;
+      ledgerError: string | null;
+    }>(`/leasing/orders/${orderId}/qpay/payments/${paymentId}/refund`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
+  customers: (query?: Query) =>
+    request<AdminCustomer[]>("/leasing/customers", { ...adminAuth, query }),
+
+  customer: (id: string) =>
+    request<
+      AdminCustomer & {
+        stats: {
+          orderCount: number;
+          totalSpent: number;
+          handedOver: number;
+          cancelled: number;
+          lastOrderAt: string | null;
+        };
+        orders: AdminOrderRow[];
+      }
+    >(`/leasing/customers/${id}`, adminAuth).then((r) => r.data),
+
+  updateCustomer: (
+    id: string,
+    body: Partial<{
+      email: string;
+      name: string | null;
+      phone: string | null;
+      district: string | null;
+      khoroo: string | null;
+      addressText: string | null;
+    }>,
+  ) =>
+    request<AdminCustomer>(`/leasing/customers/${id}`, {
       ...adminAuth,
       method: "PATCH",
       body,

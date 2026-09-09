@@ -10,6 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { money, phoneLabel, rangeLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
+import { orderAccruesStorage } from "@/lib/fulfilment";
 import { useSession } from "@/lib/session";
 import { usePolling } from "@/lib/usePolling";
 import type { PublicOrder, Store } from "@/lib/types";
@@ -178,6 +179,7 @@ function Pending({
 
 /** Захиалгын мөрүүд ба нийт дүн — хоёр төлөвт хуваалцана. */
 function OrderSummary({ order }: { order: PublicOrder }) {
+  const storageFee = orderAccruesStorage(order) ? (order.storageFee ?? 0) : 0;
   return (
     <div className="tnum flex flex-col gap-2.5 text-[14px]">
       {order.items.map((item) => (
@@ -200,12 +202,77 @@ function OrderSummary({ order }: { order: PublicOrder }) {
         </div>
       )}
       <div className="h-px bg-line" />
-      <div className="flex justify-between gap-3 text-[17px] font-medium">
-        <span>{order.dueAmount > 0 ? "Нийт" : "Төлсөн, бүтнээр"}</span>
-        <span className={order.dueAmount > 0 ? "" : "text-ok"}>
-          {money(order.dueAmount > 0 ? order.subtotal : order.paidAmount - order.refundedAmount)}
-        </span>
-      </div>
+      {order.isLeasing && (order.leasingFee ?? 0) > 0 && (
+        <div className="flex justify-between gap-3">
+          <span className="text-ink-2">Лизингийн шимтгэл (10%)</span>
+          <span>{money(order.leasingFee ?? 0)}</span>
+        </div>
+      )}
+      {storageFee > 0 && (
+        <div className="flex justify-between gap-3">
+          <span className="text-ink-2">Агуулахын хураамж</span>
+          <span>{money(storageFee)}</span>
+        </div>
+      )}
+      {(order.cargoFee ?? 0) > 0 && (
+        <div className="flex justify-between gap-3">
+          <span className="text-ink-2">Карго</span>
+          <span>{money(order.cargoFee)}</span>
+        </div>
+      )}
+      {order.dueAmount > 0 ? (
+        order.isLeasing ? (
+          <>
+            <div className="flex justify-between gap-3 text-[14px] text-ink-2">
+              <span>Нийт</span>
+              <span>
+                {money(
+                  order.subtotal +
+                    (order.leasingFee ?? 0) +
+                    storageFee +
+                    (order.cargoFee ?? 0),
+                )}
+              </span>
+            </div>
+            <div className="flex justify-between gap-3 text-[17px] font-medium">
+              <span>
+                {!order.leasingFeePaid
+                  ? "Одоо төлөх (10%)"
+                  : "Үлдэгдэл — хувааж төлнө"}
+              </span>
+              <span>
+                {money(
+                  !order.leasingFeePaid
+                    ? (order.leasingFee ?? 0)
+                    : (order.leasingPrincipalDue ?? order.dueAmount),
+                )}
+              </span>
+            </div>
+            {!order.leasingFeePaid && (
+              <div className="flex justify-between gap-3 text-[13px] text-ink-2">
+                <span>Дараа төлнө (үндсэн 100%)</span>
+                <span>{money(order.subtotal)}</span>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="flex justify-between gap-3 text-[17px] font-medium">
+            <span>Нийт</span>
+            <span>
+              {money(
+                order.subtotal +
+                  storageFee +
+                  (order.cargoFee ?? 0),
+              )}
+            </span>
+          </div>
+        )
+      ) : (
+        <div className="flex justify-between gap-3 text-[17px] font-medium">
+          <span>Төлсөн, бүтнээр</span>
+          <span className="text-ok">{money(order.paidAmount - order.refundedAmount)}</span>
+        </div>
+      )}
     </div>
   );
 }

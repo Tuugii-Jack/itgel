@@ -203,6 +203,7 @@ export default function OrdersByProductPage() {
     return (
       <OrderDetail
         orderId={openOrderId}
+        workspace="shop"
         onClose={() => setOpenOrderId(null)}
         onChanged={() => void load()}
       />

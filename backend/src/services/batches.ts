@@ -60,7 +60,13 @@ export async function findOrderIdsForBatch(
 
   // Идэвхтэй жагсаалтад барааны үнэ төлөгдсөн захиалга орно.
   // Карго/агуулахын үлдэгдэл (`dueAmount > 0`) багцаас хасах ёсгүй.
-  const paidSelect = { id: true, subtotal: true, paidAmount: true, refundedAmount: true } as const;
+  const paidSelect = {
+    id: true,
+    subtotal: true,
+    paidAmount: true,
+    refundedAmount: true,
+    leasingFee: true,
+  } as const;
 
   const byBatch = await tx.order.findMany({
     where: {
@@ -128,7 +134,7 @@ export async function attachOrdersForRound(
       status: { notIn: FROZEN_ORDER_STATUSES },
       OR: [{ batchId: null }, { batchId }],
     },
-    select: { id: true, subtotal: true, paidAmount: true, refundedAmount: true },
+    select: { id: true, subtotal: true, paidAmount: true, refundedAmount: true, leasingFee: true },
   });
   const orderIds = paidOrders.filter(isProductPaid).map((o) => o.id);
   if (orderIds.length === 0) return 0;

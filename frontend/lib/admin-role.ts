@@ -1,6 +1,9 @@
-/** Бүтэн админ — каталог, тохиргоо, захиалга засах. */
 export function isFullAdmin(role?: string | null): boolean {
   return role === "ADMIN";
+}
+
+export function isLeasingAdmin(role?: string | null): boolean {
+  return role === "LEASING";
 }
 
 /** Туслах админ хандаж болох хуудсууд. */
@@ -24,4 +27,5 @@ export function helperAdminCanAccess(pathname: string): boolean {
 export const ROLE_LABEL: Record<string, string> = {
   ADMIN: "Админ",
   STAFF: "Туслах админ",
+  LEASING: "Лизингийн админ",
 };

@@ -36,7 +36,21 @@ export type PaymentState =
   | "OVERPAID"
   | "REFUNDED";
 
+export type LeasingPayKind = "NONE" | "FEE" | "PRINCIPAL" | "BALANCE";
+
+export interface LeasingFields {
+  isLeasing: boolean;
+  leasingFee: number;
+  leasingFeePaid: boolean;
+  leasingFeePaidAmount: number;
+  leasingPrincipalPaid: number;
+  leasingPrincipalDue: number;
+  nextPayAmount: number;
+  nextPayKind: LeasingPayKind;
+}
+
 export type PaymentKind = "PAYMENT" | "REFUND";
+
 export type PaymentMethod =
   | "BANK_TRANSFER"
   | "CASH"
@@ -62,6 +76,8 @@ export interface OrderTotals {
   deliveryFee: number;
   storageFee: number;
   cargoFee: number;
+  /** Лизингийн шимтгэл. Энгийн захиалгад 0. */
+  leasingFee?: number;
   total: number;
   paidAmount: number;
   refundedAmount: number;
@@ -397,6 +413,14 @@ export interface PublicOrder {
   refundedAmount: number;
   dueAmount: number;
   paymentState: PaymentState;
+  isLeasing?: boolean;
+  leasingFee?: number;
+  leasingFeePaid?: boolean;
+  leasingFeePaidAmount?: number;
+  leasingPrincipalPaid?: number;
+  leasingPrincipalDue?: number;
+  nextPayAmount?: number;
+  nextPayKind?: LeasingPayKind;
   /** Хэрэглэгч "шилжүүлсэн" гэж мэдэгдсэн огноо. Төлбөр орсны баталгаа биш. */
   paymentClaimedAt: string | null;
   fulfilment: Fulfilment | null;
@@ -426,6 +450,9 @@ export interface MyOrder {
   refundedAmount: number;
   dueAmount: number;
   paymentState: PaymentState;
+  isLeasing?: boolean;
+  leasingFee?: number;
+  nextPayAmount?: number;
   fulfilment: Fulfilment | null;
   canChooseFulfilment: boolean;
   itemCount: number;
@@ -479,6 +506,8 @@ export interface Store {
   bank: BankAccount | null;
   /** QPay — enabled=flag, ready=credential бэлэн (код ирсний дараа). */
   qpay: { enabled: boolean; ready: boolean };
+  /** Лизингийн тусдаа QPay account. */
+  leasingQpay?: { enabled: boolean; ready: boolean };
   /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
   unpaidCancelHours: number;
   /** Агуулахад ирснээс хойш үнэгүй хадгалах хоног. */
@@ -516,6 +545,7 @@ export interface AdminOrderQpay extends AdminQpayStatus {
   dueAmount: number;
   paidAmount: number;
   orderCode: string;
+  account?: "shop" | "leasing";
 }
 
 export interface QpayPaymentRow {
@@ -550,8 +580,10 @@ export interface CreatedOrder {
   status: OrderStatus;
   statusLabel: string;
   subtotal: number;
-  /** Шилжүүлэх дүн — төлбөр үргэлж 100%. */
+  /** Шилжүүлэх дүн — төлбөр үргэлж 100%. Лизингт эхлээд 10% шимтгэл. */
   dueAmount: number;
+  isLeasing?: boolean;
+  leasingFee?: number;
   createdAt: string;
 }
 
@@ -585,6 +617,14 @@ export interface AdminOrderRow {
   refundedAmount: number;
   dueAmount: number;
   paymentState: PaymentState;
+  isLeasing?: boolean;
+  leasingFee?: number;
+  leasingFeePaid?: boolean;
+  leasingFeePaidAmount?: number;
+  leasingPrincipalPaid?: number;
+  leasingPrincipalDue?: number;
+  nextPayAmount?: number;
+  nextPayKind?: LeasingPayKind;
   paymentClaimedAt: string | null;
   profit: number;
   fulfilment: Fulfilment | null;
@@ -979,7 +1019,7 @@ export interface AdminStaffUser {
   id: string;
   email: string;
   name: string;
-  role: "ADMIN" | "STAFF";
+  role: "ADMIN" | "STAFF" | "LEASING";
   isActive: boolean;
   createdAt: string;
   lastLoginAt: string | null;

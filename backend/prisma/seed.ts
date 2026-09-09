@@ -137,6 +137,15 @@ async function main() {
     },
   });
 
+  await prisma.adminUser.create({
+    data: {
+      email: 'leasing@itgel.mn',
+      name: 'Лизингийн админ',
+      passwordHash: await bcrypt.hash(process.env.LEASING_ADMIN_PASSWORD ?? 'leasing123', 10),
+      role: 'LEASING',
+    },
+  });
+
   await prisma.ad.createMany({
     data: [
       {

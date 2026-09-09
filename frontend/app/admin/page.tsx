@@ -6,6 +6,7 @@ import {
   BATCH_STAGE_LABEL,
   Metric,
   OrderBadge,
+  LeasingBadge,
   ORDER_STATUS_LABEL,
   PageHead,
   Select,
@@ -231,6 +232,7 @@ export default function AdminOrdersPage() {
     return (
       <OrderDetail
         orderId={openId}
+        workspace="shop"
         onClose={() => setOpenId(null)}
         onChanged={load}
       />
@@ -480,6 +482,11 @@ export default function AdminOrdersPage() {
                       >
                         {order.code}
                       </button>
+                      {order.isLeasing && (
+                        <div className="mt-1">
+                          <LeasingBadge />
+                        </div>
+                      )}
                     </Td>
                     <Td>
                       <div>{order.customer.name ?? "—"}</div>
@@ -567,6 +574,7 @@ export default function AdminOrdersPage() {
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
+                  {order.isLeasing && <LeasingBadge />}
                   <Badge tone={PAYMENT_TONE[order.paymentState]}>
                     {PAYMENT_LABEL_SHORT[order.paymentState]}
                   </Badge>

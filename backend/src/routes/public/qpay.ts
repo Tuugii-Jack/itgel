@@ -13,9 +13,13 @@ import {
   createQpayInvoice,
   getQpayPayment,
   isQpayReady,
+  leasingQpayPublicStatus,
+  qpayAccountForOrder,
   qpayPublicStatus,
+  type QpayAccountKind,
   type QpayInvoice,
 } from '../../services/qpay.js';
+import { leasingView, resolveInvoiceAmount } from '../../lib/leasing.js';
 
 export const publicQpayRouter = Router();
 
@@ -29,6 +33,7 @@ publicQpayRouter.get(
       query: req.query as Record<string, unknown>,
       body: req.body,
       res,
+      kind: 'shop',
     });
   }),
 );
@@ -40,6 +45,31 @@ publicQpayRouter.post(
       query: req.query as Record<string, unknown>,
       body: req.body,
       res,
+      kind: 'shop',
+    });
+  }),
+);
+
+publicQpayRouter.get(
+  '/leasing-qpay/callback',
+  asyncHandler(async (req, res) => {
+    await qpayCallbackHandler({
+      query: req.query as Record<string, unknown>,
+      body: req.body,
+      res,
+      kind: 'leasing',
+    });
+  }),
+);
+
+publicQpayRouter.post(
+  '/leasing-qpay/callback',
+  asyncHandler(async (req, res) => {
+    await qpayCallbackHandler({
+      query: req.query as Record<string, unknown>,
+      body: req.body,
+      res,
+      kind: 'leasing',
     });
   }),
 );
@@ -72,15 +102,11 @@ publicQpayRouter.post(
   '/:code/qpay/invoice',
   requireCustomer,
   ipRateLimit(40, 10 * 60 * 1000),
-  validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
+  validate({
+    params: z.object({ code: z.string().min(3).max(20) }),
+    body: z.object({ amount: z.coerce.number().int().min(1).optional() }).optional(),
+  }),
   asyncHandler(async (req, res) => {
-    if (!isQpayReady()) {
-      throw conflict(
-        'QPay одоогоор идэвхжээгүй. Дансаар шилжүүлэх сонголтыг ашиглана уу.',
-        { code: 'QPAY_NOT_READY', ...qpayPublicStatus() },
-      );
-    }
-
     const code = param(req, 'code').toUpperCase();
     const order = await prisma.order.findFirst({
       where: { code, deletedAt: null, customerId: req.auth!.sub },
@@ -90,6 +116,12 @@ publicQpayRouter.post(
         status: true,
         dueAmount: true,
         subtotal: true,
+        paidAmount: true,
+        refundedAmount: true,
+        storageFee: true,
+        cargoFee: true,
+        isLeasing: true,
+        leasingFee: true,
         customerId: true,
         qpayInvoiceId: true,
         qpayInvoiceAt: true,
@@ -103,15 +135,49 @@ publicQpayRouter.post(
       throw conflict('Энэ захиалгын төлбөр аль хэдийн бүрэн орсон байна.');
     }
 
-    if (order.qpayInvoiceId) {
-      await cancelQpayInvoice(order.qpayInvoiceId, { silent: true });
+    const kind = qpayAccountForOrder(order.isLeasing);
+    if (!isQpayReady(kind)) {
+      throw conflict(
+        kind === 'leasing'
+          ? 'Лизингийн QPay одоогоор идэвхжээгүй.'
+          : 'QPay одоогоор идэвхжээгүй. Дансаар шилжүүлэх сонголтыг ашиглана уу.',
+        {
+          code: 'QPAY_NOT_READY',
+          ...(kind === 'leasing' ? leasingQpayPublicStatus() : qpayPublicStatus()),
+        },
+      );
     }
 
-    const invoice = await createQpayInvoice({
-      orderCode: order.code,
-      amount: order.dueAmount,
-      description: `Захиалга ${order.code}`,
-    });
+    const leasing = leasingView(order);
+    const requested = (req.body as { amount?: number } | undefined)?.amount;
+    const resolved = resolveInvoiceAmount(leasing, requested);
+    if (resolved.amount <= 0) {
+      if (order.isLeasing && leasing.nextPayKind === 'PRINCIPAL') {
+        throw conflict('Төлөх дүнгээ сонгоно уу.');
+      }
+      throw conflict('Энэ захиалгын төлбөр аль хэдийн бүрэн орсон байна.');
+    }
+    const amount = resolved.amount;
+
+    if (order.qpayInvoiceId) {
+      await cancelQpayInvoice(order.qpayInvoiceId, { silent: true, kind });
+    }
+
+    const description =
+      resolved.kind === 'FEE'
+        ? `Лизинг шимтгэл ${order.code}`
+        : resolved.kind === 'PRINCIPAL'
+          ? `Лизинг үндсэн ${order.code}`
+          : `Захиалга ${order.code}`;
+
+    const invoice = await createQpayInvoice(
+      {
+        orderCode: order.code,
+        amount,
+        description,
+      },
+      kind,
+    );
 
     await prisma.order.update({
       where: { id: order.id },
@@ -185,6 +251,12 @@ publicQpayRouter.post(
         dueAmount: true,
         qpayInvoiceId: true,
         paidAmount: true,
+        refundedAmount: true,
+        subtotal: true,
+        storageFee: true,
+        cargoFee: true,
+        isLeasing: true,
+        leasingFee: true,
       },
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
@@ -196,16 +268,23 @@ publicQpayRouter.post(
       return;
     }
 
-    if (!order.qpayInvoiceId || !isQpayReady()) {
+    if (!order.qpayInvoiceId || !isQpayReady(qpayAccountForOrder(order.isLeasing))) {
       res.json({
         data: { paid: false, paidAmount: 0, invoiceId: order.qpayInvoiceId },
       });
       return;
     }
 
-    const check = await checkQpayInvoice(order.qpayInvoiceId);
+    const kind = qpayAccountForOrder(order.isLeasing);
+    const check = await checkQpayInvoice(order.qpayInvoiceId, kind);
     if (check.paid && check.paidAmount > 0) {
-      await applyQpayPayment(order.id, order.qpayInvoiceId, check.paidAmount, check.paymentIds[0]);
+      await applyQpayPayment(
+        order.id,
+        order.qpayInvoiceId,
+        check.paidAmount,
+        check.paymentIds[0],
+        kind === 'leasing' ? 'system:leasing-qpay' : 'system:qpay',
+      );
     }
 
     const fresh = await prisma.order.findUniqueOrThrow({
@@ -235,6 +314,7 @@ async function qpayCallbackHandler(req: {
   query: Record<string, unknown>;
   body: unknown;
   res: { status: (n: number) => { send: (b: string) => void; json: (b: unknown) => void } };
+  kind: QpayAccountKind;
 }): Promise<void> {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const invoiceId =
@@ -249,12 +329,12 @@ async function qpayCallbackHandler(req: {
     null;
 
   let resolvedInvoiceId = invoiceId;
-  if (!resolvedInvoiceId && paymentId && isQpayReady()) {
+  if (!resolvedInvoiceId && paymentId && isQpayReady(req.kind)) {
     try {
-      const payment = await getQpayPayment(paymentId);
+      const payment = await getQpayPayment(paymentId, req.kind);
       resolvedInvoiceId = payment.invoiceId;
     } catch (e) {
-      console.error('[qpay] callback payment lookup failed', e);
+      console.error(`[qpay:${req.kind}] callback payment lookup failed`, e);
     }
   }
 
@@ -263,29 +343,35 @@ async function qpayCallbackHandler(req: {
     return;
   }
 
-  if (!isQpayReady()) {
+  if (!isQpayReady(req.kind)) {
     req.res.status(200).send('SUCCESS');
     return;
   }
 
   const order = await prisma.order.findFirst({
     where: { qpayInvoiceId: resolvedInvoiceId, deletedAt: null },
-    select: { id: true, dueAmount: true },
+    select: { id: true, dueAmount: true, isLeasing: true },
   });
+
+  if (order && qpayAccountForOrder(order.isLeasing) !== req.kind) {
+    req.res.status(200).send('SUCCESS');
+    return;
+  }
 
   if (order && order.dueAmount > 0) {
     try {
-      const check = await checkQpayInvoice(resolvedInvoiceId);
+      const check = await checkQpayInvoice(resolvedInvoiceId, req.kind);
       if (check.paid && check.paidAmount > 0) {
         await applyQpayPayment(
           order.id,
           resolvedInvoiceId,
           check.paidAmount,
           check.paymentIds[0] ?? paymentId ?? undefined,
+          req.kind === 'leasing' ? 'system:leasing-qpay' : 'system:qpay',
         );
       }
     } catch (e) {
-      console.error('[qpay] callback verify failed', e);
+      console.error(`[qpay:${req.kind}] callback verify failed`, e);
     }
   }
 
