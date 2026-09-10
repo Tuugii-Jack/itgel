@@ -13,7 +13,13 @@ import { awaitingPayment } from "@/lib/payment";
 import { orderAccruesStorage } from "@/lib/fulfilment";
 import { useSession } from "@/lib/session";
 import { usePolling } from "@/lib/usePolling";
-import { leasingFeeCaption, formatLeasingPercent, leasingFeePercentOf } from "@/lib/leasing";
+import {
+  leasingFeeCaption,
+  formatLeasingPercent,
+  leasingFeePercentOf,
+  leasingFeeHold,
+} from "@/lib/leasing";
+import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import type { PublicOrder, Store } from "@/lib/types";
 
 /**
@@ -50,11 +56,14 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
     setTrackUrl(`${window.location.origin}/t/${code}`);
   }, [code]);
 
+  const feeHold = Boolean(order && leasingFeeHold(order));
   const pending =
     !!order &&
     order.status !== "CANCELLED" &&
-    awaitingPayment(order.paymentState) &&
-    order.dueAmount > 0;
+    (feeHold ||
+      (!order.isLeasing &&
+        awaitingPayment(order.paymentState) &&
+        order.dueAmount > 0));
 
   // Админ төлбөрийг бүртгэмэгц хуудас өөрөө «Баталгаажлаа» болно —
   // хэрэглэгч refresh дарах шаардлагагүй.
@@ -108,7 +117,7 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
   return (
     <div className="screen pb-8">
       {pending ? (
-        <Pending order={order} store={store} onClaimed={load} />
+        <Pending order={order} store={store} onClaimed={load} feeHold={feeHold} />
       ) : (
         <Confirmed order={order} store={store} trackUrl={trackUrl} />
       )}
@@ -122,22 +131,28 @@ function Pending({
   order,
   store,
   onClaimed,
+  feeHold,
 }: {
   order: PublicOrder;
   store: Store | null;
   onClaimed: () => void;
+  feeHold?: boolean;
 }) {
   return (
     <div className="px-4 pt-8 lg:mx-auto lg:max-w-[1000px] lg:px-10">
-      <div className="text-[20px] font-medium lg:text-[24px]">Захиалга үүслээ</div>
+      <div className="text-[20px] font-medium lg:text-[24px]">
+        {feeHold ? "Шимтгэл төлнө үү" : "Төлбөр хүлээгдэж байна"}
+      </div>
       <p className="mt-1 mb-0 max-w-[560px] text-[14px] leading-[1.6] text-ink-2">
-        Төлбөрийн хураангуй, хуваарь, QPay энд байна. Төлсний дараа захиалга баталгаажна.
+        {feeHold
+          ? "Лизингийн шимтгэлийг QPay-ээр төлнө. Төлсний дараа захиалга үүснэ."
+          : "Төлбөрийн хураангуй, QPay энд байна. Төлсний дараа захиалга баталгаажна."}
       </p>
 
       <div className="mt-5 flex flex-col gap-5 lg:mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8">
         <div className="flex flex-col gap-5">
           {store ? (
-            <PaymentPanel order={order} store={store} onClaimed={onClaimed} />
+            <PaymentPanel order={order} store={store} onClaimed={onClaimed} feeHold={feeHold} />
           ) : (
             <Skeleton className="h-56 w-full rounded-[12px]" />
           )}
@@ -150,11 +165,13 @@ function Pending({
 
         <div className="flex flex-col gap-4 lg:sticky lg:top-6">
           <div className="flex flex-col items-center gap-3 pt-1 lg:pt-0">
-            <Link href={`/t/${order.code}`} className="w-full no-underline">
-              <Button full size="bar" variant="outline">
-                Захиалгаа хянах
-              </Button>
-            </Link>
+            {!feeHold && (
+              <Link href={`/t/${order.code}`} className="w-full no-underline">
+                <Button full size="bar" variant="outline">
+                  Захиалгаа хянах
+                </Button>
+              </Link>
+            )}
             {store && (
               <p className="m-0 text-center text-[13px] text-ink-2">
                 Асуух зүйл байвал{" "}
@@ -290,6 +307,21 @@ function Confirmed({
   const inTransit = order.timeline.find((s) => s.key === "in_transit");
   const etaFrom = inTransit?.estimatedAt ?? eta;
   const cancelled = order.status === "CANCELLED";
+  const leasingPlaced = Boolean(order.isLeasing && order.leasingFeePaid && !cancelled);
+  const title = cancelled
+    ? "Захиалга цуцлагдсан"
+    : leasingPlaced
+      ? "Захиалга үүслээ"
+      : "Төлбөр баталгаажлаа";
+  const subtitle = cancelled
+    ? "Энэ захиалга цуцлагдсан байна."
+    : leasingPlaced
+      ? order.dueAmount > 0
+        ? "Шимтгэл төлөгдлөө. Үлдэгдлийг хуваарийн дагуу төлнө."
+        : "Шимтгэл төлөгдлөө. Бараа ирэхэд мэдэгдэнэ."
+      : etaFrom && eta
+        ? `Барааг ${rangeLabel(etaFrom, eta)}-нд ирнэ. Ирэхэд мэдэгдэнэ.`
+        : "Бараа ирэхэд мэдэгдэнэ.";
 
   return (
     <div className="lg:mx-auto lg:max-w-[1000px] lg:px-10 lg:pt-8">
@@ -310,16 +342,12 @@ function Confirmed({
                 <circle cx="10" cy="10" r="8.2" />
                 <path d="M6.2 10.2 L8.8 12.8 L13.8 7.6" />
               </svg>
-              <span className="text-[20px] text-ok">Төлбөр баталгаажлаа</span>
+              <span className="text-[20px] text-ok">{title}</span>
             </>
           )}
         </div>
         <div className="mb-7 text-[15px] text-ink-2">
-          {cancelled
-            ? "Энэ захиалга цуцлагдсан байна."
-            : etaFrom && eta
-              ? `Барааг ${rangeLabel(etaFrom, eta)}-нд ирнэ. Ирэхэд мэдэгдэнэ.`
-              : "Бараа ирэхэд мэдэгдэнэ."}
+          {subtitle}
         </div>
       </div>
 
@@ -343,7 +371,7 @@ function Confirmed({
                 <circle cx="10" cy="10" r="8.2" />
                 <path d="M6.2 10.2 L8.8 12.8 L13.8 7.6" />
               </svg>
-              <span className="text-[17px] text-ok">Төлбөр баталгаажлаа</span>
+              <span className="text-[17px] text-ok">{title}</span>
             </>
           )}
         </div>
@@ -370,8 +398,8 @@ function Confirmed({
         </div>
 
         <p className="order-3 m-0 max-w-[300px] text-center text-[17px] leading-[1.6] lg:hidden">
-          {cancelled ? (
-            "Энэ захиалга цуцлагдсан байна."
+          {leasingPlaced || cancelled ? (
+            subtitle
           ) : etaFrom && eta ? (
             <>
               Төлбөр бүрэн төлөгдсөн. Барааг{" "}
@@ -389,6 +417,11 @@ function Confirmed({
       <div className="px-4 pt-6 lg:rounded-[12px] lg:border lg:border-line lg:px-5 lg:py-5 lg:pt-5">
         <div className="mb-3 text-[15px] font-medium">Захиалгын хураангуй</div>
         <OrderSummary order={order} />
+        {leasingPlaced && order.payPlan && (
+          <div className="mt-4">
+            <LeasingPaySchedule plan={order.payPlan} />
+          </div>
+        )}
       </div>
         </div>
 

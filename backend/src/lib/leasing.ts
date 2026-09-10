@@ -238,6 +238,12 @@ export function leasingView(order: {
   };
 }
 
+/** Шимтгэл төлөгдөөгүй лизинг — захиалга хараахан баталгаажаагүй. */
+export function leasingFeeHold(order: Parameters<typeof leasingView>[0]): boolean {
+  const view = leasingView(order);
+  return view.isLeasing && !view.feePaid;
+}
+
 export function parseLeasingPayGaps(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length < 2) return [...DEFAULT_LEASING_PAY_GAPS];
   const gaps = raw

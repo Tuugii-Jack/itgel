@@ -150,6 +150,13 @@ export function leasingArrivalUnpaid(status: string, dueAmount: number): boolean
   return leasingGoodsArrived(status) && dueAmount > 0;
 }
 
+/** Шимтгэл төлөгдөөгүй лизинг — захиалга хараахан үүсээгүй. */
+export function leasingFeeHold(order: Pick<LeasingPayOrder, "isLeasing" | "leasingFeePaid" | "nextPayKind">): boolean {
+  if (!order.isLeasing) return false;
+  if (order.nextPayKind === "FEE") return true;
+  return !order.leasingFeePaid;
+}
+
 /** Үндсэн төлбөр дутуу бол бараа авч болохгүй — лизингийн данс тусдаа. */
 export function leasingHoldsGoods(order: LeasingPayOrder): boolean {
   if (!order.isLeasing) return false;

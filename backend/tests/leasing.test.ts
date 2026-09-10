@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leasingFeeOf, leasingFlagOf, leasingView, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing } from '../src/lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingView, leasingFeeHold, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing } from '../src/lib/leasing.js';
 import { AppError } from '../src/lib/errors.js';
 
 describe('Лизингийн шимтгэл', () => {
@@ -65,6 +65,15 @@ describe('Лизингийн төлөлт', () => {
     expect(view.nextPayAmount).toBe(10_000);
     expect(view.feePaid).toBe(false);
     expect(view.principalDue).toBe(100_000);
+    expect(
+      leasingFeeHold({
+        isLeasing: true,
+        leasingFee: 10_000,
+        subtotal: 100_000,
+        paidAmount: 0,
+        refundedAmount: 0,
+      }),
+    ).toBe(true);
   });
 
   it('шимтгэл төлөгдсөний дараа үндсэн 100% үлдэнэ', () => {
@@ -77,6 +86,16 @@ describe('Лизингийн төлөлт', () => {
       dueAmount: 100_000,
     });
     expect(view.feePaid).toBe(true);
+    expect(
+      leasingFeeHold({
+        isLeasing: true,
+        leasingFee: 10_000,
+        subtotal: 100_000,
+        paidAmount: 10_000,
+        refundedAmount: 0,
+        dueAmount: 100_000,
+      }),
+    ).toBe(false);
     expect(view.nextPayKind).toBe('PRINCIPAL');
     expect(view.nextPayAmount).toBe(100_000);
     expect(view.principalPaid).toBe(0);

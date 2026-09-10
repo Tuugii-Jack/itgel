@@ -2,7 +2,8 @@ import type { Payment, PaymentKind, PaymentMethod, Prisma } from '@prisma/client
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { conflict, notFound } from '../lib/errors.js';
-import { assertRefundable, computeTotals, recalcOrderTotals, type OrderTotals } from './money.js';
+import { assertRefundable, computeTotals, fullyPaid, recalcOrderTotals, type OrderTotals } from './money.js';
+import { changeOrderStatus } from './orders.js';
 import { restoreReadyStock, selectionsFromItem } from './readyStock.js';
 import { syncOrderCargoFee } from './cargoFee.js';
 
@@ -29,7 +30,7 @@ export async function recordPayment(
     throw conflict('Дүн 0-ээс их бүхэл тоо байх ёстой.');
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const order = await tx.order.findFirst({
       where: { id: input.orderId, deletedAt: null },
       select: {
@@ -83,6 +84,44 @@ export async function recordPayment(
 
     return { payment, totals };
   });
+
+  if (input.kind === 'PAYMENT') {
+    await confirmLeasingIfFeePaid(input.orderId, input.actor);
+  }
+
+  return result;
+}
+
+/**
+ * Лизингийн шимтгэл орсон NEW захиалгыг баталгаажуулна.
+ * Шимтгэл төлөгдөхөөс өмнө захиалга үүссэнд тооцогдохгүй.
+ */
+async function confirmLeasingIfFeePaid(orderId: string, actor: string): Promise<void> {
+  const order = await prisma.order.findFirst({
+    where: { id: orderId, deletedAt: null, status: 'NEW', isLeasing: true },
+    select: {
+      id: true,
+      subtotal: true,
+      leasingFee: true,
+      paidAmount: true,
+      refundedAmount: true,
+      storageFee: true,
+      cargoFee: true,
+    },
+  });
+  if (!order) return;
+
+  const totals = computeTotals(order);
+  if (!fullyPaid(totals)) return;
+
+  try {
+    await changeOrderStatus(order.id, 'CONFIRMED', {
+      actor,
+      reason: 'Лизингийн шимтгэл төлөгдсөн',
+    });
+  } catch (error) {
+    console.warn('[leasing] шимтгэлээр баталгаажуулж чадсангүй:', error);
+  }
 }
 
 /**

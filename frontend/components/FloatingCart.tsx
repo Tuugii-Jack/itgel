@@ -28,7 +28,7 @@ export function FloatingCart() {
   }, [cart.count]);
 
   if (!cart.ready || cart.count === 0) return null;
-  if (pathname === "/cart" || pathname.startsWith("/success")) return null;
+  if (pathname === "/cart" || pathname === "/checkout" || pathname.startsWith("/success")) return null;
 
   const onProduct = pathname.startsWith("/p/");
 

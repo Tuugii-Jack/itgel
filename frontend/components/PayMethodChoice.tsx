@@ -15,7 +15,7 @@ import { money } from "@/lib/format";
 import type { LeasingPayPlan } from "@/lib/types";
 
 /**
- * Сагс болон төлбөрийн самбарт ижил: QPay | Лизинг.
+ * Төлбөрийн хуудас болон төлбөрийн самбарт ижил: QPay | Лизинг.
  */
 export function PayMethodChoice({
   leasing,
@@ -42,7 +42,7 @@ export function PayMethodChoice({
   choiceHint?: string;
   termsTitle?: string;
   termsBody?: string;
-  /** Сагс — зөвхөн сонголт. Хуваарь, нөхцөл захиалсны дараа. */
+  /** Сагс/төлбөр — зөвхөн сонголт. Хуваарь, нөхцөл захиалсны дараа. */
   compact?: boolean;
 }) {
   const percent = leasingRatePercent(subtotal, feeTiers);

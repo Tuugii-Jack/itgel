@@ -175,11 +175,17 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
         actor: input.actor,
       });
     }
-    await changeOrderStatus(order.id, 'CONFIRMED', {
-      actor: input.actor,
-      reason: 'Админ гараар оруулсан',
-      now,
+    const current = await prisma.order.findUnique({
+      where: { id: order.id },
+      select: { status: true },
     });
+    if (current?.status === 'NEW') {
+      await changeOrderStatus(order.id, 'CONFIRMED', {
+        actor: input.actor,
+        reason: 'Админ гараар оруулсан',
+        now,
+      });
+    }
   }
 
   return prisma.order.findUniqueOrThrow({ where: { id: order.id } });

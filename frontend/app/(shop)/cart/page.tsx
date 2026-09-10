@@ -5,23 +5,19 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { EmailAuthForm } from "@/components/EmailAuthForm";
-import { PayMethodChoice } from "@/components/PayMethodChoice";
 import {
   Button,
   Empty,
-  ErrorNote,
   Input,
   Spinner,
   Textarea,
 } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
 import { useCart, type CartLine } from "@/lib/cart";
+import { writeCheckoutDraft } from "@/lib/checkoutDraft";
 import { useSession } from "@/lib/session";
 import { money, relativeDay } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
-import { leasingFeeOf } from "@/lib/leasing";
 import { useToast } from "@/lib/toast";
-import type { Store } from "@/lib/types";
 
 /**
  * 03 Сагс ба захиалга — дизайны хэмжээг яг барина.
@@ -38,22 +34,11 @@ export default function CartPage() {
   const [buyerName, setBuyerName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [note, setNote] = useState("");
-  const [leasing, setLeasing] = useState(false);
-  const [store, setStore] = useState<Store | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (session.me?.name) setBuyerName(session.me.name);
     if (session.me?.phone) setContactPhone(session.me.phone);
   }, [session.me]);
-
-  useEffect(() => {
-    api
-      .store()
-      .then(setStore)
-      .catch(() => undefined);
-  }, []);
 
   const groups = useMemo(() => groupLines(cart.lines), [cart.lines]);
 
@@ -80,54 +65,18 @@ export default function CartPage() {
     );
   }
 
-  const placeOrder = async () => {
+  const goCheckout = () => {
     if (!session.me) {
       toast.error("Эхлээд нэвтэрнэ үү.");
       return;
     }
-    setError(null);
-    setBusy(true);
-    try {
-      const phone = contactPhone.trim() || null;
-      if (
-        phone !== (session.me.phone ?? null) ||
-        buyerName.trim() !== (session.me.name ?? "")
-      ) {
-        await api.updateMe({
-          name: buyerName.trim() || null,
-          phone,
-        });
-        await session.refresh();
-      }
-      const order = await api.createOrder({
-        name: buyerName.trim() || undefined,
-        note: note.trim() || undefined,
-        leasing,
-        items: cart.lines.map((line) => ({
-          productId: line.productId,
-          qty: line.qty,
-          selections: line.selections ?? undefined,
-          size: line.size ?? undefined,
-          color: line.color ?? undefined,
-        })),
-      });
-      cart.clear();
-      toast.success("Захиалга үүслээ.");
-      router.push(`/success/${order.code}`);
-    } catch (e) {
-      const message =
-        e instanceof ApiError ? e.message : "Захиалга үүсгэж чадсангүй.";
-      setError(message);
-      toast.error(message);
-      setBusy(false);
-    }
+    writeCheckoutDraft({
+      name: buyerName.trim(),
+      phone: contactPhone.trim(),
+      note: note.trim(),
+    });
+    router.push("/checkout");
   };
-
-  const orderTotal = cart.lines
-    .filter((l) => l.type === "order")
-    .reduce((sum, l) => sum + l.price * l.qty, 0);
-  const readyTotal = cart.subtotal - orderTotal;
-  const fee = leasing ? leasingFeeOf(cart.subtotal, store?.leasing?.feeTiers) : 0;
 
   return (
     <div className='screen flex flex-col pb-28 lg:pb-12'>
@@ -136,7 +85,7 @@ export default function CartPage() {
         <div className='text-[20px] font-medium lg:text-[24px]'>Сагс</div>
       </div>
 
-      <div className='lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8 lg:px-10 lg:pt-6'>
+      <div className='lg:max-w-[720px] lg:px-10 lg:pt-6'>
         <div className='lg:flex lg:flex-col lg:gap-6'>
           {/* Бараанууд — төрлөөр бүлэглэж, ирэх огноог картын хөлд */}
           {groups.map((group, i) => (
@@ -233,60 +182,14 @@ export default function CartPage() {
             )}
           </div>
 
-          {error && (
-            <div className='px-4 pt-4 lg:px-0'>
-              <ErrorNote>{error}</ErrorNote>
-            </div>
-          )}
-
-          {/* Мобайл дээр блок хоорондын зураас — дизайны 24px/16px */}
-          <div className='lg:hidden'>
-            <Rule />
-          </div>
-        </div>
-
-        {/* Сагс — нийт ба төлбөрийн хэлбэр. Хураангуй захиалсны дараа. */}
-        <div className='px-4 pb-6 pt-6 lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-4 lg:rounded-[12px] lg:border lg:border-line lg:p-6'>
-          <div className='tnum flex flex-col gap-2.5 text-[14px]'>
-            {orderTotal > 0 && readyTotal > 0 && (
-              <>
-                <SumRow label='Захиалгын бараа' value={money(orderTotal)} />
-                <SumRow label='Бэлэн бараа' value={money(readyTotal)} />
-                <div className='h-px bg-line' />
-              </>
-            )}
-            <div className='flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]'>
-              <span>Нийт</span>
-              <span>{money(cart.subtotal)}</span>
-            </div>
-            {leasing && fee > 0 && (
-              <p className='m-0 text-[13px] font-normal leading-[1.5] text-ink-2'>
-                Лизингээр захиалбал эхлээд шимтгэл {money(fee)}. Хуваарийг дараагийн
-                дэлгэцэн дээр харна.
-              </p>
-            )}
-          </div>
-
-          <div className='mt-4'>
-            <PayMethodChoice
-              compact
-              leasing={leasing}
-              onChange={setLeasing}
-              subtotal={cart.subtotal}
-              feeTiers={store?.leasing?.feeTiers}
-              choiceHint={store?.leasing?.choiceHint}
-            />
-          </div>
-
-          <div className='hidden lg:block'>
+          <div className='hidden px-4 pt-6 lg:block lg:px-0'>
             <Button
               full
               size='bar'
-              onClick={placeOrder}
+              onClick={goCheckout}
               disabled={!session.me}
-              loading={busy && Boolean(session.me)}
             >
-              Захиалах
+              Үргэлжлүүлэх
             </Button>
           </div>
         </div>
@@ -296,11 +199,10 @@ export default function CartPage() {
         <Button
           full
           size='bar'
-          onClick={placeOrder}
+          onClick={goCheckout}
           disabled={!session.me}
-          loading={busy && Boolean(session.me)}
         >
-          Захиалах
+          Үргэлжлүүлэх
         </Button>
       </div>
     </div>
@@ -441,15 +343,6 @@ function RemoveButton({ onRemove }: { onRemove: () => void }) {
         <path d='M4 4 L12 12 M12 4 L4 12' />
       </svg>
     </button>
-  );
-}
-
-function SumRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className='flex justify-between gap-3'>
-      <span className='text-ink-2'>{label}</span>
-      <span>{value}</span>
-    </div>
   );
 }
 

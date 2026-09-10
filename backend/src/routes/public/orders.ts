@@ -183,7 +183,8 @@ publicOrdersRouter.post(
       return created;
     });
 
-    if (customer.phone) {
+    // Лизинг: шимтгэл төлөгдсөний дараа л захиалга үүссэнд тооцогдоно.
+    if (customer.phone && !isLeasing) {
       void sms
         .send({ phone: customer.phone, text: smsTemplates.orderCreated(order.code, subtotal) })
         .then((r) => {

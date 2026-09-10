@@ -10,7 +10,7 @@ import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
-import { leasingDueHeadline, leasingFeeCaption, leasingHoldsGoods } from "@/lib/leasing";
+import { leasingDueHeadline, leasingFeeCaption, leasingFeeHold, leasingHoldsGoods } from "@/lib/leasing";
 import {
   orderHasPickup,
   orderAccruesStorage,
@@ -102,6 +102,7 @@ export default function TrackPage() {
               (order.status === "ARRIVED" && order.fulfilment === null))
           )),
   );
+  const feeHold = Boolean(order && leasingFeeHold(order));
 
   // Төлбөр хүлээгдэж байхад төлөвийг автоматаар шинэчилнэ —
   // админ бүртгэмэгц «Төлөгдсөн» гэж харагдана.
@@ -162,7 +163,9 @@ export default function TrackPage() {
         </div>
         <div className="flex flex-col items-end gap-1">
           {order.isLeasing && <Badge tone="info">Лизинг</Badge>}
-          <Badge tone={STATUS_TONE[order.status]}>{order.statusLabel}</Badge>
+          <Badge tone={feeHold ? "warn" : STATUS_TONE[order.status]}>
+            {feeHold ? "Шимтгэл хүлээгдэж байна" : order.statusLabel}
+          </Badge>
         </div>
       </div>
 
@@ -273,7 +276,12 @@ export default function TrackPage() {
       {/* Мөнгө хүлээж байгаа бол QPay — лизинг үлдэгдэлтэй бол бараанаас өмнө */}
       {(unpaid || leasingHold) && store && (
         <div className="px-4 pt-6 lg:px-0 lg:pt-0">
-          <PaymentPanel order={order} store={store} onClaimed={load} />
+          {feeHold && (
+            <p className="mb-3 mt-0 text-[14px] leading-[1.5] text-ink-2">
+              Лизингийн шимтгэлийг төлнө үү. Төлсний дараа захиалга үүснэ.
+            </p>
+          )}
+          <PaymentPanel order={order} store={store} onClaimed={load} feeHold={feeHold} />
         </div>
       )}
 

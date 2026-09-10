@@ -20,10 +20,13 @@ export function PaymentPanel({
   order,
   store,
   onClaimed,
+  feeHold,
 }: {
   order: PublicOrder;
   store: Store;
   onClaimed?: () => void;
+  /** Лизингийн шимтгэл төлөгдөх хүртэл захиалга үүсээгүй. */
+  feeHold?: boolean;
 }) {
   const netPaid = order.paidAmount - order.refundedAmount;
   const unpaid = netPaid <= 0;
@@ -67,7 +70,9 @@ export function PaymentPanel({
 
   return (
     <Card className="w-full p-4">
-      <div className="text-[15px] font-medium">Төлбөрийн хураангуй</div>
+      <div className="text-[15px] font-medium">
+        {feeHold ? "Шимтгэл төлнө" : "Төлбөрийн хураангуй"}
+      </div>
 
       {unpaid ? (
         <>
@@ -84,6 +89,7 @@ export function PaymentPanel({
               <Row label="Одоо төлөх" value={money(order.subtotal)} big />
             )}
           </div>
+          {!feeHold && (
           <div className="mt-4">
             <PayMethodChoice
               leasing={leasing}
@@ -98,8 +104,11 @@ export function PaymentPanel({
               termsBody={store.leasing?.termsBody}
             />
           </div>
+          )}
           <p className="mt-3 mb-0 text-[13px] leading-[1.6] text-ink-2">
-            {leasing
+            {feeHold
+              ? "Эхлээд лизингийн шимтгэлийг төлнө. Төлсний дараа захиалга үүснэ."
+              : leasing
               ? "Эхлээд лизингийн шимтгэлийг лизингийн QPay-ээр төлнө. Үндсэн төлбөрийг хуваарьтай төлнө."
               : "Төлбөрийг QPay-ээр төлнө. Төлсний дараа захиалга баталгаажна."}
           </p>
@@ -245,7 +254,9 @@ function QpayPay({
       const st = await api.qpayVerify(order.code);
       // Лизингт эхний 10% орсон ч нийт үлдэгдэл үлдэнэ — paidAmount өссөн бол амжилт.
       if (st.paid || st.paidAmount > order.paidAmount) {
-        toast.success("QPay төлбөр амжилттай.");
+        toast.success(
+          feeFirst ? "Шимтгэл төлөгдлөө. Захиалга үүслээ." : "QPay төлбөр амжилттай.",
+        );
         onPaid?.();
       }
     } catch (e) {
@@ -426,7 +437,9 @@ function QpayPay({
               <>
                 {" "}
                 <span className="tnum">{store.unpaidCancelHours}</span> цагийн дотор
-                төлөөгүй бол захиалга цуцлагдана.
+                {feeFirst
+                  ? " шимтгэл төлөөгүй бол захиалга үүсэхгүй."
+                  : " төлөөгүй бол захиалга цуцлагдана."}
               </>
             )}
           </p>
