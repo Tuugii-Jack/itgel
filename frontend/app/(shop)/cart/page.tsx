@@ -80,12 +80,12 @@ export default function CartPage() {
 
   return (
     <div className='screen flex flex-col pb-28 lg:pb-12'>
-      {/* Laptop-ийн хуудасны гарчиг */}
-      <div className='px-4 pt-6 lg:px-10 lg:pt-8'>
+      {/* Laptop — гарчиг ба агуулгыг нэг багананд голлуулна */}
+      <div className='px-4 pt-6 lg:mx-auto lg:w-full lg:max-w-[720px] lg:px-10 lg:pt-8'>
         <div className='text-[20px] font-medium lg:text-[24px]'>Сагс</div>
       </div>
 
-      <div className='lg:max-w-[720px] lg:px-10 lg:pt-6'>
+      <div className='lg:mx-auto lg:w-full lg:max-w-[720px] lg:px-10 lg:pt-6'>
         <div className='lg:flex lg:flex-col lg:gap-6'>
           {/* Бараанууд — төрлөөр бүлэглэж, ирэх огноог картын хөлд */}
           {groups.map((group, i) => (
