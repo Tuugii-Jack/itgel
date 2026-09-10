@@ -11,6 +11,7 @@ import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
 import { leasingDueHeadline, leasingFeeCaption, leasingFeeHold, leasingHoldsGoods } from "@/lib/leasing";
+import { buildOrderStages } from "@/lib/orderStages";
 import {
   orderHasPickup,
   orderAccruesStorage,
@@ -18,7 +19,7 @@ import {
   itemNeedsFulfilment,
 } from "@/lib/fulfilment";
 import { usePolling } from "@/lib/usePolling";
-import type { OrderStatus, PublicOrder } from "@/lib/types";
+import type { PublicOrder } from "@/lib/types";
 import {
   STATUS_TONE,
   TrackDetailSkeleton,
@@ -124,7 +125,7 @@ export default function TrackPage() {
   }
 
   const dueHead = leasingDueHeadline(order);
-  const stages = buildStages(order);
+  const stages = buildOrderStages(order.status);
   const eta = etaOf(order);
   const goodsReady =
     order.canChooseFulfilment || order.items.some(itemNeedsFulfilment);
@@ -549,28 +550,6 @@ export default function TrackPage() {
       )}
     </>
   );
-}
-
-/**
- * 6 төлвийг дизайны гурван шат болгоно.
- * Цуцлагдсан захиалгад аль ч шат гэрэлтэхгүй.
- */
-function buildStages(order: PublicOrder) {
-  const reachedIndex: Record<OrderStatus, number> = {
-    NEW: 0,
-    CONFIRMED: 0,
-    IN_BATCH: 1,
-    IN_TRANSIT: 1,
-    ARRIVED: 2,
-    HANDED_OVER: 2,
-    CANCELLED: -1,
-  };
-  const at = reachedIndex[order.status];
-  return [
-    { key: "placed", label: "Захиалсан" },
-    { key: "transit", label: "Замд" },
-    { key: "arrived", label: "Гарт очсон" },
-  ].map((stage, i) => ({ ...stage, reached: i <= at }));
 }
 
 /** Дизайны ETA карт — төлвөөс хамаарч гарчиг, утга, тайлбар өөрчлөгдөнө. */

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AdBanner } from "@/components/AdBanner";
 import { ProductCard } from "@/components/ProductCard";
-import { Button, Divider, Empty, ErrorNote, Skeleton } from "@/components/ui";
+import { Skeleton } from "@/components/shadcn/skeleton";
+import { Button, Divider, Empty, ErrorNote } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import type { Ad, Category, Product, Store } from "@/lib/types";
 
@@ -286,16 +287,16 @@ function Chip({
 }
 
 /* =========================================================
-   SKELETON
+   SKELETON — жинхэнэ нүүрийн layout-тай ижил хэмжээ
 ========================================================= */
 
 const CHIP_SKELETON_WIDTHS = [
   "w-16",
-  "w-24",
-  "w-[4.5rem]",
-  "w-28",
+  "w-[9.5rem]",
   "w-20",
   "w-24",
+  "w-[7.5rem]",
+  "w-28",
   "w-[5.5rem]",
 ] as const;
 
@@ -303,22 +304,19 @@ function HomePageSkeleton() {
   return (
     <div className="page" aria-busy="true" aria-label="Ачаалж байна">
       <div className={`${GUTTER} pt-4 lg:pt-6`}>
-        <Skeleton className="aspect-[2/1] w-full rounded-[12px] sm:aspect-[2.4/1] sm:rounded-[16px] lg:aspect-[3/1]" />
+        <div className="overflow-hidden rounded-[12px] border border-line bg-surface sm:rounded-[16px]">
+          <Skeleton className="aspect-[2/1] w-full rounded-none sm:aspect-[2.4/1] lg:aspect-[3/1]" />
+        </div>
       </div>
 
-      <div
-        className={`flex gap-2 overflow-hidden ${GUTTER} pt-4 lg:pt-6`}
-      >
+      <div className={`flex gap-2 overflow-hidden ${GUTTER} pt-4 lg:pt-6`}>
         {CHIP_SKELETON_WIDTHS.map((width, i) => (
-          <Skeleton
-            key={i}
-            className={`h-10 shrink-0 rounded-[8px] ${width}`}
-          />
+          <Skeleton key={i} className={`h-10 shrink-0 rounded-[8px] ${width}`} />
         ))}
       </div>
 
-      <ProductSectionSkeleton />
-      <ProductSectionSkeleton />
+      <ProductSectionSkeleton titleWidth="w-[9.5rem]" hintWidth="w-64" />
+      <ProductSectionSkeleton titleWidth="w-[7.5rem]" hintWidth="w-72" />
 
       <section className={`${GUTTER} mt-24 pt-10 sm:pt-12`}>
         <div className="grid grid-cols-1 gap-4 sm:gap-6 lg:grid-cols-2">
@@ -329,8 +327,8 @@ function HomePageSkeleton() {
             >
               <Skeleton className="h-16 w-16 shrink-0 rounded-[14px] sm:h-[72px] sm:w-[72px] lg:h-20 lg:w-20" />
               <div className="flex min-w-0 flex-1 flex-col gap-2">
-                <Skeleton className="h-5 w-4/5 sm:h-6" />
-                <Skeleton className="h-5 w-2/5 sm:hidden" />
+                <Skeleton className="h-[22px] w-4/5 sm:h-[25px] lg:h-[29px]" />
+                <Skeleton className="h-[22px] w-2/5 sm:hidden" />
               </div>
             </div>
           ))}
@@ -338,25 +336,28 @@ function HomePageSkeleton() {
       </section>
 
       <section className={`${GUTTER} pt-10 sm:pt-12`}>
-        <Skeleton className="mb-4 h-7 w-28 lg:h-8" />
-        <Skeleton className="h-[300px] w-full rounded-[12px] sm:h-[400px] lg:h-[450px]" />
+        <Skeleton className="mb-4 h-[26px] w-24 lg:mb-5 lg:h-[31px]" />
+        <div className="overflow-hidden rounded-[12px] border border-line shadow-sm">
+          <Skeleton className="block h-[300px] w-full rounded-none sm:h-[400px] lg:h-[450px]" />
+        </div>
       </section>
 
-      <section className="mt-10 sm:mt-12">
-        <div className="border-t border-line bg-primary-soft/60 p-5 sm:p-6 lg:p-8">
+      <section className="relative z-10 mt-10 sm:mt-12">
+        <div className="rounded-none border-x-0 border-b-0 border-t border-line bg-primary-soft/60 p-5 sm:p-6 lg:p-8">
           <div className={GUTTER}>
             <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:gap-6">
               <Skeleton className="h-11 w-11 shrink-0 rounded-[8px] sm:h-12 sm:w-12" />
               <div className="grid min-w-0 flex-1 gap-3.5 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-4">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="flex flex-col gap-1.5">
-                    <Skeleton className="h-3 w-16" />
-                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-[13px] w-14 sm:h-3.5" />
+                    <Skeleton className="h-[21px] w-3/4" />
                   </div>
                 ))}
               </div>
             </div>
-            <Skeleton className="mt-6 h-3 w-40" />
+            <Divider className="my-5 sm:my-6" />
+            <Skeleton className="h-3 w-40 sm:h-[17px]" />
           </div>
         </div>
       </section>
@@ -364,12 +365,21 @@ function HomePageSkeleton() {
   );
 }
 
-function ProductSectionSkeleton() {
+function ProductSectionSkeleton({
+  titleWidth = "w-44",
+  hintWidth = "w-64",
+}: {
+  titleWidth?: string;
+  hintWidth?: string;
+}) {
   return (
-    <div className="pt-8 lg:pt-12">
-      <div className={GUTTER}>
-        <Skeleton className="h-7 w-44 lg:h-8" />
-        <Skeleton className="mt-2 h-4 w-64" />
+    <section className="scroll-mt-20 pt-8 lg:pt-12">
+      <div className={`flex items-end justify-between gap-4 ${GUTTER}`}>
+        <div>
+          <Skeleton className={`h-[26px] ${titleWidth} lg:h-9`} />
+          <Skeleton className={`mt-1 h-[17px] ${hintWidth} lg:h-5`} />
+        </div>
+        <Skeleton className="hidden h-7 w-[4.75rem] shrink-0 rounded-full sm:block" />
       </div>
 
       <div
@@ -379,19 +389,23 @@ function ProductSectionSkeleton() {
           <ProductCardSkeleton key={i} />
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
 function ProductCardSkeleton() {
   return (
     <div className="flex flex-col overflow-hidden rounded-[12px] border border-line bg-bg">
-      <Skeleton className="aspect-square w-full rounded-none" />
-      <div className="flex flex-col gap-2.5 p-3.5">
-        <Skeleton className="h-4 w-4/5" />
-        <Skeleton className="h-4 w-3/5" />
-        <Skeleton className="h-5 w-2/5" />
-        <Skeleton className="mt-1 h-11 w-full rounded-[8px]" />
+      <div className="relative aspect-square border-b border-line bg-surface">
+        <Skeleton className="size-full rounded-none" />
+      </div>
+      <div className="flex flex-1 flex-col gap-2 p-3.5">
+        <Skeleton className="h-[21px] w-[90%]" />
+        <Skeleton className="h-[21px] w-3/5" />
+        <Skeleton className="h-[27px] w-24" />
+        <div className="mt-auto pt-1">
+          <Skeleton className="h-11 w-full rounded-[8px]" />
+        </div>
       </div>
     </div>
   );
