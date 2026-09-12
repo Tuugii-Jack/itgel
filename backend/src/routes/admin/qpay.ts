@@ -13,6 +13,7 @@ import {
   getQpayPayment,
   listQpayPayments,
   qpayPublicStatus,
+  rememberQpayInvoice,
   reverseQpayPayment,
 } from '../../services/qpay.js';
 
@@ -146,11 +147,12 @@ adminQpayRouter.delete(
     if (order?.isLeasing === true) {
       throw forbidden('Лизинг захиалгын төлбөрийг зөвхөн лизингийн админ бүртгэнэ.');
     }
+    if (order) await rememberQpayInvoice(order.id, invoiceId, order.qpayAccount);
     await cancelQpayInvoice(invoiceId);
 
     if (order) {
-      await prisma.order.update({
-        where: { id: order.id },
+      await prisma.order.updateMany({
+        where: { id: order.id, qpayInvoiceId: invoiceId },
         data: { qpayInvoiceId: null, qpayInvoiceAt: null },
       });
       await audit({

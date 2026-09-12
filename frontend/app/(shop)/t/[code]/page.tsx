@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FulfilmentChooser } from "@/components/FulfilmentChooser";
 import { PaymentPanel } from "@/components/PaymentPanel";
 import { Badge, Button, ErrorNote, Spinner } from "@/components/ui";
@@ -19,12 +19,11 @@ import {
   itemNeedsFulfilment,
 } from "@/lib/fulfilment";
 import { usePolling } from "@/lib/usePolling";
+import { trackedOrderAfterError } from "@/lib/trackedOrders";
 import type { PublicOrder } from "@/lib/types";
 import {
   STATUS_TONE,
   TrackDetailSkeleton,
-  fetchTrackedOrder,
-  peekTrackedOrder,
   useTrackShell,
 } from "../TrackShell";
 
@@ -36,49 +35,38 @@ import {
  */
 export default function TrackPage() {
   const code = String(useParams<{ code: string }>().code ?? "").toUpperCase();
-  const { store, setChromeHidden } = useTrackShell();
-  const [order, setOrder] = useState<PublicOrder | null>(() => peekTrackedOrder(code));
+  return <TrackDetail key={code} code={code} />;
+}
+
+function TrackDetail({ code }: { code: string }) {
+  const { store, setChromeHidden, trackedOrders } = useTrackShell();
+  const [order, setOrder] = useState<PublicOrder | null>(() => trackedOrders.peek(code));
+  const mounted = useRef(false);
   /** Дизайны 06 дэлгэц — «Ирсэн барааг авах» дарсны дараа нээгдэнэ. */
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    if (!code) return;
+    if (!code || !mounted.current) return;
     try {
-      const next = await fetchTrackedOrder(code);
+      const next = await trackedOrders.fetch(code);
+      if (!mounted.current) return;
       setOrder(next);
       setError(null);
     } catch (e) {
-      if (!peekTrackedOrder(code)) {
-        setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
-      }
+      if (!mounted.current) return;
+      setOrder((current) => trackedOrderAfterError(current, e));
+      setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
     }
-  }, [code]);
+  }, [code, trackedOrders]);
 
   useEffect(() => {
-    if (!code) return;
-    const cached = peekTrackedOrder(code);
-    if (cached) setOrder(cached);
-    else setOrder((prev) => (prev?.code === code ? prev : null));
-    setCollecting(false);
-    setError(null);
-
-    let alive = true;
-    fetchTrackedOrder(code)
-      .then((next) => {
-        if (!alive) return;
-        setOrder(next);
-        setError(null);
-      })
-      .catch((e) => {
-        if (!alive) return;
-        if (peekTrackedOrder(code)) return;
-        setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
-      });
+    mounted.current = true;
+    void load();
     return () => {
-      alive = false;
+      mounted.current = false;
     };
-  }, [code]);
+  }, [load]);
 
   useEffect(() => {
     const hide = collecting && Boolean(store);

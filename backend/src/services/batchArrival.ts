@@ -2,6 +2,7 @@ import type { Order, Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { lockOrders } from '../lib/orderLock.js';
 import {
   formatSelectionsLabel,
   itemSelections,
@@ -101,7 +102,8 @@ export type RoundArrivalSummary = {
 function eligibleOrderWhere(): Prisma.OrderWhereInput {
   return {
     deletedAt: null,
-    status: { notIn: ['CANCELLED', 'HANDED_OVER'] },
+    // Хүлээлгэн өгсөн бараа ирсэн НИЙТ тоонд хэвээр орно.
+    status: { not: 'CANCELLED' },
     batchOmittedAt: null,
   };
 }
@@ -150,7 +152,7 @@ export async function summarizeRoundArrivals(
   const byRound = new Map<string, Map<string, Agg>>();
 
   for (const item of items) {
-    if (!isProductPaid(item.order)) continue;
+    if (!item.handedOverAt && !isProductPaid(item.order)) continue;
     const selections = itemSelections(item);
     const key = variantKey(selections);
     let roundMap = byRound.get(item.roundId);
@@ -168,9 +170,11 @@ export async function summarizeRoundArrivals(
         waitingCustomers: new Set<string>(),
       } satisfies Agg);
     agg.orderedQty += item.qty;
-    agg.arrivedQty += Math.min(item.arrivedQty, item.qty);
+    agg.arrivedQty += item.handedOverAt ? item.qty : Math.min(item.arrivedQty, item.qty);
     if (item.handedOverAt) agg.handedOverQty += item.qty;
-    if (item.arrivedQty < item.qty) agg.waitingCustomers.add(item.order.customerId);
+    if (!item.handedOverAt && item.arrivedQty < item.qty) {
+      agg.waitingCustomers.add(item.order.customerId);
+    }
     roundMap.set(key, agg);
   }
 
@@ -286,6 +290,13 @@ export async function registerBatchArrivals(
       if (line.arrivedQty < 0) throw badRequest('Ирсэн тоо сөрөг байж болохгүй.');
     }
 
+    // Хүлээлгэн өгөх/цуцлахтай зэрэгцвэл шинэ төлөвийг нь уншиж тооцно.
+    const participatingOrders = await tx.order.findMany({
+      where: { items: { some: { roundId: { in: lines.map((line) => line.roundId) } } } },
+      select: { id: true },
+    });
+    await lockOrders(tx, participatingOrders.map((order) => order.id));
+
     const items = await tx.orderItem.findMany({
       where: {
         roundId: { in: lines.map((l) => l.roundId) },
@@ -319,7 +330,7 @@ export async function registerBatchArrivals(
     type Row = (typeof items)[number];
     const byVariant = new Map<string, Row[]>();
     for (const item of items) {
-      if (!isProductPaid(item.order)) continue;
+      if (!item.handedOverAt && !isProductPaid(item.order)) continue;
       const key = `${item.roundId}\0${variantKey(itemSelections(item))}`;
       const list = byVariant.get(key) ?? [];
       list.push(item);
@@ -344,7 +355,10 @@ export async function registerBatchArrivals(
       const key = `${line.roundId}\0${variantKey(line.selections)}`;
       const pool = byVariant.get(key) ?? [];
       const ordered = pool.reduce((s, i) => s + i.qty, 0);
-      const current = pool.reduce((s, i) => s + Math.min(i.arrivedQty, i.qty), 0);
+      const current = pool.reduce(
+        (s, i) => s + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
+        0,
+      );
       const locked = pool.filter((i) => i.handedOverAt).reduce((s, i) => s + i.qty, 0);
       if (line.arrivedQty < locked) {
         throw conflict(
@@ -357,7 +371,7 @@ export async function registerBatchArrivals(
       if (delta === 0) continue;
 
       if (delta > 0) {
-        const waiting = pool.filter((i) => i.arrivedQty < i.qty).map(toLine);
+        const waiting = pool.filter((i) => !i.handedOverAt && i.arrivedQty < i.qty).map(toLine);
         const { allocations, unused: leftover } = allocateFifo(waiting, delta);
         unused += leftover;
         for (const row of allocations) {

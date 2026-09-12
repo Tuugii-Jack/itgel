@@ -25,17 +25,15 @@ import {
   refundPayoutStatus,
 } from "../../services/serialize.js";
 import { paidPayoutDaySet } from "../../services/returns.js";
-import { mailTemplates, sendMail } from "../../services/mail.js";
 import { ipLimiters, RateLimiter } from "../../lib/rateLimit.js";
-import { randomInt } from "node:crypto";
 import { currentLeasingPayGaps } from "../../services/settings.js";
+import { issueEmailChange } from "../../services/emailChange.js";
 
 export const publicMeRouter = Router();
 
 publicMeRouter.use(requireCustomer);
 
 const BCRYPT_ROUNDS = 10;
-const OTP_TTL_MS = 10 * 60 * 1000;
 const emailChangeLimiter = new RateLimiter(5, 60 * 60 * 1000);
 ipLimiters.push(emailChangeLimiter);
 
@@ -73,7 +71,8 @@ const phoneOptional = z
   .nullable()
   .optional()
   .transform((v) => {
-    if (v == null || v === "") return null;
+    if (v === undefined) return undefined;
+    if (v === null || v === "") return null;
     return normalizePhone(v);
   })
   .refine(
@@ -216,34 +215,11 @@ publicMeRouter.post(
       throw badRequest("Хэт олон удаа оролдлоо. Дараа дахин оролдоно уу.");
     }
 
-    await prisma.customer.update({
-      where: { id: customer.id },
-      data: { email, emailVerifiedAt: null },
-    });
-
-    const code = String(randomInt(100_000, 1_000_000));
-    await prisma.emailOtp.create({
-      data: {
-        email,
-        code,
-        purpose: "VERIFY",
-        expiresAt: new Date(Date.now() + OTP_TTL_MS),
-      },
-    });
-    const template = mailTemplates.verify(code);
-    const sent = await sendMail({
-      to: email,
-      subject: template.subject,
-      text: template.text,
-      html: template.html,
-    });
-    if (!sent.ok) throw badRequest(sent.error ?? "И-мэйл илгээж чадсангүй.");
+    const otp = await issueEmailChange(customer, email);
 
     res.json({
       data: {
-        email,
-        expiresInSec: OTP_TTL_MS / 1000,
-        resendAfterSec: 60,
+        ...otp,
         message: "Шинэ и-мэйл рүү баталгаажуулах код илгээлээ.",
       },
     });

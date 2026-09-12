@@ -17,7 +17,8 @@ import { env } from '../env.js';
 import { audit } from '../lib/audit.js';
 import { AppError, conflict, notFound } from '../lib/errors.js';
 import { prisma } from '../prisma.js';
-import { recordPayment } from './payments.js';
+import { lockOrder } from '../lib/orderLock.js';
+import { confirmLeasingIfFeePaid, recordPayment, recordPaymentWithTotals } from './payments.js';
 
 export interface QpayBankLink {
   name: string;
@@ -515,7 +516,24 @@ export async function refundQpayPayment(
   );
 }
 
-/** QPay төлбөрийг дэвтэрт бүртгэнэ — давхар webhook/check-д аюулгүй. */
+/** Keep invoice ownership after replacement, cancellation, or a payment-method switch. */
+export async function rememberQpayInvoice(
+  orderId: string,
+  invoiceId: string,
+  account: QpayAccountKind,
+  client: Pick<typeof prisma, 'qpayInvoice'> = prisma,
+): Promise<void> {
+  const invoice = await client.qpayInvoice.upsert({
+    where: { id: invoiceId },
+    create: { id: invoiceId, orderId, account },
+    update: {},
+  });
+  if (invoice.orderId !== orderId || invoice.account !== account) {
+    throw conflict('QPay нэхэмжлэл өөр захиалга эсвэл данстай холбогдсон байна.');
+  }
+}
+
+/** amount is QPay's cumulative paid amount for this invoice, never the order balance. */
 export async function applyQpayPayment(
   orderId: string,
   invoiceId: string,
@@ -523,46 +541,51 @@ export async function applyQpayPayment(
   paymentRef?: string,
   actor = 'system:qpay',
 ): Promise<boolean> {
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { dueAmount: true, id: true },
-  });
-  if (!order || order.dueAmount <= 0) return false;
+  if (!Number.isSafeInteger(amount) || amount <= 0) return false;
+  const recorded = await prisma.$transaction(async (tx) => {
+    await lockOrder(tx, orderId);
+    const order = await tx.order.findFirst({
+      where: { id: orderId, deletedAt: null },
+      select: { id: true, isLeasing: true },
+    });
+    if (!order) return false;
+    const invoice = await tx.qpayInvoice.findUnique({ where: { id: invoiceId } });
+    if (invoice && invoice.orderId !== orderId) throw conflict('QPay нэхэмжлэлийн захиалга зөрсөн.');
+    if (!invoice) await rememberQpayInvoice(orderId, invoiceId, qpayAccountForOrder(order.isLeasing), tx);
 
-  const payAmount = Math.min(amount, order.dueAmount);
-  if (payAmount <= 0) return false;
+    // Associate legacy records before calculating the already recorded cumulative amount.
+    const reference = paymentRef ?? `qpay:${invoiceId}`;
+    await tx.payment.updateMany({
+      where: {
+        orderId, kind: 'PAYMENT', method: 'QPAY', qpayInvoiceId: null,
+        reference: { in: [...new Set([reference, `qpay:${invoiceId}`])] },
+      },
+      data: { qpayInvoiceId: invoiceId },
+    });
+    const previous = await tx.payment.aggregate({
+      where: { orderId, kind: 'PAYMENT', qpayInvoiceId: invoiceId },
+      _sum: { amount: true },
+    });
+    const payAmount = amount - (previous._sum.amount ?? 0);
+    if (payAmount <= 0) return false;
 
-  const reference = paymentRef ?? `qpay:${invoiceId}`;
-  const existing = await prisma.payment.findFirst({
-    where: { orderId, reference, kind: 'PAYMENT' },
+    await recordPaymentWithTotals(tx, {
+      orderId, kind: 'PAYMENT', amount: payAmount, method: 'QPAY',
+      reference, qpayInvoiceId: invoiceId, note: 'QPay автомат бүртгэл', actor,
+    });
+    await audit({
+      actor, action: 'QPAY_PAID', entity: 'Order', entityId: orderId,
+      after: { invoiceId, amount: payAmount, reference },
+    }, tx);
+    return true;
   });
-  if (existing) return false;
-
-  await recordPayment({
-    orderId,
-    kind: 'PAYMENT',
-    amount: payAmount,
-    method: 'QPAY',
-    reference,
-    note: 'QPay автомат бүртгэл',
-    actor,
-  });
-
-  await audit({
-    actor,
-    action: 'QPAY_PAID',
-    entity: 'Order',
-    entityId: orderId,
-    after: { invoiceId, amount: payAmount, reference },
-  });
-  return true;
+  if (recorded) await confirmLeasingIfFeePaid(orderId, actor);
+  return recorded;
 }
 
 export async function findOrderByQpayInvoice(invoiceId: string) {
   if (!invoiceId) return null;
-  return prisma.order.findFirst({
-    where: { qpayInvoiceId: invoiceId, deletedAt: null },
-    select: {
+  const select = {
       id: true,
       code: true,
       dueAmount: true,
@@ -570,8 +593,20 @@ export async function findOrderByQpayInvoice(invoiceId: string) {
       qpayInvoiceId: true,
       qpayInvoiceAt: true,
       isLeasing: true,
-    },
+      deletedAt: true,
+    } as const;
+  const invoice = await prisma.qpayInvoice.findUnique({
+    where: { id: invoiceId },
+    include: { order: { select } },
   });
+  if (invoice) {
+    if (invoice.order.deletedAt) return null;
+    return { ...invoice.order, qpayAccount: invoice.account as QpayAccountKind };
+  }
+  const order = await prisma.order.findFirst({
+    where: { qpayInvoiceId: invoiceId, deletedAt: null }, select,
+  });
+  return order ? { ...order, qpayAccount: qpayAccountForOrder(order.isLeasing) } : null;
 }
 
 /** Нэхэмжлэлийг QPay дээр цуцалж, захиалгаас id-г авна. */
@@ -586,12 +621,13 @@ export async function cancelStoredQpayInvoice(
   if (!order) throw notFound('Захиалга олдсонгүй.');
   if (!order.qpayInvoiceId) throw conflict('QPay нэхэмжлэл алга.');
 
+  await rememberQpayInvoice(order.id, order.qpayInvoiceId, qpayAccountForOrder(order.isLeasing));
   await cancelQpayInvoice(order.qpayInvoiceId, {
     kind: qpayAccountForOrder(order.isLeasing),
   });
 
-  await prisma.order.update({
-    where: { id: order.id },
+  await prisma.order.updateMany({
+    where: { id: order.id, qpayInvoiceId: order.qpayInvoiceId },
     data: { qpayInvoiceId: null, qpayInvoiceAt: null },
   });
 

@@ -10,6 +10,7 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { addDays, toIso } from '../lib/date.js';
 import { conflict } from '../lib/errors.js';
+import { lockOrder, lockOrders } from '../lib/orderLock.js';
 import { canTransition, ORDER_STATUS_LABEL, previousInFlow, stepsToStatus } from '../lib/orderStatus.js';
 import { mailTemplates, sendMail } from './mail.js';
 import { isProductPaid } from './money.js';
@@ -55,6 +56,7 @@ export async function changeOrderStatus(
   const now = options.now ?? new Date();
 
   const updated = await prisma.$transaction(async (tx) => {
+    await lockOrder(tx, orderId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) throw conflict('Захиалга олдсонгүй.');
 
@@ -63,6 +65,15 @@ export async function changeOrderStatus(
         `"${ORDER_STATUS_LABEL[order.status]}" төлвөөс "${ORDER_STATUS_LABEL[to]}" руу шилжих боломжгүй.`,
         { from: order.status, to },
       );
+    }
+
+    if (to === 'CANCELLED') {
+      const delivered = await tx.orderItem.count({
+        where: { orderId, cancelledAt: null, handedOverAt: { not: null } },
+      });
+      if (delivered > 0) {
+        throw conflict('Зарим барааг хүлээлгэн өгсөн тул үлдсэн барааг мөрөөр нь цуцална уу.');
+      }
     }
 
     const timestampField = STATUS_TIMESTAMP[to];
@@ -290,6 +301,7 @@ export async function revertOrderStatus(
   options: StatusChangeOptions,
 ): Promise<Order> {
   const updated = await prisma.$transaction(async (tx) => {
+    await lockOrder(tx, orderId);
     const order = await tx.order.findUnique({ where: { id: orderId } });
     if (!order) throw conflict('Захиалга олдсонгүй.');
     if (order.deletedAt) throw conflict('Устгасан захиалгын төлөв буцаах боломжгүй.');
@@ -391,7 +403,7 @@ async function previousStatusFromAudit(
 /** Цуцлалтыг буцаах үед бэлэн барааны үлдэгдлийг дахин хасна. */
 async function consumeReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
   const items = await tx.orderItem.findMany({
-    where: { orderId, cancelledAt: null },
+    where: { orderId, cancelledAt: null, handedOverAt: null },
     include: {
       round: { include: { skuStocks: true, product: { select: { name: true } } } },
     },
@@ -449,7 +461,7 @@ async function batchForOrder(
  */
 async function restoreReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
   const items = await tx.orderItem.findMany({
-    where: { orderId, cancelledAt: null },
+    where: { orderId, cancelledAt: null, handedOverAt: null },
     include: { round: { include: { skuStocks: true } } },
   });
 
@@ -607,6 +619,11 @@ export async function handOverItems(opts: {
   if (itemIds.length === 0) throw conflict('Бараа сонгоогүй байна.');
 
   return prisma.$transaction(async (tx) => {
+    const requested = await tx.orderItem.findMany({
+      where: { id: { in: itemIds } },
+      select: { orderId: true },
+    });
+    await lockOrders(tx, requested.map((item) => item.orderId));
     const items = await tx.orderItem.findMany({
       where: { id: { in: itemIds } },
       include: {
@@ -633,10 +650,19 @@ export async function handOverItems(opts: {
       }
     }
 
-    await tx.orderItem.updateMany({
-      where: { id: { in: itemIds } },
+    const handedOver = await tx.orderItem.updateMany({
+      where: {
+        id: { in: itemIds },
+        cancelledAt: null,
+        handedOverAt: null,
+        arrivedAt: { not: null },
+        order: { deletedAt: null, status: { notIn: ['CANCELLED', 'HANDED_OVER'] } },
+      },
       data: { handedOverAt: now },
     });
+    if (handedOver.count !== itemIds.length) {
+      throw conflict('Зарим барааны төлөв өөрчлөгдсөн байна. Дахин ачаална уу.');
+    }
     await tx.orderItem.updateMany({
       where: { id: { in: itemIds }, fulfilment: null },
       data: { fulfilment: 'PICKUP' },

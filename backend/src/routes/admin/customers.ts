@@ -26,7 +26,8 @@ const phoneOptional = z
   .nullable()
   .optional()
   .transform((v) => {
-    if (v == null || v === '') return null;
+    if (v === undefined) return undefined;
+    if (v === null || v === '') return null;
     return normalizePhone(v);
   })
   .refine((v) => v === null || v === undefined || PHONE_RE.test(v), 'Утасны дугаар буруу.');

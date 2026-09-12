@@ -6,6 +6,7 @@ import { assertRefundable, computeTotals, fullyPaid, recalcOrderTotals, type Ord
 import { changeOrderStatus } from './orders.js';
 import { restoreReadyStock, selectionsFromItem } from './readyStock.js';
 import { syncOrderCargoFee } from './cargoFee.js';
+import { lockOrder } from '../lib/orderLock.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -15,6 +16,7 @@ export interface RecordPaymentInput {
   amount: number;
   method?: PaymentMethod;
   reference?: string | null;
+  qpayInvoiceId?: string;
   note?: string | null;
   actor: string;
 }
@@ -26,77 +28,86 @@ export interface RecordPaymentInput {
 export async function recordPayment(
   input: RecordPaymentInput,
 ): Promise<{ payment: Payment; totals: OrderTotals }> {
-  if (!Number.isInteger(input.amount) || input.amount <= 0) {
-    throw conflict('Дүн 0-ээс их бүхэл тоо байх ёстой.');
-  }
-
   const result = await prisma.$transaction(async (tx) => {
-    const order = await tx.order.findFirst({
-      where: { id: input.orderId, deletedAt: null },
-      select: {
-        id: true,
-        code: true,
-        subtotal: true,
-        deliveryFee: true,
-        storageFee: true,
-        cargoFee: true,
-        leasingFee: true,
-        paidAmount: true,
-        refundedAmount: true,
-      },
-    });
-    if (!order) throw notFound('Захиалга олдсонгүй.');
-
-    if (input.kind === 'REFUND') {
-      assertRefundable(computeTotals(order), input.amount);
-    }
-
-    const payment = await tx.payment.create({
-      data: {
-        orderId: order.id,
-        kind: input.kind,
-        amount: input.amount,
-        method: input.method ?? 'BANK_TRANSFER',
-        reference: input.reference ?? null,
-        note: input.note ?? null,
-        actor: input.actor,
-      },
-    });
-
-    const totals = await recalcOrderTotals(tx, order.id);
-
-    await audit(
-      {
-        actor: input.actor,
-        action: input.kind === 'PAYMENT' ? 'PAYMENT_RECORDED' : 'REFUND_RECORDED',
-        entity: 'Order',
-        entityId: order.id,
-        after: {
-          code: order.code,
-          amount: input.amount,
-          method: payment.method,
-          reference: payment.reference,
-          dueAmount: totals.dueAmount,
-        },
-      },
-      tx,
-    );
-
-    return { payment, totals };
+    await lockOrder(tx, input.orderId);
+    return recordPaymentWithTotals(tx, input);
   });
 
   if (input.kind === 'PAYMENT') {
     await confirmLeasingIfFeePaid(input.orderId, input.actor);
   }
-
   return result;
+}
+
+/** Caller must hold lockOrder for the whole read/check/write transaction. */
+export async function recordPaymentWithTotals(
+  tx: Tx,
+  input: RecordPaymentInput,
+): Promise<{ payment: Payment; totals: OrderTotals }> {
+  if (!Number.isInteger(input.amount) || input.amount <= 0) {
+    throw conflict('Дүн 0-ээс их бүхэл тоо байх ёстой.');
+  }
+
+  const order = await tx.order.findFirst({
+    where: { id: input.orderId, deletedAt: null },
+    select: {
+      id: true,
+      code: true,
+      subtotal: true,
+      deliveryFee: true,
+      storageFee: true,
+      cargoFee: true,
+      leasingFee: true,
+      paidAmount: true,
+      refundedAmount: true,
+    },
+  });
+  if (!order) throw notFound('Захиалга олдсонгүй.');
+
+  if (input.kind === 'REFUND') {
+    assertRefundable(computeTotals(order), input.amount);
+  }
+
+  const payment = await tx.payment.create({
+    data: {
+      orderId: order.id,
+      kind: input.kind,
+      amount: input.amount,
+      method: input.method ?? 'BANK_TRANSFER',
+      reference: input.reference ?? null,
+      qpayInvoiceId: input.qpayInvoiceId,
+      note: input.note ?? null,
+      actor: input.actor,
+    },
+  });
+
+  const totals = await recalcOrderTotals(tx, order.id);
+
+  await audit(
+    {
+      actor: input.actor,
+      action: input.kind === 'PAYMENT' ? 'PAYMENT_RECORDED' : 'REFUND_RECORDED',
+      entity: 'Order',
+      entityId: order.id,
+      after: {
+        code: order.code,
+        amount: input.amount,
+        method: payment.method,
+        reference: payment.reference,
+        dueAmount: totals.dueAmount,
+      },
+    },
+    tx,
+  );
+
+  return { payment, totals };
 }
 
 /**
  * Лизингийн шимтгэл орсон NEW захиалгыг баталгаажуулна.
  * Шимтгэл төлөгдөхөөс өмнө захиалга үүссэнд тооцогдохгүй.
  */
-async function confirmLeasingIfFeePaid(orderId: string, actor: string): Promise<void> {
+export async function confirmLeasingIfFeePaid(orderId: string, actor: string): Promise<void> {
   const order = await prisma.order.findFirst({
     where: { id: orderId, deletedAt: null, status: 'NEW', isLeasing: true },
     select: {
@@ -137,6 +148,7 @@ export async function cancelOrderItem(input: {
   refund: boolean;
 }): Promise<{ totals: OrderTotals; orderCancelled: boolean; refunded: number }> {
   const result = await prisma.$transaction(async (tx) => {
+    await lockOrder(tx, input.orderId);
     const order = await tx.order.findFirst({
       where: { id: input.orderId, deletedAt: null },
       select: { id: true, code: true, status: true },
@@ -152,16 +164,22 @@ export async function cancelOrderItem(input: {
     });
     if (!item) throw notFound('Захиалгын мөр олдсонгүй.');
     if (item.cancelledAt) throw conflict('Энэ мөр аль хэдийн цуцлагдсан байна.');
+    if (item.handedOverAt) {
+      throw conflict('Хүлээлгэн өгсөн барааг цуцлах боломжгүй.');
+    }
 
     const lineTotal = item.unitPrice * item.qty;
 
-    await tx.orderItem.update({
-      where: { id: item.id },
+    const cancelled = await tx.orderItem.updateMany({
+      where: { id: item.id, cancelledAt: null, handedOverAt: null },
       data: { cancelledAt: new Date(), cancelReason: input.reason ?? null },
     });
+    if (cancelled.count !== 1) {
+      throw conflict('Энэ мөрийн төлөв өөрчлөгдсөн байна. Дахин ачаална уу.');
+    }
 
     // Бэлэн бараа байсан бол үлдэгдлийг тухайн тойрогт нь буцаана.
-    if (item.round && item.round.closeAt === null) {
+    if (item.round && item.round.closeAt === null && order.status !== 'CANCELLED') {
       await restoreReadyStock(tx, item.round, item.qty, selectionsFromItem(item));
     }
 

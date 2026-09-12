@@ -9,6 +9,7 @@ import { signCustomerToken } from '../../lib/jwt.js';
 import { ipLimiters, RateLimiter } from '../../lib/rateLimit.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
 import { mailTemplates, sendMail } from '../../services/mail.js';
+import { findPendingEmailChange, resendEmailChange, verifyEmailChange } from '../../services/emailChange.js';
 
 export const publicAuthRouter = Router();
 
@@ -197,12 +198,18 @@ publicAuthRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const { email, code } = req.body as { email: string; code: string };
-    await consumeEmailOtp(email, 'VERIFY', code);
-
-    const customer = await prisma.customer.update({
-      where: { email },
-      data: { emailVerifiedAt: new Date() },
-    });
+    // An abandoned change request must not shadow a later registration at this address.
+    const existingCustomer = await prisma.customer.findUnique({ where: { email } });
+    const pendingChange = existingCustomer ? null : await findPendingEmailChange(email);
+    const customer = pendingChange
+      ? await verifyEmailChange(pendingChange, code)
+      : await (async () => {
+          await consumeEmailOtp(email, 'VERIFY', code);
+          return prisma.customer.update({
+            where: { email },
+            data: { emailVerifiedAt: new Date() },
+          });
+        })();
 
     res.json({
       data: {
@@ -224,7 +231,12 @@ publicAuthRouter.post(
   asyncHandler(async (req, res) => {
     const { email } = req.body as { email: string };
     const customer = await prisma.customer.findUnique({ where: { email } });
-    if (!customer) throw badRequest('Бүртгэл олдсонгүй.');
+    if (!customer) {
+      const pendingChange = await findPendingEmailChange(email);
+      if (!pendingChange) throw badRequest('Бүртгэл олдсонгүй.');
+      res.json({ data: await resendEmailChange(pendingChange) });
+      return;
+    }
     if (customer.emailVerifiedAt) throw badRequest('И-мэйл аль хэдийн баталгаажсан.');
 
     const otp = await issueEmailOtp(email, 'VERIFY');

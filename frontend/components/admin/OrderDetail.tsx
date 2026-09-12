@@ -416,7 +416,7 @@ export function OrderDetail({
                   <span className={`tnum text-[15px] ${item.cancelled ? "text-muted line-through" : ""}`}>
                     {money(item.total)}
                   </span>
-                  {!item.cancelled && canCancelItems && order.status !== "HANDED_OVER" && (
+                  {!item.cancelled && !item.handedOverAt && canCancelItems && order.status !== "HANDED_OVER" && (
                     <CancelItem
                       disabled={busy}
                       loading={busyKey === `item:${item.id}`}
@@ -482,6 +482,7 @@ export function OrderDetail({
           {canWriteStatus ? (
           <StatusActions
             status={order.status}
+            hasHandedOverItems={order.items.some((item) => !item.cancelled && !!item.handedOverAt)}
             disabled={busy}
             busyKey={busyKey}
             onChange={changeStatus}
@@ -623,12 +624,14 @@ export function OrderDetail({
 /** Дараагийн алхам, буцаах, цуцлах — backend-ийн зөвшөөрсөн шилжилтүүд л харагдана. */
 function StatusActions({
   status,
+  hasHandedOverItems,
   disabled,
   busyKey,
   onChange,
   onRevert,
 }: {
   status: OrderStatus;
+  hasHandedOverItems: boolean;
   disabled: boolean;
   busyKey: string | null;
   onChange: (status: OrderStatus) => void;
@@ -637,7 +640,7 @@ function StatusActions({
   const next = nextStatus(status);
   const prev = previousStatus(status);
   const canRevert = status !== "NEW";
-  const canCancel = status !== "CANCELLED" && status !== "HANDED_OVER";
+  const canCancel = status !== "CANCELLED" && status !== "HANDED_OVER" && !hasHandedOverItems;
   if (!next && !canCancel && !canRevert) return null;
 
   const revertLabel =

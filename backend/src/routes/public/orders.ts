@@ -26,7 +26,7 @@ import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } fr
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { itemSelections, normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
 import { leasingFlagOf, leasingHoldsGoods, serializeLeasing } from '../../lib/leasing.js';
-import { cancelQpayInvoice, qpayAccountForOrder } from '../../services/qpay.js';
+import { cancelQpayInvoice, qpayAccountForOrder, rememberQpayInvoice } from '../../services/qpay.js';
 
 export const publicOrdersRouter = Router();
 
@@ -474,6 +474,7 @@ publicOrdersRouter.patch(
     }
 
     if (order.qpayInvoiceId) {
+      await rememberQpayInvoice(order.id, order.qpayInvoiceId, qpayAccountForOrder(order.isLeasing));
       await cancelQpayInvoice(order.qpayInvoiceId, {
         silent: true,
         kind: qpayAccountForOrder(order.isLeasing),

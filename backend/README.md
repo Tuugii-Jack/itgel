@@ -3,6 +3,18 @@
 Захиалгын дэлгүүрийн API. Node.js + TypeScript + Express + PostgreSQL (Prisma).
 Заавар: [`backend-prompt.md`](backend-prompt.md). API лавлах: [`openapi.yaml`](openapi.yaml).
 
+## 2026-09-12 засварыг байрлуулах
+
+Шинэ backend-ийг эхлүүлэхээс өмнө `npx prisma migrate deploy` ажиллуулна.
+`20260912090000_payment_history_email_changes` migration нь QPay нэхэмжлэлийн түүх,
+төлбөрийн холбоос болон баталгаажуулалт хүлээж буй и-мэйл солих мэдээллийн талбаруудыг нэмнэ.
+Одоо хадгалагдаж байгаа QPay нэхэмжлэлүүдийг түүх рүү хуулна; хуучин мөнгөн дүнг өөрчлөхгүй.
+Өмнө нь дарагдаж алга болсон нэхэмжлэл, буруу бүртгэгдсэн төлбөрийг энэ migration
+автоматаар нөхөхгүй — шаардлагатай бол банкны гүйлгээтэй тусад нь тулгана.
+
+Шалгалт: backend дээр `npm test` болон `npm run typecheck`; frontend дээр
+`node --test tests/trackedOrders.test.mjs` (Node 22.18+) болон `npx tsc --noEmit --incremental false`.
+
 ## Эхлүүлэх
 
 ```bash

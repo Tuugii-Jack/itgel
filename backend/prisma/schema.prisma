@@ -270,20 +270,26 @@ model Customer {
 
   orders        Order[]
   refundPayouts RefundPayout[]
+  emailOtps     EmailOtp[]
 }
 
 model EmailOtp {
   id        String    @id @default(cuid())
   email     String
   code      String
-  /// VERIFY | RESET
+  /// VERIFY | RESET | CHANGE_EMAIL
   purpose   String
+  customerId String?
+  previousEmail String?
   expiresAt DateTime
   usedAt    DateTime?
   attempts  Int       @default(0)
   createdAt DateTime  @default(now())
 
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
   @@index([email, purpose, createdAt])
+  @@index([customerId, purpose, createdAt])
 }
 
 model AdminUser {
@@ -360,6 +366,7 @@ model Order {
   items    OrderItem[]
   delivery Delivery?
   payments Payment[]
+  qpayInvoices QpayInvoice[]
 
   @@index([status])
   @@index([customerId])
@@ -369,6 +376,19 @@ model Order {
   @@index([dueAmount])
   @@index([deletedAt, status, createdAt])
   @@index([isLeasing, createdAt])
+}
+
+/// Keep every invoice associated with its order, including replaced/cancelled invoices.
+model QpayInvoice {
+  id        String   @id
+  orderId   String
+  account   String
+  createdAt DateTime @default(now())
+
+  order    Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  payments Payment[]
+
+  @@index([orderId])
 }
 
 /// Орлого, буцаалт бүрийн бичилт. Устгагдахгүй — залруулга нь эсрэг мөр.
@@ -381,15 +401,18 @@ model Payment {
   method    PaymentMethod @default(BANK_TRANSFER)
   /// Банкны гүйлгээний утга, QPay-ийн дугаар гэх мэт.
   reference String?
+  qpayInvoiceId String?
   note      String?
   /// Хэн бүртгэсэн: "admin:<id>" | "system".
   actor     String
   createdAt DateTime      @default(now())
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  qpayInvoice QpayInvoice? @relation(fields: [qpayInvoiceId], references: [id], onDelete: SetNull)
 
   @@index([orderId, createdAt])
   @@index([createdAt])
+  @@index([qpayInvoiceId, kind])
 }
 
 model OrderItem {

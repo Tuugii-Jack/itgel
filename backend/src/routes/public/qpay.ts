@@ -12,10 +12,12 @@ import {
   checkQpayInvoice,
   createQpayInvoice,
   getQpayPayment,
+  findOrderByQpayInvoice,
   isQpayReady,
   leasingQpayPublicStatus,
   qpayAccountForOrder,
   qpayPublicStatus,
+  rememberQpayInvoice,
   type QpayAccountKind,
   type QpayInvoice,
 } from '../../services/qpay.js';
@@ -165,6 +167,7 @@ publicQpayRouter.post(
     const amount = resolved.amount;
 
     if (order.qpayInvoiceId) {
+      await rememberQpayInvoice(order.id, order.qpayInvoiceId, kind);
       await cancelQpayInvoice(order.qpayInvoiceId, { silent: true, kind });
     }
 
@@ -184,12 +187,15 @@ publicQpayRouter.post(
       kind,
     );
 
-    await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        qpayInvoiceId: invoice.invoiceId,
-        qpayInvoiceAt: new Date(),
-      },
+    await prisma.$transaction(async (tx) => {
+      await rememberQpayInvoice(order.id, invoice.invoiceId, kind, tx);
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          qpayInvoiceId: invoice.invoiceId,
+          qpayInvoiceAt: new Date(),
+        },
+      });
     });
 
     await audit({
@@ -266,16 +272,9 @@ publicQpayRouter.post(
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
-    if (order.dueAmount <= 0) {
-      res.json({
-        data: { paid: true, paidAmount: order.paidAmount, invoiceId: order.qpayInvoiceId },
-      });
-      return;
-    }
-
     if (!order.qpayInvoiceId || !isQpayReady(qpayAccountForOrder(order.isLeasing))) {
       res.json({
-        data: { paid: false, paidAmount: 0, invoiceId: order.qpayInvoiceId },
+        data: { paid: order.dueAmount <= 0, paidAmount: order.paidAmount, invoiceId: order.qpayInvoiceId },
       });
       return;
     }
@@ -340,6 +339,8 @@ async function qpayCallbackHandler(req: {
       resolvedInvoiceId = payment.invoiceId;
     } catch (e) {
       console.error(`[qpay:${req.kind}] callback payment lookup failed`, e);
+      req.res.status(503).send('RETRY');
+      return;
     }
   }
 
@@ -349,21 +350,23 @@ async function qpayCallbackHandler(req: {
   }
 
   if (!isQpayReady(req.kind)) {
+    req.res.status(503).send('RETRY');
+    return;
+  }
+
+  const order = await findOrderByQpayInvoice(resolvedInvoiceId);
+
+  if (!order) {
+    // The callback can arrive before the invoice-creation transaction commits.
+    req.res.status(503).send('RETRY');
+    return;
+  }
+  if (order.qpayAccount !== req.kind) {
     req.res.status(200).send('SUCCESS');
     return;
   }
 
-  const order = await prisma.order.findFirst({
-    where: { qpayInvoiceId: resolvedInvoiceId, deletedAt: null },
-    select: { id: true, dueAmount: true, isLeasing: true },
-  });
-
-  if (order && qpayAccountForOrder(order.isLeasing) !== req.kind) {
-    req.res.status(200).send('SUCCESS');
-    return;
-  }
-
-  if (order && order.dueAmount > 0) {
+  {
     try {
       const check = await checkQpayInvoice(resolvedInvoiceId, req.kind);
       if (check.paid && check.paidAmount > 0) {
@@ -377,6 +380,8 @@ async function qpayCallbackHandler(req: {
       }
     } catch (e) {
       console.error(`[qpay:${req.kind}] callback verify failed`, e);
+      req.res.status(503).send('RETRY');
+      return;
     }
   }
 

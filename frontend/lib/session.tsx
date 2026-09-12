@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -26,31 +27,41 @@ const Ctx = createContext<Session | null>(null);
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [loading, setLoading] = useState(true);
+  const refreshVersion = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!readToken("customer")) {
-      setMe(null);
-      setLoading(false);
-      return;
-    }
+    const version = ++refreshVersion.current;
+    const token = readToken("customer");
+    const isCurrent = () =>
+      version === refreshVersion.current && token === readToken("customer");
     try {
-      setMe(await api.me());
+      const next = await (token ? api.me() : null);
+      if (isCurrent()) setMe(next);
     } catch (error) {
+      if (!isCurrent()) return;
       // Хугацаа нь дууссан токеныг цэвэрлэнэ.
       if (isAuthError(error)) writeToken("customer", null);
       setMe(null);
     } finally {
-      setLoading(false);
+      if (version === refreshVersion.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
+    let active = true;
+    queueMicrotask(() => {
+      if (active) void refresh();
+    });
+    return () => {
+      active = false;
+      refreshVersion.current += 1;
+    };
   }, [refresh]);
 
   const signIn = useCallback(
     async (token: string) => {
       writeToken("customer", token);
+      setMe(null);
       setLoading(true);
       await refresh();
     },
@@ -58,8 +69,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(() => {
+    refreshVersion.current += 1;
     writeToken("customer", null);
     setMe(null);
+    setLoading(false);
   }, []);
 
   const value = useMemo<Session>(

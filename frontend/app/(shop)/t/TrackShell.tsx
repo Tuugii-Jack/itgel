@@ -7,7 +7,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -16,7 +15,8 @@ import { Badge, Card, Skeleton, Spinner, type Tone } from "@/components/ui";
 import { api } from "@/lib/api";
 import { dayLabel, money } from "@/lib/format";
 import { useSession } from "@/lib/session";
-import type { MyOrder, OrderStatus, PublicOrder, Store } from "@/lib/types";
+import { createTrackedOrderCache } from "@/lib/trackedOrders";
+import type { Me, MyOrder, OrderStatus, Store } from "@/lib/types";
 
 export const STATUS_TONE: Record<OrderStatus, Tone> = {
   NEW: "neutral",
@@ -28,42 +28,10 @@ export const STATUS_TONE: Record<OrderStatus, Tone> = {
   CANCELLED: "danger",
 };
 
-const orderCache = new Map<string, PublicOrder>();
-const inflight = new Map<string, Promise<PublicOrder>>();
-
-export function peekTrackedOrder(code: string): PublicOrder | null {
-  return orderCache.get(code.trim().toUpperCase()) ?? null;
-}
-
-export function fetchTrackedOrder(code: string): Promise<PublicOrder> {
-  const key = code.trim().toUpperCase();
-  const pending = inflight.get(key);
-  if (pending) return pending;
-  const request = api
-    .order(key)
-    .then((order) => {
-      orderCache.set(order.code, order);
-      inflight.delete(key);
-      return order;
-    })
-    .catch((error) => {
-      inflight.delete(key);
-      orderCache.delete(key);
-      throw error;
-    });
-  inflight.set(key, request);
-  return request;
-}
-
-export function prefetchTrackedOrder(code: string): void {
-  const key = code.trim().toUpperCase();
-  if (orderCache.has(key) || inflight.has(key)) return;
-  void fetchTrackedOrder(key).catch(() => undefined);
-}
-
 type TrackShell = {
   store: Store | null;
   myOrders: MyOrder[];
+  trackedOrders: ReturnType<typeof createTrackedOrderCache>;
   chromeHidden: boolean;
   setChromeHidden: (hidden: boolean) => void;
 };
@@ -78,16 +46,26 @@ export function useTrackShell(): TrackShell {
 
 export function TrackShellProvider({ children }: { children: ReactNode }) {
   const session = useSession();
+  const customer = session.loading ? null : session.me;
+  // Reset cached data, pending requests and rendered details together on account changes.
+  return (
+    <CustomerTrackShell key={customer?.id ?? ""} customer={customer}>
+      {children}
+    </CustomerTrackShell>
+  );
+}
+
+function CustomerTrackShell({
+  children,
+  customer,
+}: {
+  children: ReactNode;
+  customer: Me | null;
+}) {
   const [store, setStore] = useState<Store | null>(null);
   const [myOrders, setMyOrders] = useState<MyOrder[]>([]);
+  const [trackedOrders] = useState(() => createTrackedOrderCache(api.order));
   const [chromeHidden, setChromeHidden] = useState(false);
-  const cacheOwner = useRef(session.me?.id ?? "");
-  const sessionKey = session.me?.id ?? "";
-  if (cacheOwner.current !== sessionKey) {
-    cacheOwner.current = sessionKey;
-    orderCache.clear();
-    inflight.clear();
-  }
 
   useEffect(() => {
     let alive = true;
@@ -101,10 +79,7 @@ export function TrackShellProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (!session.me) {
-      setMyOrders([]);
-      return;
-    }
+    if (!customer) return;
     let alive = true;
     api
       .myOrders()
@@ -113,11 +88,11 @@ export function TrackShellProvider({ children }: { children: ReactNode }) {
     return () => {
       alive = false;
     };
-  }, [session.me]);
+  }, [customer]);
 
   const value = useMemo<TrackShell>(
-    () => ({ store, myOrders, chromeHidden, setChromeHidden }),
-    [store, myOrders, chromeHidden],
+    () => ({ store, myOrders, trackedOrders, chromeHidden, setChromeHidden }),
+    [store, myOrders, trackedOrders, chromeHidden],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -207,6 +182,7 @@ export function TrackDetailSkeleton() {
 }
 
 function OrderList({ orders, current }: { orders: MyOrder[]; current: string }) {
+  const { trackedOrders } = useTrackShell();
   return (
     <div className="hidden lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-2.5">
       {orders.map((order) => {
@@ -217,9 +193,9 @@ function OrderList({ orders, current }: { orders: MyOrder[]; current: string }) 
             href={`/t/${order.code}`}
             scroll={false}
             prefetch
-            onMouseEnter={() => prefetchTrackedOrder(order.code)}
-            onFocus={() => prefetchTrackedOrder(order.code)}
-            onTouchStart={() => prefetchTrackedOrder(order.code)}
+            onMouseEnter={() => trackedOrders.prefetch(order.code)}
+            onFocus={() => trackedOrders.prefetch(order.code)}
+            onTouchStart={() => trackedOrders.prefetch(order.code)}
             className={`flex flex-col gap-2 rounded-[12px] border p-4 no-underline ${
               active ? "border-ink bg-surface" : "border-line bg-bg hover:bg-surface"
             }`}
@@ -240,6 +216,7 @@ function OrderList({ orders, current }: { orders: MyOrder[]; current: string }) 
 }
 
 function OrderChips({ orders, current }: { orders: MyOrder[]; current: string }) {
+  const { trackedOrders } = useTrackShell();
   return (
     <div className="w-full min-w-0 max-w-full overflow-x-auto px-4 pt-3 lg:hidden">
       <div className="no-scrollbar flex w-max max-w-none gap-2">
@@ -251,9 +228,9 @@ function OrderChips({ orders, current }: { orders: MyOrder[]; current: string })
               href={`/t/${order.code}`}
               scroll={false}
               prefetch
-              onMouseEnter={() => prefetchTrackedOrder(order.code)}
-              onFocus={() => prefetchTrackedOrder(order.code)}
-              onTouchStart={() => prefetchTrackedOrder(order.code)}
+              onMouseEnter={() => trackedOrders.prefetch(order.code)}
+              onFocus={() => trackedOrders.prefetch(order.code)}
+              onTouchStart={() => trackedOrders.prefetch(order.code)}
               className={`tnum flex h-9 shrink-0 items-center rounded-[8px] border px-3 text-[13px] whitespace-nowrap no-underline ${
                 active ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"
               }`}
