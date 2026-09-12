@@ -25,6 +25,7 @@ import {
   sizeColorCompat,
   sizeColorFromSelections,
 } from '../lib/options.js';
+import { leasingFeeHold } from '../lib/leasing.js';
 import { BATCH_STAGE_LABEL, ORDER_STATUS_LABEL } from '../lib/orderStatus.js';
 import { publicSkuStocks } from '../lib/skuStock.js';
 import { lineCargoFee } from './cargoFee.js';
@@ -316,3 +317,11 @@ export function batchSummary(batch: Batch | null | undefined) {
 }
 
 export const orderStatusLabel = (status: Order['status']) => ORDER_STATUS_LABEL[status];
+
+/** Хэрэглэгчийн профайл/мөрдөлт — шимтгэл төлөгдөхөөс өмнө захиалга үүсээгүй. */
+export function customerFacingStatusLabel(order: Parameters<typeof leasingFeeHold>[0] & {
+  status: Order['status'];
+}): string {
+  if (leasingFeeHold(order)) return 'Шимтгэл хүлээгдэж байна';
+  return orderStatusLabel(order.status);
+}

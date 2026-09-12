@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leasingFeeOf, leasingFlagOf, leasingView, leasingFeeHold, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing } from '../src/lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingView, leasingFeeHold, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing, SHOP_STAFF_ORDER_WHERE, LEASING_STAFF_ORDER_WHERE, LEASING_FEE_HOLD_WHERE } from '../src/lib/leasing.js';
 import { AppError } from '../src/lib/errors.js';
 
 describe('Лизингийн шимтгэл', () => {
@@ -74,6 +74,19 @@ describe('Лизингийн төлөлт', () => {
         refundedAmount: 0,
       }),
     ).toBe(true);
+  });
+
+  it('шимтгэл төлөгдөөгүй лизинг админд захиалга биш', () => {
+    expect(SHOP_STAFF_ORDER_WHERE).toEqual({ isLeasing: false });
+    expect(LEASING_FEE_HOLD_WHERE).toEqual({
+      isLeasing: true,
+      status: 'NEW',
+      paidAmount: 0,
+    });
+    expect(LEASING_STAFF_ORDER_WHERE).toEqual({
+      isLeasing: true,
+      NOT: { status: 'NEW', paidAmount: 0 },
+    });
   });
 
   it('шимтгэл төлөгдсөний дараа үндсэн 100% үлдэнэ', () => {

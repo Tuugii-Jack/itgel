@@ -69,6 +69,7 @@ adminOrdersRouter.get(
 
     const where: Prisma.OrderWhereInput = {
       deletedAt: q.deleted ? { not: null } : null,
+      isLeasing: false,
       ...(q.status ? { status: q.status } : {}),
       ...(q.batch ? { batchId: q.batch } : {}),
       ...(q.fulfilment ? { fulfilment: q.fulfilment } : {}),
@@ -184,9 +185,10 @@ adminOrdersRouter.get(
       : null;
 
     const where: Prisma.OrderWhereInput = ids
-      ? { id: { in: ids } }
+      ? { id: { in: ids }, isLeasing: false }
       : {
           deletedAt: q.deleted ? { not: null } : null,
+          isLeasing: false,
           ...(q.status ? { status: q.status } : {}),
           ...(q.batch ? { batchId: q.batch } : {}),
           ...(q.fulfilment ? { fulfilment: q.fulfilment } : {}),

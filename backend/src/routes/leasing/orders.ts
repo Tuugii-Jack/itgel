@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { profitOf } from '../../lib/money.js';
-import { serializeLeasing, leasingGoodsWhere, buildLeasingPayPlan } from '../../lib/leasing.js';
+import { serializeLeasing, leasingGoodsWhere, buildLeasingPayPlan, LEASING_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { adminPaymentsRouter } from '../admin/payments.js';
@@ -82,7 +82,7 @@ const listQuery = z.object({
 leasingOrdersRouter.get(
   '/summary',
   asyncHandler(async (_req, res) => {
-    const where: Prisma.OrderWhereInput = { isLeasing: true, deletedAt: null };
+    const where: Prisma.OrderWhereInput = { ...LEASING_STAFF_ORDER_WHERE, deletedAt: null };
     const arrived = leasingGoodsWhere('arrived') as Prisma.OrderWhereInput;
     const notArrived = leasingGoodsWhere('not_arrived') as Prisma.OrderWhereInput;
     const gaps = leasingPayGapsOf(await getSettingsCached());
@@ -136,7 +136,7 @@ leasingOrdersRouter.get(
     const scheduleFilter = q.goods === 'pay_due_today' || q.goods === 'pay_overdue';
 
     const where: Prisma.OrderWhereInput = {
-      isLeasing: true,
+      ...LEASING_STAFF_ORDER_WHERE,
       deletedAt: q.deleted ? { not: null } : null,
       ...(scheduleFilter
         ? { status: { not: 'CANCELLED' }, dueAmount: { gt: 0 } }

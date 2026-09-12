@@ -15,6 +15,7 @@ import {
   type KindTally,
   type VariantTally,
 } from '../lib/options.js';
+import { LEASING_FEE_HOLD_WHERE } from '../lib/leasing.js';
 
 export type ClosedFilter = 'all' | 'open' | 'closed';
 
@@ -31,7 +32,11 @@ export interface OrdersByProductQuery {
 
 const liveItemWhere: Prisma.OrderItemWhereInput = {
   cancelledAt: null,
-  order: { deletedAt: null, status: { not: 'CANCELLED' } },
+  order: {
+    deletedAt: null,
+    status: { not: 'CANCELLED' },
+    NOT: LEASING_FEE_HOLD_WHERE,
+  },
 };
 
 function dayRange(year: number, month: number, day: number): { gte: Date; lte: Date } | null {

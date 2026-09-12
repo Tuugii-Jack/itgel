@@ -117,6 +117,7 @@ adminCustomersRouter.get(
             customerId: { in: customers.map((c) => c.id) },
             deletedAt: null,
             status: { not: 'CANCELLED' },
+            isLeasing: false,
           },
           _count: { _all: true },
           _sum: { subtotal: true },
@@ -198,7 +199,7 @@ adminCustomersRouter.get(
       where: { id: req.params.id },
       include: {
         orders: {
-          where: { deletedAt: null },
+          where: { deletedAt: null, isLeasing: false },
           orderBy: { createdAt: 'desc' },
           include: { items: true, delivery: true },
         },

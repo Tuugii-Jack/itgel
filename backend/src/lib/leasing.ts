@@ -244,6 +244,30 @@ export function leasingFeeHold(order: Parameters<typeof leasingView>[0]): boolea
   return view.isLeasing && !view.feePaid;
 }
 
+/**
+ * Шимтгэл 0₮ — захиалга админд үүсээгүй.
+ * `confirmLeasingIfFeePaid` шимтгэл ормогц CONFIRMED болгодог тул
+ * NEW + paidAmount 0 нь энэ төлөвийн Prisma шүүлт.
+ */
+export const LEASING_FEE_HOLD_FILTER = {
+  status: 'NEW' as const,
+  paidAmount: 0 as const,
+};
+
+export const LEASING_FEE_HOLD_WHERE = {
+  isLeasing: true as const,
+  ...LEASING_FEE_HOLD_FILTER,
+};
+
+/** Дэлгүүрийн админ — лизинг захиалга харагдахгүй. */
+export const SHOP_STAFF_ORDER_WHERE = { isLeasing: false as const };
+
+/** Лизингийн админ — шимтгэл төлөгдсөний дараа. */
+export const LEASING_STAFF_ORDER_WHERE = {
+  isLeasing: true as const,
+  NOT: LEASING_FEE_HOLD_FILTER,
+};
+
 export function parseLeasingPayGaps(raw: unknown): number[] {
   if (!Array.isArray(raw) || raw.length < 2) return [...DEFAULT_LEASING_PAY_GAPS];
   const gaps = raw

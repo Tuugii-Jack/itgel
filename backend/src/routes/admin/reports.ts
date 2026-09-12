@@ -242,9 +242,9 @@ adminReportsRouter.get(
   asyncHandler(async (_req, res) => {
     const [newOrders, inTransit, arrived, pendingDeliveries, activeProducts, paymentClaims] =
       await Promise.all([
-        prisma.order.count({ where: { deletedAt: null, status: 'NEW' } }),
-        prisma.order.count({ where: { deletedAt: null, status: 'IN_TRANSIT' } }),
-        prisma.order.count({ where: { deletedAt: null, status: 'ARRIVED' } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'NEW', isLeasing: false } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'IN_TRANSIT', isLeasing: false } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'ARRIVED', isLeasing: false } }),
         prisma.delivery.count({ where: { status: { not: 'DELIVERED' } } }),
         prisma.productRound.count({
           where: { deletedAt: null, status: 'ACTIVE', product: { deletedAt: null } },
@@ -253,6 +253,7 @@ adminReportsRouter.get(
           where: {
             deletedAt: null,
             status: { not: 'CANCELLED' },
+            isLeasing: false,
             paymentClaimedAt: { not: null },
             dueAmount: { gt: 0 },
           },

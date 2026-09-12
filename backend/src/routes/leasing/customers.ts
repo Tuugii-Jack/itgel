@@ -5,7 +5,7 @@ import { prisma } from '../../prisma.js';
 import { normalizePhone, PHONE_RE } from '../../lib/code.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { toIso } from '../../lib/date.js';
-import { serializeLeasing } from '../../lib/leasing.js';
+import { serializeLeasing, LEASING_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { orderStatusLabel, publicOrderItem } from '../../services/serialize.js';
 import { currentLeasingPayGaps } from '../../services/settings.js';
@@ -60,10 +60,8 @@ function serializeCustomer(customer: {
 const leasingCustomerWhere: Prisma.CustomerWhereInput = {
   orders: {
     some: {
-      isLeasing: true,
+      ...LEASING_STAFF_ORDER_WHERE,
       deletedAt: null,
-      leasingFee: { gt: 0 },
-      paidAmount: { gt: 0 },
     },
   },
 };
@@ -106,7 +104,7 @@ leasingCustomersRouter.get(
           by: ['customerId'],
           where: {
             customerId: { in: customers.map((c) => c.id) },
-            isLeasing: true,
+            ...LEASING_STAFF_ORDER_WHERE,
             deletedAt: null,
             status: { not: 'CANCELLED' },
           },
@@ -139,7 +137,7 @@ leasingCustomersRouter.get(
       where: { id: req.params.id, ...leasingCustomerWhere },
       include: {
         orders: {
-          where: { isLeasing: true, deletedAt: null },
+          where: { ...LEASING_STAFF_ORDER_WHERE, deletedAt: null },
           orderBy: { createdAt: 'desc' },
           include: { items: true, delivery: true },
         },

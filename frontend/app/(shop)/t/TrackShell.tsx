@@ -14,6 +14,7 @@ import { EmailAuthForm } from "@/components/EmailAuthForm";
 import { Badge, Card, Skeleton, Spinner, type Tone } from "@/components/ui";
 import { api } from "@/lib/api";
 import { dayLabel, money } from "@/lib/format";
+import { leasingFeeHold } from "@/lib/leasing";
 import { useSession } from "@/lib/session";
 import { createTrackedOrderCache } from "@/lib/trackedOrders";
 import type { Me, MyOrder, OrderStatus, Store } from "@/lib/types";
@@ -187,6 +188,7 @@ function OrderList({ orders, current }: { orders: MyOrder[]; current: string }) 
     <div className="hidden lg:sticky lg:top-6 lg:flex lg:flex-col lg:gap-2.5">
       {orders.map((order) => {
         const active = order.code === current;
+        const feeHold = leasingFeeHold(order);
         return (
           <Link
             key={order.code}
@@ -202,7 +204,9 @@ function OrderList({ orders, current }: { orders: MyOrder[]; current: string }) 
           >
             <span className="flex w-full items-start justify-between gap-3">
               <span className="tnum text-[15px]">{order.code}</span>
-              <Badge tone={STATUS_TONE[order.status]}>{order.statusLabel}</Badge>
+              <Badge tone={feeHold ? "warn" : STATUS_TONE[order.status]}>
+                {order.statusLabel}
+              </Badge>
             </span>
             <span className="flex w-full items-center justify-between gap-3 text-[13px] text-muted">
               <span className="tnum">{dayLabel(order.createdAt)}</span>

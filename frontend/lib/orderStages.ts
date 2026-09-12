@@ -8,9 +8,15 @@ export const ORDER_STAGES = [
 
 /**
  * 6 дотоод төлвийг хэрэглэгчийн гурван шат болгоно.
- * Цуцлагдсан захиалгад аль ч шат гэрэлтэхгүй.
+ * Цуцлагдсан болон шимтгэл хүлээгдэж буй захиалгад аль ч шат гэрэлтэхгүй.
  */
-export function buildOrderStages(status: OrderStatus) {
+export function buildOrderStages(
+  status: OrderStatus,
+  opts?: { feeHold?: boolean },
+) {
+  if (opts?.feeHold) {
+    return ORDER_STAGES.map((stage) => ({ ...stage, reached: false }));
+  }
   const reachedIndex: Record<OrderStatus, number> = {
     NEW: 0,
     CONFIRMED: 0,

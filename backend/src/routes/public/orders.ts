@@ -13,7 +13,7 @@ import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { consumeReadyStock } from '../../services/readyStock.js';
 import { buildTimeline } from '../../services/orders.js';
-import { batchSummary, publicDelivery, publicOrderItem, orderStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
+import { batchSummary, publicDelivery, publicOrderItem, customerFacingStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
 import { paidPayoutDaySet } from '../../services/returns.js';
 import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
 import { syncOrderCargoFee, lineCargoFee } from '../../services/cargoFee.js';
@@ -197,7 +197,7 @@ publicOrdersRouter.post(
       data: {
         code: order.code,
         status: order.status,
-        statusLabel: orderStatusLabel(order.status),
+        statusLabel: customerFacingStatusLabel(order),
         subtotal,
         dueAmount: subtotal + leasingFee,
         isLeasing,
@@ -338,7 +338,7 @@ publicOrdersRouter.get(
       data: {
         code: order.code,
         status: order.status,
-        statusLabel: orderStatusLabel(order.status),
+        statusLabel: customerFacingStatusLabel(order),
         subtotal,
         deliveryFee: 0,
         storageFee,

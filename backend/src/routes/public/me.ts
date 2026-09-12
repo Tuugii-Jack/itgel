@@ -18,7 +18,7 @@ import { computeTotals, paymentState } from "../../services/money.js";
 import { serializeLeasing } from "../../lib/leasing.js";
 import { buildTimeline } from "../../services/orders.js";
 import {
-  orderStatusLabel,
+  customerFacingStatusLabel,
   publicDelivery,
   publicOrderItem,
   refundPayoutDatesFor,
@@ -277,7 +277,7 @@ publicMeRouter.get(
         return {
           code: order.code,
           status: order.status,
-          statusLabel: orderStatusLabel(order.status),
+          statusLabel: customerFacingStatusLabel(order),
           subtotal: order.subtotal,
           deliveryFee: order.deliveryFee,
           storageFee: order.storageFee,

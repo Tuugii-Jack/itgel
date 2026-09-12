@@ -5,7 +5,7 @@ import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
 import { itemPickableAtStore } from '../../lib/itemFulfilment.js';
-import { leasingHoldsGoods, leasingView } from '../../lib/leasing.js';
+import { leasingFeeHold, leasingHoldsGoods, leasingView } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { handOverItems } from '../../services/orders.js';
@@ -60,6 +60,9 @@ adminHandoverRouter.get(
       },
     });
     if (!order) throw notFound('Ийм кодтой захиалга олдсонгүй.');
+    if (leasingFeeHold(order)) {
+      throw conflict('Лизингийн шимтгэл төлөгдөөгүй. Захиалга хараахан үүсээгүй.');
+    }
 
     await syncOrderStorageFee(order.id);
     await syncOrderCargoFee(prisma, order.id);
@@ -132,7 +135,7 @@ adminHandoverRouter.get(
       orderBy: { updatedAt: 'desc' },
       include: {
         orders: {
-          where: { deletedAt: null, status: { not: 'CANCELLED' } },
+          where: { deletedAt: null, status: { not: 'CANCELLED' }, isLeasing: false },
           orderBy: { createdAt: 'desc' },
           include: {
             items: { include: { product: true } },
@@ -156,6 +159,7 @@ adminHandoverRouter.get(
           where: {
             deletedAt: null,
             status: { notIn: ['CANCELLED'] },
+            isLeasing: false,
           },
           orderBy: { createdAt: 'desc' },
           include: {

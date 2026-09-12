@@ -25,7 +25,7 @@ import { LocationFields } from "@/components/LocationFields";
 import { dayLabel, money, phoneLabel, refundPayoutLabel } from "@/lib/format";
 import { UB_DISTRICTS } from "@/lib/locations";
 import { awaitingPayment, PAYMENT_LABEL, PAYMENT_TONE } from "@/lib/payment";
-import { leasingHoldsGoods } from "@/lib/leasing";
+import { leasingFeeHold, leasingHoldsGoods } from "@/lib/leasing";
 import { buildOrderStages } from "@/lib/orderStages";
 import type { MyOrder, OrderStatus, Store } from "@/lib/types";
 
@@ -317,7 +317,8 @@ function OrdersTab({
         {orders.map((order) => {
           const eta = order.timeline.find((s) => s.key === "arrived");
           const etaValue = eta?.at ?? eta?.estimatedAt;
-          const stages = buildOrderStages(order.status);
+          const feeHold = leasingFeeHold(order);
+          const stages = buildOrderStages(order.status, { feeHold });
           return (
             <Link
               key={order.code}
@@ -334,8 +335,8 @@ function OrdersTab({
                       {dayLabel(order.createdAt)} · {order.itemCount} бараа
                     </div>
                   </div>
-                  <Badge tone={STATUS_TONE[order.status]}>
-                    {order.statusLabel}
+                  <Badge tone={feeHold ? "warn" : STATUS_TONE[order.status]}>
+                    {feeHold ? "Шимтгэл хүлээгдэж байна" : order.statusLabel}
                   </Badge>
                 </div>
 
