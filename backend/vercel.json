@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/sms-delivery",
-      "schedule": "* * * * *"
+      "schedule": "0 0 * * *"
     }
   ],
   "functions": {
