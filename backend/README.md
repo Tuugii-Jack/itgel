@@ -143,7 +143,7 @@ SHOP_SMS_API_KEY=
 SHOP_SMS_FROM=
 ```
 
-Түлхүүр орсон суваг `POST https://api-text.callpro.mn/v1/sms/send` (`x-api-key`) ашиглана. CallPro тохиргоо дутуу бол алдаа буцаана, console руу автоматаар шилжихгүй. Console зөвхөн `SMS_PROVIDER=console` / `SHOP_SMS_PROVIDER=console` үед.
+Түлхүүр орсон суваг `POST https://api-text.callpro.mn/v1/sms/send` (`x-api-key`) ашиглана. `/send` 200 (`queued`) гэдгийг амжилт гэж тооцохгүй — `GET /v1/sms/:message_id` дээр утас руу `delivered` болсны дараа л илгээлээ гэж харуулна. CallPro тохиргоо дутуу бол алдаа буцаана, console руу автоматаар шилжихгүй. Console зөвхөн `SMS_PROVIDER=console` / `SHOP_SMS_PROVIDER=console` үед.
 
 **Зураг** — presigned PUT URL. `POST /api/admin/products/:id/images` → `uploadUrl` руу файлаа
 шууд PUT хийж, дараа нь `PATCH /api/admin/products/:id/images` -ээр `publicUrl`-уудыг бүртгэнэ.

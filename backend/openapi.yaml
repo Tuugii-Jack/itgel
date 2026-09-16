@@ -104,7 +104,7 @@ paths:
                 phone: { type: string, example: '99112233' }
       responses:
         '200':
-          description: Код илгээгдлээ
+          description: Код утас руу хүргэгдсэний дараа
           content:
             application/json:
               schema:
