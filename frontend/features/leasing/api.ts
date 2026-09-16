@@ -215,7 +215,7 @@ export const leasingApi = {
     ).then((r) => r.data),
 
   sendOrderSms: (id: string, kind: "pay_reminder" = "pay_reminder", text?: string) =>
-    request<{ ok: boolean; amount: number }>(`/leasing/orders/${id}/sms`, {
+    request<{ ok: boolean; amount: number; smsStatus?: string }>(`/leasing/orders/${id}/sms`, {
       ...adminAuth,
       method: "POST",
       body: { kind, ...(text != null ? { text } : {}) },
@@ -230,6 +230,9 @@ export const leasingApi = {
     request<{
       sent: number;
       skipped: number;
+      pending?: number;
+      delivered?: number;
+      unknown?: number;
       failed: { orderId: string; code: string; error: string }[];
     }>("/leasing/orders/sms-reminders", {
       ...adminAuth,
@@ -247,6 +250,9 @@ export const leasingApi = {
       ok: boolean;
       phone: string;
       sent: number;
+      pending?: number;
+      delivered?: number;
+      unknown?: number;
       failed: { phone: string; error: string }[];
       invalid: string[];
     }>("/leasing/sms", {

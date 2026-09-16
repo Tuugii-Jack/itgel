@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button, Card, Empty } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { phoneLabel } from "@/lib/format";
+import { smsStatusLabel, smsToastForSend } from "@/lib/smsStatus";
 import { useToast } from "@/lib/toast";
 import type { AdminBatchDetail } from "@/lib/types";
 
@@ -18,7 +19,10 @@ export function ArrivalSmsPanel({
   const [busyId, setBusyId] = useState<string | null>(null);
   const eligible = batch.orders.filter((o) => o.status !== "CANCELLED");
   const smsReady = eligible.filter((o) => o.arrivalSmsEligible !== false);
-  const pending = smsReady.filter((o) => !o.arrivalNotifiedAt && o.customer.phone);
+  const pending = smsReady.filter((o) => {
+    const open = o.arrivalSmsStatus === "queued" || o.arrivalSmsStatus === "pending";
+    return !o.arrivalNotifiedAt && !open && o.customer.phone;
+  });
   const missingPhone = smsReady.filter((o) => !o.customer.phone);
 
   const send = async (orderId?: string) => {
@@ -29,16 +33,20 @@ export function ArrivalSmsPanel({
         batch.id,
         orderId ? { orderId } : undefined,
       );
-      if (result.failed.length > 0 && result.sent === 0) {
-        toast.error(result.failed[0]?.error ?? "Илгээгдсэнгүй.");
-      } else if (result.sent > 0) {
-        toast.success(
-          result.sent === 1
-            ? "SMS илгээлээ."
-            : `${result.sent} захиалагчид SMS илгээлээ.`,
-        );
+      const fail = result.failed.length;
+      if (fail > 0 && result.sent === 0) {
+        toast.error(result.failed[0]?.error ?? "Хүргэлт амжилтгүй.");
       } else {
-        toast.success("Илгээх захиалга алга.");
+        const note = smsToastForSend({
+          sent: result.sent,
+          pending: result.pending,
+          delivered: result.delivered,
+          unknown: result.unknown,
+          failed: fail,
+        });
+        if (note?.kind === "error") toast.error(note.message);
+        else if (note) toast.success(note.message);
+        else toast.success("Илгээх захиалга алга.");
       }
       onSent();
     } catch (e) {
@@ -76,9 +84,14 @@ export function ArrivalSmsPanel({
       ) : (
         <div className="flex flex-col gap-2">
           {eligible.map((order) => {
-            const sent = Boolean(order.arrivalNotifiedAt);
+            const accepted = Boolean(order.arrivalNotifiedAt);
             const phone = order.customer.phone;
             const canSend = Boolean(phone) && order.arrivalSmsEligible !== false;
+            const statusText = order.arrivalSmsStatus
+              ? smsStatusLabel(order.arrivalSmsStatus, order.arrivalSmsError)
+              : accepted
+                ? smsStatusLabel("queued")
+                : "";
             return (
               <div
                 key={order.id}
@@ -89,18 +102,18 @@ export function ArrivalSmsPanel({
                   <div className="truncate text-[13px] text-ink-2">
                     {order.customer.name ?? "Нэргүй"}
                     {phone ? ` · ${phoneLabel(phone)}` : " · утас алга"}
-                    {sent ? " · илгээгдсэн" : ""}
+                    {statusText ? ` · ${statusText}` : ""}
                     {order.arrivalSmsEligible === false ? " · SMS илгээхгүй" : ""}
                   </div>
                 </div>
                 <Button
                   size="sm"
-                  variant={sent ? "outline" : "primary"}
+                  variant={accepted ? "outline" : "primary"}
                   onClick={() => void send(order.id)}
                   loading={busyId === order.id}
                   disabled={!canSend || busyId !== null}
                 >
-                  {sent ? "Дахин илгээх" : "SMS илгээх"}
+                  {accepted ? "Дахин илгээх" : "SMS илгээх"}
                 </Button>
               </div>
             );

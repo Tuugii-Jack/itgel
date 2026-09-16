@@ -51,6 +51,7 @@ export const shopProfileApi = {
       phone: string;
       expiresInSec: number;
       resendAfterSec: number;
+      smsStatus?: string;
       message?: string;
     }>("/me/phone/change", {
       method: "POST",
@@ -63,6 +64,7 @@ export const shopProfileApi = {
       phone: string;
       expiresInSec: number;
       resendAfterSec: number;
+      smsStatus?: string;
     }>("/me/phone/resend", {
       method: "POST",
       body: { phone },

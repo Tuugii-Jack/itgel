@@ -9,8 +9,9 @@ import {
   CUSTOM_SMS_MAX_CHARS,
   parseSmsPhones,
   prepareCustomSms,
-  leasingSms,
+  smsStatusLabel,
 } from '../../services/sms.js';
+import { dispatchSms } from '../../services/smsDispatch.js';
 
 export const leasingSmsRouter = Router();
 
@@ -48,6 +49,9 @@ leasingSmsRouter.post(
     const actor = actorOf(req);
     const sent: string[] = [];
     const failed: { phone: string; error: string }[] = [];
+    let pending = 0;
+    let delivered = 0;
+    let unknown = 0;
 
     for (const phone of parsed.phones) {
       const hit = smsLimiter.hit(actor);
@@ -58,12 +62,20 @@ leasingSmsRouter.post(
         });
         continue;
       }
-      const result = await leasingSms.send({ phone, text });
-      if (!result.ok) {
-        failed.push({ phone, error: result.error ?? 'SMS илгээгдсэнгүй.' });
+      const { send } = await dispatchSms({
+        channel: 'leasing',
+        purpose: 'leasing_custom',
+        phone,
+        text,
+      });
+      if (!send.accepted) {
+        failed.push({ phone, error: send.error ?? 'SMS илгээгдсэнгүй.' });
         continue;
       }
       sent.push(phone);
+      if (send.status === 'delivered') delivered += 1;
+      else if (send.status === 'unknown') unknown += 1;
+      else pending += 1;
     }
 
     if (sent.length === 0) {
@@ -80,9 +92,11 @@ leasingSmsRouter.post(
       entity: 'Sms',
       entityId: sent[0]!,
       after: {
-        text,
         sent: sent.length,
         failed: failed.length,
+        pending,
+        delivered,
+        unknown,
         invalid: parsed.invalid.length,
         phones: sent,
       },
@@ -93,8 +107,20 @@ leasingSmsRouter.post(
         ok: true,
         phone: sent[0]!,
         sent: sent.length,
+        pending,
+        delivered,
         failed,
+        unknown,
         invalid: parsed.invalid,
+        statusLabel: smsStatusLabel(
+          delivered === sent.length && sent.length > 0
+            ? 'delivered'
+            : pending > 0
+              ? 'queued'
+              : unknown > 0
+                ? 'unknown'
+                : 'queued',
+        ),
       },
     });
   }),

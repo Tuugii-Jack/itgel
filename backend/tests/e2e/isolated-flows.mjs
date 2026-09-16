@@ -141,14 +141,25 @@ pass('cross-portal 403');
 
 const otp = await req('/api/auth/otp', { method: 'POST', body: { phone, name: 'Isolated User' } });
 assert.equal(otp.status, 200, otp.text);
+assert.notEqual(data(otp).smsStatus, 'delivered', 'queued/pending must not look delivered');
 const code = sql(
   `SELECT code FROM "PhoneOtp" WHERE phone='${phone}' AND purpose='LOGIN' ORDER BY "createdAt" DESC LIMIT 1`,
 );
 assert.match(code, /^\d{6}$/);
+const dispatchCount1 = Number(
+  sql(`SELECT count(*) FROM "SmsDispatch" WHERE phone='${phone}' AND purpose='otp_login'`),
+);
+assert.equal(dispatchCount1, 1, 'OTP persist-then-send creates one SmsDispatch');
+const otpAgain = await req('/api/auth/otp', { method: 'POST', body: { phone, name: 'Isolated User' } });
+assert.equal(otpAgain.status, 200, otpAgain.text);
+const dispatchCount2 = Number(
+  sql(`SELECT count(*) FROM "SmsDispatch" WHERE phone='${phone}' AND purpose='otp_login'`),
+);
+assert.equal(dispatchCount2, 1, 'cooldown OTP must not send a second SMS');
 const verify = await req('/api/auth/verify', { method: 'POST', body: { phone, code } });
 const customerToken = data(verify).token;
 assert.ok(customerToken);
-pass('customer phone OTP (local PhoneOtp, console SMS)');
+pass('customer phone OTP (local PhoneOtp, console SMS, no double-send)');
 
 const products = data(await req('/api/products?type=ready&pageSize=50'));
 const shopReady = products.find((p) => p.ownerKind !== 'LEASING' && !p.options?.length && p.stock >= 4);
@@ -511,6 +522,20 @@ const doubleOrder = await Promise.all([
 assert.equal(doubleOrder.filter((r) => r.status === 201).length, 2, doubleOrder.map((r) => r.text).join(' | '));
 assert.equal(data(doubleOrder[0]).code, data(doubleOrder[1]).code);
 pass('double submit same key returns one order', data(doubleOrder[0]).code);
+
+const cronSecret = process.env.CRON_SECRET ?? '';
+assert.ok(cronSecret.length >= 8, 'isolated CRON_SECRET required');
+const beforePoll = Number(sql(`SELECT count(*) FROM "SmsDispatch"`));
+const cronDenied = await req('/api/cron/sms-delivery');
+assert.equal(cronDenied.status, 401, cronDenied.text);
+const cronWrong = await req('/api/cron/sms-delivery', { token: 'wrong-secret' });
+assert.equal(cronWrong.status, 401, cronWrong.text);
+const cronOk = await req('/api/cron/sms-delivery', { token: cronSecret });
+assert.equal(cronOk.status, 200, cronOk.text);
+assert.equal(typeof data(cronOk).checked, 'number');
+const afterPoll = Number(sql(`SELECT count(*) FROM "SmsDispatch"`));
+assert.equal(afterPoll, beforePoll, 'delivery poll must not insert/resend SMS');
+pass('cron sms-delivery auth + no resend');
 
 console.log('\nIsolated API flows:', results.length);
 for (const row of results) console.log(' ', row);

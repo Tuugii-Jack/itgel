@@ -104,7 +104,7 @@ paths:
                 phone: { type: string, example: '99112233' }
       responses:
         '200':
-          description: Код утас руу хүргэгдсэний дараа
+          description: Код бүртгэгдсэн. Хүргэлт pending/unknown байсан ч код оруулж болно.
           content:
             application/json:
               schema:

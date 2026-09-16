@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
     $executeRaw,
     $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
     smsSend: vi.fn(),
+    dispatchSms: vi.fn(),
   };
 });
 
@@ -32,6 +33,9 @@ vi.mock('../src/services/sms.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/services/sms.js')>();
   return { ...actual, shopSms: { name: 'mock', send: mocks.smsSend } };
 });
+vi.mock('../src/services/smsDispatch.js', () => ({
+  dispatchSms: (...args: unknown[]) => mocks.dispatchSms(...args),
+}));
 vi.mock('../src/lib/code.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/code.js')>();
   return { ...actual, generateOtp: () => '123456' };
@@ -47,7 +51,10 @@ describe('phone OTP', () => {
       fn({ customer: mocks.customer, phoneOtp: mocks.phoneOtp, $executeRaw: mocks.$executeRaw }),
     );
     mocks.$executeRaw.mockResolvedValue(undefined);
-    mocks.smsSend.mockResolvedValue({ ok: true, id: 'm1' });
+    mocks.dispatchSms.mockResolvedValue({
+      send: { accepted: true, status: 'queued', id: 'm1' },
+      dispatch: { id: 'd1' },
+    });
     mocks.phoneOtp.findFirst.mockResolvedValue(null);
     mocks.phoneOtp.findUnique.mockResolvedValue({ attempts: 1 });
     mocks.phoneOtp.updateMany.mockResolvedValue({ count: 1 });
@@ -73,9 +80,13 @@ describe('phone OTP', () => {
     mocks.customer.findUnique.mockResolvedValue(null);
     const result = await issuePhoneOtp({ phone: '+976 9911-2233' });
     expect(result.phone).toBe('99112233');
-    expect(mocks.smsSend).toHaveBeenCalledWith({
+    expect(mocks.dispatchSms).toHaveBeenCalledWith({
+      channel: 'shop',
+      purpose: 'otp_login',
       phone: '99112233',
       text: smsTemplates.otp('123456'),
+      relatedType: 'phone_otp',
+      relatedId: 'otp-1',
     });
     expect(mocks.customer.create).not.toHaveBeenCalled();
     expect(result).not.toHaveProperty('isNew');
@@ -86,7 +97,7 @@ describe('phone OTP', () => {
     const result = await issuePhoneOtp({ phone: '99112233' });
     expect(result.phone).toBe('99112233');
     expect(result).not.toHaveProperty('isNew');
-    expect(mocks.smsSend).toHaveBeenCalledOnce();
+    expect(mocks.dispatchSms).toHaveBeenCalledOnce();
     expect(mocks.customer.create).not.toHaveBeenCalled();
   });
 
@@ -94,9 +105,13 @@ describe('phone OTP', () => {
     mocks.customer.findUnique.mockResolvedValue(null);
     const result = await issuePhoneOtp({ phone: '9911-2233', name: 'Бат' });
     expect(result.phone).toBe('99112233');
-    expect(mocks.smsSend).toHaveBeenCalledWith({
+    expect(mocks.dispatchSms).toHaveBeenCalledWith({
+      channel: 'shop',
+      purpose: 'otp_login',
       phone: '99112233',
       text: smsTemplates.otp('123456'),
+      relatedType: 'phone_otp',
+      relatedId: 'otp-1',
     });
     expect(mocks.phoneOtp.create).toHaveBeenCalled();
     expect(result).not.toHaveProperty('devCode');
@@ -111,20 +126,23 @@ describe('phone OTP', () => {
       name: 'Бат',
     });
     await issuePhoneOtp({ phone: '99112233' });
-    expect(mocks.smsSend).toHaveBeenCalledOnce();
+    expect(mocks.dispatchSms).toHaveBeenCalledOnce();
   });
 
-  it('SMS илгээгдээгүй бол код хадгалахгүй', async () => {
+  it('SMS failed бол кодыг хадгалаад алдаа буцаана', async () => {
     mocks.customer.findUnique.mockResolvedValue(null);
-    mocks.smsSend.mockResolvedValue({ ok: false, error: 'CallPro тохиргоо дутуу' });
+    mocks.dispatchSms.mockResolvedValue({
+      send: { accepted: false, status: 'failed', error: 'CallPro тохиргоо дутуу' },
+      dispatch: { id: 'd1' },
+    });
     await expect(issuePhoneOtp({ phone: '99112233' })).rejects.toMatchObject({
       status: 400,
     });
-    expect(mocks.phoneOtp.create).not.toHaveBeenCalled();
+    expect(mocks.phoneOtp.create).toHaveBeenCalled();
     expect(mocks.customer.create).not.toHaveBeenCalled();
   });
 
-  it('нэргүй зөв код баталгаажсан хэрэглэгч үүсгэнэ, нэрийг хоосон үлдээнэ', async () => {
+  it('хүргэлт pending байхад зөв кодоор нэвтэрнэ', async () => {
     mocks.phoneOtp.findFirst.mockResolvedValue({
       id: 'otp-1',
       phone: '99112233',
@@ -294,9 +312,13 @@ describe('phone OTP', () => {
       expiresAt: new Date(Date.now() + 60_000),
     });
     await issuePhoneOtp({ phone: '99112233' });
-    expect(mocks.smsSend).toHaveBeenCalledWith({
+    expect(mocks.dispatchSms).toHaveBeenCalledWith({
+      channel: 'shop',
+      purpose: 'otp_login',
       phone: '99112233',
       text: smsTemplates.otp('123456'),
+      relatedType: 'phone_otp',
+      relatedId: 'otp-1',
     });
     expect(mocks.phoneOtp.updateMany).toHaveBeenCalledWith({
       where: { usedAt: null, phone: '99112233', purpose: 'LOGIN' },

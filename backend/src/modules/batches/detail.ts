@@ -40,7 +40,7 @@ export async function loadBatchDetail(id: string) {
     findOrderIdsForBatch(prisma, batch.id, roundIds, true),
   ]);
   const allIds = [...new Set([...activeIds, ...omittedIds])];
-  const [stats, arrivals, orderRows] = await Promise.all([
+  const [stats, arrivals, orderRows, arrivalDispatches] = await Promise.all([
     roundStats(roundIds),
     summarizeRoundArrivals(prisma, roundIds),
     allIds.length === 0
@@ -63,7 +63,20 @@ export async function loadBatchDetail(id: string) {
           },
           orderBy: { createdAt: 'asc' },
         }),
+    allIds.length === 0
+      ? Promise.resolve([])
+      : prisma.smsDispatch.findMany({
+          where: { relatedType: 'order', relatedId: { in: allIds }, purpose: 'arrival' },
+          orderBy: { createdAt: 'desc' },
+          select: { relatedId: true, status: true, error: true },
+        }),
   ]);
+
+  const arrivalSmsByOrder = new Map<string, { status: string; error: string | null }>();
+  for (const row of arrivalDispatches) {
+    if (!row.relatedId || arrivalSmsByOrder.has(row.relatedId)) continue;
+    arrivalSmsByOrder.set(row.relatedId, { status: row.status, error: row.error });
+  }
 
   const serializeOrder = (order: (typeof orderRows)[number]) => {
     const state = paymentState(computeTotals(order));
@@ -82,6 +95,8 @@ export async function loadBatchDetail(id: string) {
       itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
       customer: { id: order.customer.id, name: order.customer.name, phone: order.customer.phone },
       arrivalNotifiedAt: order.arrivalNotifiedAt?.toISOString() ?? null,
+      arrivalSmsStatus: arrivalSmsByOrder.get(order.id)?.status ?? null,
+      arrivalSmsError: arrivalSmsByOrder.get(order.id)?.error ?? null,
       arrivalSmsEligible: isArrivalSmsEligible({
         deletedAt: order.deletedAt,
         status: order.status,

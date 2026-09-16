@@ -10,7 +10,8 @@ import {
   type OtpClaimStore,
 } from '../lib/otpClaim.js';
 import { ipLimiters, RateLimiter } from '../lib/rateLimit.js';
-import { shopSms, smsPhoneOf, smsTemplates } from './sms.js';
+import { smsPhoneOf, smsTemplates } from './sms.js';
+import { dispatchSms } from './smsDispatch.js';
 
 export const PHONE_OTP_LOGIN = 'LOGIN';
 export const PHONE_OTP_CHANGE = 'CHANGE_PHONE';
@@ -29,12 +30,14 @@ export function publicPhoneOtp(
   phone: string,
   otp: { expiresAt: Date; createdAt: Date },
   resendAfterSec: number,
+  smsStatus?: string,
 ) {
   const now = Date.now();
   return {
     phone,
     expiresInSec: Math.max(1, Math.ceil((otp.expiresAt.getTime() - now) / 1000)),
     resendAfterSec,
+    ...(smsStatus ? { smsStatus } : {}),
   };
 }
 
@@ -190,9 +193,6 @@ export async function issuePhoneOtp(input: {
   }
 
   const code = generateOtp();
-  const sent = await shopSms.send({ phone, text: smsTemplates.otp(code) });
-  if (!sent.ok) throw badRequest(sent.error ?? 'SMS илгээж чадсангүй.');
-
   const otp = await persistPhoneOtp(prisma, {
     phone,
     code,
@@ -204,7 +204,22 @@ export async function issuePhoneOtp(input: {
     usedAtStamp: now,
   });
 
-  return publicPhoneOtp(phone, otp, RESEND_COOLDOWN_MS / 1000);
+  const { send } = await dispatchSms({
+    channel: 'shop',
+    purpose: purpose === PHONE_OTP_CHANGE ? 'otp_change' : 'otp_login',
+    phone,
+    text: smsTemplates.otp(code),
+    relatedType: 'phone_otp',
+    relatedId: otp.id,
+  });
+
+  if (send.status === 'failed' && !send.accepted) {
+    throw badRequest(send.error ?? 'SMS илгээж чадсангүй.');
+  }
+
+  return {
+    ...publicPhoneOtp(phone, otp, RESEND_COOLDOWN_MS / 1000, send.status),
+  };
 }
 
 async function attachVerifiedPhone(

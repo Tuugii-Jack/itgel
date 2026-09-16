@@ -46,20 +46,32 @@ export async function sendBatchArrivalSms(opts: {
     },
   });
 
-  const forceResend = Boolean(orderId) || Boolean(resend);
+  const forceSingle = Boolean(orderId);
   const sent: string[] = [];
   const skipped: string[] = [];
   const failed: { orderId: string; code: string; error: string }[] = [];
+  let pending = 0;
+  let delivered = 0;
+  let failedCount = 0;
+  let unknown = 0;
 
   for (const order of orders) {
     if (!orderId && !isArrivalSmsEligible(order)) {
       skipped.push(order.id);
       continue;
     }
+    const forceResend = Boolean(resend) || (forceSingle && Boolean(order.arrivalNotifiedAt));
     const result = await notifyArrival(order, { resend: forceResend });
     if (result.skipped) skipped.push(order.id);
-    else if (result.ok) sent.push(order.id);
-    else failed.push({ orderId: order.id, code: order.code, error: result.error ?? 'Алдаа' });
+    else if (result.ok) {
+      sent.push(order.id);
+      if (result.status === 'delivered') delivered += 1;
+      else if (result.status === 'unknown') unknown += 1;
+      else pending += 1;
+    } else {
+      failed.push({ orderId: order.id, code: order.code, error: result.error ?? 'Алдаа' });
+      failedCount += 1;
+    }
   }
 
   await audit({
@@ -71,9 +83,20 @@ export async function sendBatchArrivalSms(opts: {
       sent: sent.length,
       skipped: skipped.length,
       failed: failed.length,
+      pending,
+      delivered,
+      unknown,
       orderId: orderId ?? null,
     },
   });
 
-  return { sent: sent.length, skipped: skipped.length, failed };
+  return {
+    sent: sent.length,
+    skipped: skipped.length,
+    pending,
+    delivered,
+    failed,
+    failedCount,
+    unknown,
+  };
 }

@@ -1,5 +1,11 @@
 {
   "regions": ["sin1"],
+  "crons": [
+    {
+      "path": "/api/cron/sms-delivery",
+      "schedule": "* * * * *"
+    }
+  ],
   "functions": {
     "src/app.ts": {
       "includeFiles": "assets/**"

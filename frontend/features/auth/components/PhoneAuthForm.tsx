@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button, ErrorNote, Input } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { formatMnPhone, MN_PHONE_RE, parseMnPhone } from "@/lib/phone";
+import { smsStatusLabel } from "@/lib/smsStatus";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 
@@ -34,6 +35,7 @@ export function PhoneAuthForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  const [smsStatus, setSmsStatus] = useState<string | null>(null);
   const lock = useRef(false);
   const autoTried = useRef<string | null>(null);
 
@@ -66,6 +68,7 @@ export function PhoneAuthForm({
     try {
       const result = await api.sendOtp(phone);
       setCooldown(result.resendAfterSec);
+      setSmsStatus(result.smsStatus ?? "queued");
       setCode("");
       autoTried.current = null;
       setStep("code");
@@ -206,6 +209,7 @@ export function PhoneAuthForm({
             </label>
             <p className="m-0 text-[13px] text-ink-2">
               {phoneLabel} дугаарт илгээсэн 6 оронтой кодыг оруулна уу.
+              {smsStatus ? ` ${smsStatusLabel(smsStatus)}.` : ""}
             </p>
           </header>
           <Input

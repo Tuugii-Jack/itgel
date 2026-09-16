@@ -56,6 +56,9 @@ export const adminBatchesApi = {
     request<{
       sent: number;
       skipped: number;
+      pending?: number;
+      delivered?: number;
+      unknown?: number;
       failed: { orderId: string; code: string; error: string }[];
     }>(`/admin/batches/${batchId}/arrival-sms`, {
       ...adminAuth,

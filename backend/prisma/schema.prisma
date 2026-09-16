@@ -318,6 +318,38 @@ model PhoneOtp {
   @@index([customerId, purpose, createdAt])
 }
 
+/// SMS илгээлтийн оролдлого — хүлээн авсан (queued) болон хүргэгдсэн (delivered) тусдаа.
+model SmsDispatch {
+  id                String    @id @default(cuid())
+  /// shop | leasing
+  channel           String
+  /// otp_login | otp_change | arrival | leasing_custom | leasing_schedule | leasing_pay
+  purpose           String
+  /// callpro | http | console | disabled
+  provider          String
+  phone             String
+  providerMessageId String?
+  /// queued | pending | delivered | failed | unknown
+  status            String
+  attempt           Int       @default(1)
+  error             String?
+  relatedType       String?
+  relatedId         String?
+  idempotencyKey    String    @unique
+  checkCount        Int       @default(0)
+  nextCheckAt       DateTime?
+  lastCheckedAt     DateTime?
+  acceptedAt        DateTime?
+  deliveredAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status, nextCheckAt])
+  @@index([relatedType, relatedId, createdAt])
+  @@index([phone, purpose, createdAt])
+  @@index([providerMessageId])
+}
+
 /// Нэг checkout үйлдлийн давхар захиалгыг (customerId, key) unique-аар хориглоно.
 model CheckoutIdempotency {
   id             String   @id @default(cuid())
@@ -407,7 +439,7 @@ model Order {
   handedOverAt DateTime?
   cancelledAt  DateTime?
 
-  /// Ирсэн тухай SMS илгээсэн огноо — давхар илгээхээс сэргийлнэ.
+  /// Ирсэн SMS-ийн илгээх хүсэлтийг үйлчилгээ хүлээн авсан огноо. Хүргэгдсэн гэсэн үг биш.
   arrivalNotifiedAt DateTime?
 
   /// Хэрэглэгч "мөнгө шилжүүлсэн" гэж мэдэгдсэн огноо. Админ эдгээрийг

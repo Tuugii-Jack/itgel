@@ -6,6 +6,7 @@ export const shopAuthApi = {
       phone: string;
       expiresInSec: number;
       resendAfterSec: number;
+      smsStatus?: string;
     }>("/auth/otp", {
       method: "POST",
       body: { phone },

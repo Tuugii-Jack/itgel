@@ -9,6 +9,7 @@ import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { downloadOrdersExcel, printOrders, type OrderExportSelection } from "@/lib/orderExport";
 import { hasCustomizedSms, markCustomizedSms, smsTextsEqual } from "@/lib/smsEditOnce";
+import { smsStatusLabel } from "@/lib/smsStatus";
 import { useToast } from "@/lib/toast";
 import type {
   AdminOrderDetail,
@@ -143,12 +144,12 @@ export function useOrderDetail({
     setBusyKey("leasing-sms");
     setError(null);
     try {
-      await leasingApi.sendOrderSms(order.id, "pay_reminder", custom ? text : undefined);
+      const result = await leasingApi.sendOrderSms(order.id, "pay_reminder", custom ? text : undefined);
       if (custom) {
         markCustomizedSms(order.customer.id);
         setSmsTick((n) => n + 1);
       }
-      toast.success("Төлбөрийн сануулга SMS илгээлээ.");
+      toast.success(smsStatusLabel(result.smsStatus ?? "queued"));
       setSmsOpen(false);
       await load();
       onChanged();

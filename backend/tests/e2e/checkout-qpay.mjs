@@ -123,7 +123,7 @@ function startMockQpay() {
 
     if (req.method === 'POST' && url === '/v2/invoice') {
       const body = await readBody(req);
-      const id = `inv_${kind}_${++seq}`;
+      const id = `inv_${kind}_${randomUUID()}`;
       invoices.set(id, {
         id,
         account: kind,

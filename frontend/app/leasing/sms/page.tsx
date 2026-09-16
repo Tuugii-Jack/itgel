@@ -5,6 +5,7 @@ import { PageHead } from "@/components/admin/shared";
 import { Button, Card, ErrorNote, Field, Textarea } from "@/components/ui";
 import { leasingApi, ApiError } from "@/lib/api";
 import { phoneLabel } from "@/lib/format";
+import { smsStatusLabel, smsToastForSend } from "@/lib/smsStatus";
 import { useToast } from "@/lib/toast";
 
 const MAX_CHARS = 210;
@@ -52,18 +53,21 @@ export default function LeasingSmsPage() {
       const fail = result.failed.length;
       if (fail > 0) {
         setError(
-          `${result.sent} илгээлээ, ${fail} алдаа: ${result.failed
+          `Хүлээгдэж буй ${result.pending ?? 0}, хүргэгдсэн ${result.delivered ?? 0}, ${fail} алдаа: ${result.failed
             .map((f) => `${phoneLabel(f.phone)}: ${f.error}`)
             .join(" · ")}`,
         );
         toast.error("Зарим SMS илгээгдсэнгүй.");
         setRawPhones(result.failed.map((f) => f.phone).join("\n"));
       } else {
-        toast.success(
-          result.sent === 1
-            ? `${phoneLabel(result.phone)} руу илгээлээ.`
-            : `${result.sent} дугаар руу илгээлээ.`,
-        );
+        const note = smsToastForSend({
+          sent: result.sent,
+          pending: result.pending,
+          delivered: result.delivered,
+          unknown: result.unknown,
+          failed: fail,
+        });
+        toast.success(note?.message ?? smsStatusLabel("queued"));
         setRawPhones("");
         setText("");
       }

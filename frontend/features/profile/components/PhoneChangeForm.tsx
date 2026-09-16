@@ -4,6 +4,7 @@ import { type Dispatch, type SetStateAction } from "react";
 import { Button, Card, Field, Input } from "@/components/ui";
 import { usePhoneChange } from "@/features/profile/hooks/usePhoneChange";
 import { phoneLabel } from "@/lib/format";
+import { smsStatusLabel } from "@/lib/smsStatus";
 
 export function PhoneChangeForm({
   busy,
@@ -23,6 +24,7 @@ export function PhoneChangeForm({
     resendPhoneChange,
     confirmPhoneChange,
     phone,
+    smsStatus,
   } = usePhoneChange(setBusy);
 
   return (
@@ -53,7 +55,10 @@ export function PhoneChangeForm({
         </>
       ) : (
         <>
-          <Field label='Баталгаажуулах код' hint={phoneLabel(newPhone)}>
+          <Field
+            label='Баталгаажуулах код'
+            hint={`${phoneLabel(newPhone)}${smsStatus ? ` · ${smsStatusLabel(smsStatus)}` : ""}`}
+          >
             <Input
               value={phoneCode}
               onChange={(v) => setPhoneCode(v.replace(/\D/g, "").slice(0, 6))}

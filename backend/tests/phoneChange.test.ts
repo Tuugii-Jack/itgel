@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   $executeRaw: vi.fn(),
   $transaction: vi.fn(),
   smsSend: vi.fn(),
+  dispatchSms: vi.fn(),
 }));
 
 vi.mock('../src/prisma.js', () => ({
@@ -25,6 +26,9 @@ vi.mock('../src/services/sms.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/services/sms.js')>();
   return { ...actual, shopSms: { name: 'mock', send: mocks.smsSend } };
 });
+vi.mock('../src/services/smsDispatch.js', () => ({
+  dispatchSms: (...args: unknown[]) => mocks.dispatchSms(...args),
+}));
 vi.mock('../src/lib/code.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/code.js')>();
   return { ...actual, generateOtp: () => '654321' };
@@ -44,7 +48,10 @@ const live = {
 describe('нэвтрэх утас солих', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.smsSend.mockResolvedValue({ ok: true });
+    mocks.dispatchSms.mockResolvedValue({
+      send: { accepted: true, status: 'queued', id: 'm1' },
+      dispatch: { id: 'd1' },
+    });
     mocks.$executeRaw.mockResolvedValue(undefined);
     mocks.$transaction.mockImplementation(async (fn: (tx: typeof mocks) => unknown) => fn(mocks));
     mocks.phoneOtp.findFirst.mockResolvedValue(null);
@@ -68,7 +75,7 @@ describe('нэвтрэх утас солих', () => {
     const result = await issuePhoneChange(live as never, '88112233');
     expect(result.phone).toBe('88112233');
     expect(mocks.customer.update).not.toHaveBeenCalled();
-    expect(mocks.smsSend).toHaveBeenCalledOnce();
+    expect(mocks.dispatchSms).toHaveBeenCalledOnce();
     expect(mocks.phoneOtp.create.mock.calls[0]![0].data).toMatchObject({
       phone: '88112233',
       purpose: 'CHANGE_PHONE',

@@ -14,8 +14,13 @@ import {
 const changeLimiter = new RateLimiter(5, 60 * 60 * 1000);
 ipLimiters.push(changeLimiter);
 
-function publicChange(phone: string, otp: { expiresInSec: number; resendAfterSec: number }) {
-  return { phone, expiresInSec: otp.expiresInSec, resendAfterSec: otp.resendAfterSec };
+function publicChange(phone: string, otp: { expiresInSec: number; resendAfterSec: number; smsStatus?: string }) {
+  return {
+    phone,
+    expiresInSec: otp.expiresInSec,
+    resendAfterSec: otp.resendAfterSec,
+    smsStatus: otp.smsStatus,
+  };
 }
 
 export async function issuePhoneChange(customer: Customer, phoneRaw: string, ip?: string) {

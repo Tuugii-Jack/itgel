@@ -8,64 +8,138 @@ export interface SmsMessage {
   text: string;
 }
 
+/** queued/pending = хүлээн авсан. delivered = DLR батлагдсан. failed = үйлчилгээ татгалзсан/эцсийн алдаа. unknown = үр дүн тодорхойгүй. */
+export type SmsLifecycleStatus = 'queued' | 'pending' | 'delivered' | 'failed' | 'unknown';
+
+export const OPEN_SMS_STATUSES: SmsLifecycleStatus[] = ['queued', 'pending'];
+export const TERMINAL_SMS_STATUSES: SmsLifecycleStatus[] = ['delivered', 'failed'];
+
+export function smsStatusLabel(status: SmsLifecycleStatus, failedReason?: string | null): string {
+  if (status === 'delivered') return 'Хүргэгдсэн';
+  if (status === 'failed') {
+    const reason = failedReason?.trim();
+    return reason ? `Хүргэлт амжилтгүй: ${reason}` : 'Хүргэлт амжилтгүй';
+  }
+  if (status === 'unknown') return 'Хүргэлтийн төлөв одоогоор тодорхойгүй';
+  return 'Хүргэлт хүлээгдэж байна';
+}
+
 export interface SmsSendResult {
-  ok: boolean;
+  /** Үйлчилгээ хүсэлтийг хүлээн авсан эсэх. Утсанд хүрсэн эсэх биш. */
+  accepted: boolean;
+  status: SmsLifecycleStatus;
   id?: string;
+  error?: string;
+}
+
+export interface SmsDeliveryReport {
+  status: SmsLifecycleStatus;
   error?: string;
 }
 
 /** Провайдер солиход зөвхөн энэ интерфейсийг шинээр хэрэгжүүлнэ. */
 export interface SmsProvider {
   readonly name: string;
+  /** Хүргэлтийн тайлан шалгах API байвал true. */
+  readonly tracksDelivery?: boolean;
   send(message: SmsMessage): Promise<SmsSendResult>;
+  delivery?(messageId: string): Promise<SmsDeliveryReport>;
 }
 
 export const CALLPRO_SMS_BASE_URL = 'https://api-text.callpro.mn/v1/sms';
-
-/** /send queued-ийн дараа DLR хүлээх хоорондын завсар (нийт ~10 сек). */
-export const CALLPRO_DELIVERY_POLL_MS = [500, 1000, 1500, 2500, 4000];
+export const SMS_HTTP_TIMEOUT_MS = 8_000;
 
 export type SmsChannel = 'leasing' | 'shop';
 export type SmsProviderName = 'console' | 'http' | 'callpro';
 
-const DELIVERED_STATUSES = new Set(['delivered', 'delivrd', 'success', 'successful']);
-const FAILED_STATUSES = new Set([
-  'failed',
-  'fail',
-  'rejected',
-  'expired',
-  'undelivered',
-  'error',
-  'blocked',
-  'cancelled',
-  'canceled',
-  'spam',
-  'invalid',
-]);
+export function smsResult(input: {
+  accepted: boolean;
+  status: SmsLifecycleStatus;
+  id?: string;
+  error?: string;
+}): SmsSendResult {
+  return {
+    accepted: input.accepted,
+    status: input.status,
+    id: input.id,
+    error: input.error,
+  };
+}
 
-export type SmsDeliveryState = {
-  delivered: boolean;
-  failed: boolean;
-  status?: string;
-};
-
-/** CallPro GET /v1/sms/:id болон /send хариунаас хүргэлтийн төлөв. */
-export function smsDeliveryState(body: Record<string, unknown>): SmsDeliveryState {
-  const parts = flattenSmsBodies(body);
-  let status: string | undefined;
-  let delivered = false;
-  let failed = false;
-  for (const part of parts) {
-    const s = smsStatusOf(part);
-    if (s && !status) status = s;
-    if (smsFlag(part.delivered) === true || (s != null && DELIVERED_STATUSES.has(s))) {
-      delivered = true;
-    } else if (s != null && FAILED_STATUSES.has(s)) {
-      failed = true;
-    }
+/**
+ * CallPro Text POST /v1/sms/send — батлагдсан талбар:
+ * HTTP 200 + `message_id`, `status` ихэвчлэн `queued` (fleetbase CallProSmsService, erxes).
+ * `success`/`successful`-ийг delivered гэж үзэхгүй.
+ */
+export function callProSendOutcome(status: number, body: Record<string, unknown>): SmsSendResult {
+  if (status < 200 || status >= 300) {
+    return smsResult({
+      accepted: false,
+      status: 'failed',
+      error: smsErrorFromBody(status, body),
+    });
   }
-  if (delivered) return { delivered: true, failed: false, status };
-  return { delivered: false, failed, status };
+
+  const id = messageIdOf(body);
+  if (!id) {
+    return smsResult({
+      accepted: false,
+      status: 'unknown',
+      error: 'CallPro message_id алга.',
+    });
+  }
+
+  if (body.delivered === true) {
+    return smsResult({ accepted: true, status: 'delivered', id });
+  }
+  if (body.delivered === false) {
+    const queued = body.status === 'queued';
+    return smsResult({ accepted: true, status: queued ? 'queued' : 'pending', id });
+  }
+
+  if (body.status === 'queued' || body.status == null || body.status === '') {
+    return smsResult({ accepted: true, status: 'queued', id });
+  }
+
+  return smsResult({ accepted: true, status: 'pending', id });
+}
+
+/**
+ * CallPro GET /v1/sms/:id — төслийн одоогийн contract жишээ:
+ * `{ uniqueId, delivered: true, messages: [] }`.
+ * Delivered зөвхөн `delivered === true` (boolean). `delivered: false` нь failed биш.
+ * `status: success` гэх мэт таамаг утгыг delivered гэж үзэхгүй.
+ * Webhook schema батлагдаагүй тул webhook ашиглахгүй.
+ */
+export function callProDeliveryOutcome(body: Record<string, unknown>): SmsDeliveryReport {
+  const fromMessages = messagesDeliveredOf(body.messages);
+  if (body.delivered === false) {
+    return { status: body.status === 'queued' ? 'queued' : 'pending' };
+  }
+  if (body.delivered === true) {
+    if (fromMessages === false) return { status: 'pending' };
+    return { status: 'delivered' };
+  }
+  if (fromMessages === true) return { status: 'delivered' };
+  if (fromMessages === false) return { status: 'pending' };
+  if (body.status === 'queued') return { status: 'queued' };
+  return { status: 'unknown' };
+}
+
+/** messages[] зөвхөн `delivered` boolean байвал. Дутуу/зөрчилтэй бол null. */
+function messagesDeliveredOf(messages: unknown): boolean | null {
+  if (!Array.isArray(messages) || messages.length === 0) return null;
+  const flags: boolean[] = [];
+  for (const item of messages) {
+    if (!item || typeof item !== 'object') return null;
+    const delivered = (item as { delivered?: unknown }).delivered;
+    if (delivered === true) flags.push(true);
+    else if (delivered === false) flags.push(false);
+    else return null;
+  }
+  if (flags.every(Boolean)) return true;
+  if (flags.some(Boolean)) return false;
+  return false;
 }
 
 /** CallPro 8 оронтой дугаар авна. +976 / зай / зураас хасна. */
@@ -100,6 +174,7 @@ export function parseSmsPhones(input: string | string[]): {
 
 export class DisabledSmsProvider implements SmsProvider {
   readonly name = 'disabled';
+  readonly tracksDelivery = false;
 
   constructor(
     private readonly channel: SmsChannel,
@@ -107,28 +182,38 @@ export class DisabledSmsProvider implements SmsProvider {
   ) {}
 
   async send(_message: SmsMessage): Promise<SmsSendResult> {
-    return { ok: false, error: this.error };
+    return smsResult({ accepted: false, status: 'failed', error: this.error });
   }
 }
 
 /** Зөвхөн SMS_PROVIDER=console эсвэл SHOP_SMS_PROVIDER=console үед. Мессежийн агуулгыг логлохгүй. */
 export class ConsoleSmsProvider implements SmsProvider {
   readonly name = 'console';
+  readonly tracksDelivery = false;
 
-  constructor(private readonly channel: SmsChannel = 'leasing') {}
+  constructor(
+    private readonly channel: SmsChannel = 'leasing',
+    private readonly production = isProd,
+  ) {}
 
   async send(message: SmsMessage) {
     const to = smsPhoneOf(message.phone) ?? message.phone;
-    if (!isProd) {
-      console.info(`[sms:${this.channel}:console] → ${to}\n${message.text}`);
+    if (this.production) {
+      return smsResult({
+        accepted: false,
+        status: 'failed',
+        error: 'Production дээр console SMS ашиглахгүй.',
+      });
     }
-    return { ok: true, id: `console-${Date.now()}` };
+    console.info(`[sms:${this.channel}:console] → ${to}`);
+    return smsResult({ accepted: true, status: 'queued', id: `console-${Date.now()}` });
   }
 }
 
-/** Ерөнхий HTTP провайдер — Bearer + JSON { from, to, text }. */
+/** Ерөнхий HTTP провайдер — Bearer + JSON { from, to, text }. Хүргэлтийн тайлан байхгүй. */
 export class HttpSmsProvider implements SmsProvider {
   readonly name = 'http';
+  readonly tracksDelivery = false;
 
   constructor(
     private readonly url: string,
@@ -138,9 +223,9 @@ export class HttpSmsProvider implements SmsProvider {
 
   async send(message: SmsMessage) {
     const to = smsPhoneOf(message.phone);
-    if (!to) return { ok: false, error: 'Утасны дугаар буруу.' };
+    if (!to) return smsResult({ accepted: false, status: 'failed', error: 'Утасны дугаар буруу.' });
     try {
-      const res = await fetch(this.url, {
+      const res = await fetchWithTimeout(this.url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -148,10 +233,20 @@ export class HttpSmsProvider implements SmsProvider {
         },
         body: JSON.stringify({ from: this.sender, to, text: message.text }),
       });
-      if (!res.ok) return { ok: false, error: await smsHttpError(res) };
-      return { ok: true };
+      if (!res.ok) {
+        return smsResult({
+          accepted: false,
+          status: 'failed',
+          error: await smsHttpError(res),
+        });
+      }
+      return smsResult({ accepted: true, status: 'queued' });
     } catch (error) {
-      return { ok: false, error: String(error) };
+      return smsResult({
+        accepted: false,
+        status: 'unknown',
+        error: fetchErrorMessage(error),
+      });
     }
   }
 }
@@ -159,43 +254,38 @@ export class HttpSmsProvider implements SmsProvider {
 /**
  * CallPro Text API — https://api-text.callpro.mn/v1/sms
  * Header: x-api-key. Body: from (72xxxxxx), to (8 орон), text.
- * /send 200 (queued) нь хүлээн авсан гэсэн үг — утас руу очсоныг GET /:id-аар шалгана.
+ * /send 200 (`queued`) нь хүлээн авсан гэсэн үг. Хүргэлтийг GET /:id-аар дараа шалгана.
  */
 export class CallProSmsProvider implements SmsProvider {
   readonly name = 'callpro';
-  private readonly pollDelaysMs: number[];
+  readonly tracksDelivery = true;
 
   constructor(
     private readonly apiKey: string,
     private readonly from: string,
     private readonly baseUrl = CALLPRO_SMS_BASE_URL,
-    options: { pollDelaysMs?: number[] } = {},
-  ) {
-    this.pollDelaysMs =
-      options.pollDelaysMs ??
-      (process.env.NODE_ENV === 'test'
-        ? CALLPRO_DELIVERY_POLL_MS.map(() => 0)
-        : CALLPRO_DELIVERY_POLL_MS);
-  }
+  ) {}
 
   async send(message: SmsMessage): Promise<SmsSendResult> {
     const to = smsPhoneOf(message.phone);
-    if (!to) return { ok: false, error: 'Утасны дугаар буруу.' };
+    if (!to) return smsResult({ accepted: false, status: 'failed', error: 'Утасны дугаар буруу.' });
     const from = this.from.replace(/\D/g, '');
-    if (!from) return { ok: false, error: 'CallPro илгээгч дугаар алга.' };
+    if (!from) {
+      return smsResult({ accepted: false, status: 'failed', error: 'CallPro илгээгч дугаар алга.' });
+    }
 
     const first = await this.postSend(from, to, message.text);
-    if (first.ok) return this.confirmDelivery(first);
+    if (first.accepted) return first;
 
     const withoutLinks = stripSmsUrls(message.text);
     if (!withoutLinks || withoutLinks === message.text) return first;
     const retry = await this.postSend(from, to, withoutLinks);
-    return retry.ok ? this.confirmDelivery(retry) : first;
+    return retry.accepted ? retry : first;
   }
 
   private async postSend(from: string, to: string, text: string): Promise<SmsSendResult> {
     try {
-      const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/send`, {
+      const res = await fetchWithTimeout(`${this.baseUrl.replace(/\/$/, '')}/send`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -204,72 +294,52 @@ export class CallProSmsProvider implements SmsProvider {
         body: JSON.stringify({ from, to, text }),
       });
       const body = await readJson(res);
-      if (!res.ok) return { ok: false, error: smsErrorFromBody(res.status, body) };
-      const id = messageIdOf(body);
-      if (!id) return { ok: false, error: 'CallPro message_id алга.' };
-      const state = smsDeliveryState(body);
-      if (state.failed) {
-        return { ok: false, id, error: smsTerminalError(body) };
-      }
-      return { ok: true, id };
+      return callProSendOutcome(res.status, body);
     } catch (error) {
-      return { ok: false, error: String(error) };
-    }
-  }
-
-  /** /send хүлээн авсны дараа утас руу хүргэгдснийг хүлээнэ. */
-  private async confirmDelivery(accepted: SmsSendResult): Promise<SmsSendResult> {
-    const id = accepted.id?.trim();
-    if (!id) return { ok: false, error: 'CallPro message_id алга.' };
-
-    let lastError: string | undefined;
-    for (let attempt = 0; attempt <= this.pollDelaysMs.length; attempt++) {
-      if (attempt > 0) await sleep(this.pollDelaysMs[attempt - 1]!);
-      const report = await this.delivery(id);
-      if (report.delivered) return { ok: true, id };
-      if (report.failed) {
-        return { ok: false, id, error: report.error ?? 'Утас руу хүргэгдсэнгүй.' };
-      }
-      lastError = report.error;
-    }
-
-    console.warn(`[sms:callpro] ${id} утас руу хүргэгдсэнгүй`);
-    return { ok: false, id, error: lastError ?? 'Утас руу хүргэгдсэнгүй.' };
-  }
-
-  /** Хүргэлтийн төлөв — /send-ээс ирсэн message_id. */
-  async delivery(messageId: string): Promise<{
-    ok: boolean;
-    delivered?: boolean;
-    failed?: boolean;
-    status?: string;
-    error?: string;
-  }> {
-    const id = messageId.trim();
-    if (!id) return { ok: false, failed: true, error: 'message_id алга.' };
-    try {
-      const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/${encodeURIComponent(id)}`, {
-        method: 'GET',
-        headers: { 'x-api-key': this.apiKey },
+      return smsResult({
+        accepted: false,
+        status: 'unknown',
+        error: fetchErrorMessage(error),
       });
-      const body = await readJson(res);
-      if (!res.ok) {
-        const error = smsErrorFromBody(res.status, body);
-        const failed = res.status === 401 || res.status === 402 || res.status === 403;
-        return { ok: false, failed, error };
-      }
-      const state = smsDeliveryState(body);
-      return {
-        ok: true,
-        delivered: state.delivered,
-        failed: state.failed,
-        status: state.status,
-        error: state.failed ? smsTerminalError(body) : undefined,
-      };
-    } catch (error) {
-      return { ok: false, error: String(error) };
     }
   }
+
+  /** Хүргэлтийн төлөв — /send-ээс ирсэн message_id. Timeout/5xx нь failed биш. */
+  async delivery(messageId: string): Promise<SmsDeliveryReport> {
+    const id = messageId.trim();
+    if (!id) return { status: 'unknown', error: 'message_id алга.' };
+    try {
+      const res = await fetchWithTimeout(
+        `${this.baseUrl.replace(/\/$/, '')}/${encodeURIComponent(id)}`,
+        { method: 'GET', headers: { 'x-api-key': this.apiKey } },
+      );
+      const body = await readJson(res);
+      if (res.status === 401 || res.status === 402 || res.status === 403) {
+        return { status: 'failed', error: smsErrorFromBody(res.status, body) };
+      }
+      if (!res.ok) {
+        return { status: 'unknown', error: smsErrorFromBody(res.status, body) };
+      }
+      return callProDeliveryOutcome(body);
+    } catch (error) {
+      return { status: 'unknown', error: fetchErrorMessage(error) };
+    }
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), SMS_HTTP_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function fetchErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.name === 'AbortError') return 'SMS хүсэлт timeout.';
+  return String(error);
 }
 
 async function readJson(res: Response): Promise<Record<string, unknown>> {
@@ -298,55 +368,12 @@ function smsErrorFromBody(status: number, body: Record<string, unknown>): string
   return msg;
 }
 
-function smsTerminalError(body: Record<string, unknown>): string {
-  return (
-    (typeof body.error === 'string' && body.error) ||
-    (typeof body.reason === 'string' && body.reason) ||
-    'Утас руу хүргэгдсэнгүй.'
-  );
-}
-
 function messageIdOf(body: Record<string, unknown>): string | undefined {
   if (typeof body.message_id === 'string' && body.message_id.trim()) return body.message_id.trim();
   if (typeof body.message_id === 'number' && Number.isFinite(body.message_id)) {
     return String(body.message_id);
   }
-  if (typeof body.uniqueId === 'string' && body.uniqueId.trim()) return body.uniqueId.trim();
   return undefined;
-}
-
-function smsStatusOf(body: Record<string, unknown>): string | undefined {
-  for (const key of ['status', 'result', 'state'] as const) {
-    const value = body[key];
-    if (typeof value === 'string' && value.trim()) return value.trim().toLowerCase();
-  }
-  return undefined;
-}
-
-function smsFlag(value: unknown): boolean | undefined {
-  if (value === true || value === 1) return true;
-  if (value === false || value === 0) return false;
-  if (typeof value === 'string') {
-    const s = value.trim().toLowerCase();
-    if (s === 'true' || s === 'yes' || s === 'y' || s === '1') return true;
-    if (s === 'false' || s === 'no' || s === 'n' || s === '0') return false;
-  }
-  return undefined;
-}
-
-function flattenSmsBodies(body: Record<string, unknown>): Record<string, unknown>[] {
-  const out: Record<string, unknown>[] = [body];
-  if (Array.isArray(body.messages)) {
-    for (const item of body.messages) {
-      if (item && typeof item === 'object') out.push(item as Record<string, unknown>);
-    }
-  }
-  return out;
-}
-
-function sleep(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const URL_IN_SMS_RE = /https?:\/\/\S+|www\.\S+/gi;
@@ -418,6 +445,10 @@ export const shopSms: SmsProvider = buildSmsProvider({
 
 /** Лизингийн SMS. Шоп OTP / бараа ирсэнд `shopSms`. */
 export const sms: SmsProvider = leasingSms;
+
+export function smsProviderOf(channel: SmsChannel): SmsProvider {
+  return channel === 'shop' ? shopSms : leasingSms;
+}
 
 /** Захиалгын хяналтын холбоос — SMS-д кирилл 70 тэмдэгт/segment. */
 export function shopTrackUrl(code: string): string {

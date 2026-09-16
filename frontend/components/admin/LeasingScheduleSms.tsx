@@ -6,6 +6,7 @@ import { useOnKeyChange } from "@/lib/syncKey";
 import { Button, Card, ErrorNote, Skeleton, Textarea } from "@/components/ui";
 import { SmsPreviewDialog } from "@/components/leasing/SmsPreviewDialog";
 import { leasingApi, ApiError } from "@/lib/api";
+import { smsStatusLabel, smsToastForSend } from "@/lib/smsStatus";
 import { dayLabel, daysBetween, money, phoneLabel } from "@/lib/format";
 import {
   SMS_TEMPLATE_MAX,
@@ -212,17 +213,21 @@ export function LeasingScheduleSms({
       const fail = result.failed.length;
       if (fail > 0) {
         setError(
-          `${result.sent} илгээлээ, ${result.skipped} алгассан, ${fail} алдаа: ${result.failed
+          `${result.sent} хүлээн авсан, хүлээгдэж буй ${result.pending ?? 0}, хүргэгдсэн ${result.delivered ?? 0}, ${fail} алдаа: ${result.failed
             .map((f) => `${f.code}: ${f.error}`)
             .join(" · ")}`,
         );
         toast.error("Зарим SMS илгээгдсэнгүй.");
       } else {
-        toast.success(
-          result.skipped > 0
-            ? `${result.sent} илгээлээ, ${result.skipped} алгаслаа.`
-            : `${result.sent} дугаар руу илгээлээ.`,
-        );
+        const note = smsToastForSend({
+          sent: result.sent,
+          pending: result.pending,
+          delivered: result.delivered,
+          unknown: result.unknown,
+          failed: fail,
+        });
+        const extra = result.skipped > 0 ? ` ${result.skipped} алгаслаа.` : "";
+        toast.success(`${note?.message ?? smsStatusLabel("queued")}${extra}`);
       }
       const failedIds = new Set(result.failed.map((f) => f.orderId));
       for (const id of orderIds) {

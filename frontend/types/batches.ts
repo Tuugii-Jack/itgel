@@ -69,6 +69,8 @@ export interface BatchOrderRow {
   itemCount: number;
   customer: { id: string; name: string | null; phone: string | null };
   arrivalNotifiedAt?: string | null;
+  arrivalSmsStatus?: string | null;
+  arrivalSmsError?: string | null;
   arrivalSmsEligible?: boolean;
   createdAt: string;
 }

@@ -118,7 +118,7 @@ Redis рүү шилжүүлнэ — интерфейс нь адил.
 | --- | --- |
 | Өдөр бүр 00:05 | `closeAt` хүрсэн барааг `CLOSED` (`autoCloseOnDeadline` асаалттай үед) |
 | Өдөр бүр 09:00 | 2+ хоног хүлээлгэн өгөөгүй захиалгын сануулга (audit log + console) |
-| 15 мин тутам | Rate limiter-ийн хугацаа дууссан бичлэг цэвэрлэх |
+| 1 мин тутам | CallPro SMS хүргэлтийн төлөв (`SmsDispatch`). SMS дахин илгээхгүй. Vercel дээр `/api/cron/sms-delivery` + `CRON_SECRET`. |
 
 Бараа ирсэн SMS автоматаар явахгүй — админ ачааны багцыг «Агуулахад» болгосны дараа товчоор илгээнэ.
 `CRON_ENABLED=false` болгож унтраана.
@@ -143,7 +143,11 @@ SHOP_SMS_API_KEY=
 SHOP_SMS_FROM=
 ```
 
-Түлхүүр орсон суваг `POST https://api-text.callpro.mn/v1/sms/send` (`x-api-key`) ашиглана. `/send` 200 (`queued`) гэдгийг амжилт гэж тооцохгүй — `GET /v1/sms/:message_id` дээр утас руу `delivered` болсны дараа л илгээлээ гэж харуулна. CallPro тохиргоо дутуу бол алдаа буцаана, console руу автоматаар шилжихгүй. Console зөвхөн `SMS_PROVIDER=console` / `SHOP_SMS_PROVIDER=console` үед.
+Түлхүүр орсон суваг `POST https://api-text.callpro.mn/v1/sms/send` (`x-api-key`) ашиглана.
+`/send` 200 + `message_id` + `status: queued` нь хүлээн авсан гэсэн үг. Хүргэлтийг `GET /v1/sms/:message_id`-ийн `delivered === true` (boolean) дээр cron/job шалгана — HTTP хүсэлт дотор хүлээхгүй.
+CallPro тохиргоо дутуу бол алдаа буцаана, console руу автоматаар шилжихгүй. Console зөвхөн `SMS_PROVIDER=console` / `SHOP_SMS_PROVIDER=console` үед, production дээр жинхэнэ илгээлт мэт амжилт буцаахгүй.
+
+Vercel Cron: `GET /api/cron/sms-delivery` минутанд нэг (`backend/vercel.json`). `CRON_SECRET` (Authorization: Bearer) production-д заавал. CallPro webhook schema батлагдаагүй тул webhook ашиглаагүй.
 
 **Зураг** — presigned PUT URL. `POST /api/admin/products/:id/images` → `uploadUrl` руу файлаа
 шууд PUT хийж, дараа нь `PATCH /api/admin/products/:id/images` -ээр `publicUrl`-уудыг бүртгэнэ.

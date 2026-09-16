@@ -10,6 +10,7 @@ import {
 import { getSettings } from '../services/settings.js';
 import { syncAllStorageFees } from '../services/storageFee.js';
 import { unpaidAutoDeleteWhere } from '../lib/unpaidCancel.js';
+import { pollSmsDeliveries } from '../services/smsDeliveryJob.js';
 
 const tasks: ScheduledTask[] = [];
 
@@ -262,7 +263,10 @@ export function startCron(): void {
     cron.schedule('0 3 * * *', () => void purgeDeletedOrders().catch(console.error), options),
   );
 
-  // Rate limiter-ийн хугацаа дууссан бичлэгүүд — эс цэвэрлэвэл санах ой өснө.
+  // 1 минут тутам — CallPro хүргэлтийн тайлан. SMS дахин илгээхгүй.
+  tasks.push(
+    cron.schedule('*/1 * * * *', () => void pollSmsDeliveries().catch(console.error), options),
+  );
   tasks.push(
     cron.schedule(
       '*/15 * * * *',

@@ -30,7 +30,8 @@ import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../servi
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { syncOrderStorageFee } from '../../services/storageFee.js';
 import { getSettingsCached, invalidateSettingsCache, leasingPayGapsOf } from '../../services/settings.js';
-import { leasingSms, stripSmsUrls } from '../../services/sms.js';
+import { stripSmsUrls } from '../../services/sms.js';
+import { dispatchSms } from '../../services/smsDispatch.js';
 import {
   executeReadyTransfer,
   loadTransferPreview,
@@ -500,6 +501,9 @@ leasingOrdersRouter.post(
     const sent: string[] = [];
     const skipped: string[] = [];
     const failed: { orderId: string; code: string; error: string }[] = [];
+    let pending = 0;
+    let delivered = 0;
+    let unknown = 0;
 
     for (const order of orders) {
       const overrideRaw = overrideById.get(order.id);
@@ -535,12 +539,22 @@ leasingOrdersRouter.post(
         skipped.push(order.id);
         continue;
       }
-      const result = await leasingSms.send({ phone: order.customer.phone, text });
-      if (!result.ok) {
-        failed.push({ orderId: order.id, code: order.code, error: result.error ?? 'SMS илгээгдсэнгүй.' });
+      const { send } = await dispatchSms({
+        channel: 'leasing',
+        purpose: 'leasing_schedule',
+        phone: order.customer.phone,
+        text,
+        relatedType: 'order',
+        relatedId: order.id,
+      });
+      if (!send.accepted) {
+        failed.push({ orderId: order.id, code: order.code, error: send.error ?? 'SMS илгээгдсэнгүй.' });
         continue;
       }
       sent.push(order.id);
+      if (send.status === 'delivered') delivered += 1;
+      else if (send.status === 'unknown') unknown += 1;
+      else pending += 1;
     }
 
     await audit({
@@ -548,10 +562,10 @@ leasingOrdersRouter.post(
       action: 'LEASING_SCHEDULE_SMS',
       entity: 'Order',
       entityId: kind,
-      after: { kind, requested: ids.length, sent: sent.length, skipped: skipped.length, failed: failed.length },
+      after: { kind, requested: ids.length, sent: sent.length, skipped: skipped.length, failed: failed.length, pending, delivered, unknown },
     });
 
-    res.json({ data: { sent: sent.length, skipped: skipped.length, failed } });
+    res.json({ data: { sent: sent.length, skipped: skipped.length, pending, delivered, failed, unknown } });
   }),
 );
 
@@ -590,11 +604,15 @@ leasingOrdersRouter.post(
     const body = req.body as { kind?: 'pay_reminder'; text?: string };
     const preview = await payReminderPreview(param(req, 'id'));
     const text = body.text != null ? assertSendSmsText(body.text) : preview.text;
-    const result = await leasingSms.send({
+    const { send } = await dispatchSms({
+      channel: 'leasing',
+      purpose: 'leasing_pay',
       phone: preview.order.customer.phone!,
       text,
+      relatedType: 'order',
+      relatedId: preview.order.id,
     });
-    if (!result.ok) throw badRequest(result.error ?? 'SMS илгээгдсэнгүй.');
+    if (!send.accepted) throw badRequest(send.error ?? 'SMS илгээгдсэнгүй.');
 
     await audit({
       actor: actorOf(req),
@@ -605,11 +623,18 @@ leasingOrdersRouter.post(
         kind: 'pay_reminder',
         amount: preview.amount,
         customized: body.text != null,
-        smsId: result.id ?? null,
+        smsId: send.id ?? null,
+        smsStatus: send.status,
       },
     });
 
-    res.json({ data: { ok: true, amount: preview.amount } });
+    res.json({
+      data: {
+        ok: true,
+        amount: preview.amount,
+        smsStatus: send.status,
+      },
+    });
   }),
 );
 

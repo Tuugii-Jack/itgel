@@ -10,13 +10,14 @@ export function usePhoneChange(setBusy: Dispatch<SetStateAction<boolean>>) {
   const [newPhone, setNewPhone] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
   const [phoneStep, setPhoneStep] = useState<"form" | "code">("form");
+  const [smsStatus, setSmsStatus] = useState<string | null>(null);
 
   const requestPhoneChange = async () => {
     setBusy(true);
     try {
-      await api.changePhone(newPhone.trim());
+      const result = await api.changePhone(newPhone.trim());
       setPhoneStep("code");
-      toast.success("Баталгаажуулах код илгээлээ.");
+      setSmsStatus(result.smsStatus ?? "queued");
     } catch (e) {
       toast.error(
         e instanceof ApiError ? e.message : "Утас солиж чадсангүй.",
@@ -29,8 +30,8 @@ export function usePhoneChange(setBusy: Dispatch<SetStateAction<boolean>>) {
   const resendPhoneChange = async () => {
     setBusy(true);
     try {
-      await api.resendPhoneChange(newPhone.trim());
-      toast.success("Кодыг дахин илгээлээ.");
+      const result = await api.resendPhoneChange(newPhone.trim());
+      setSmsStatus(result.smsStatus ?? "queued");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Код илгээж чадсангүй.");
     } finally {
@@ -46,6 +47,7 @@ export function usePhoneChange(setBusy: Dispatch<SetStateAction<boolean>>) {
       setPhoneStep("form");
       setNewPhone("");
       setPhoneCode("");
+      setSmsStatus(null);
       toast.success("Нэвтрэх утас солигдлоо.");
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Код буруу байна.");
@@ -61,6 +63,7 @@ export function usePhoneChange(setBusy: Dispatch<SetStateAction<boolean>>) {
     setPhoneCode,
     phoneStep,
     setPhoneStep,
+    smsStatus,
     requestPhoneChange,
     resendPhoneChange,
     confirmPhoneChange,
