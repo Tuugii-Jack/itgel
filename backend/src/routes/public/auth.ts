@@ -10,12 +10,18 @@ import { ipLimiters, RateLimiter } from '../../lib/rateLimit.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
 import { mailTemplates, sendMail } from '../../services/mail.js';
 import { findPendingEmailChange, resendEmailChange, verifyEmailChange } from '../../services/emailChange.js';
+import { consumePhoneOtp, isPhoneLoginVerified, issuePhoneOtp } from '../../services/phoneOtp.js';
+import {
+  consumeOtpWithStore,
+  prismaOtpWhere,
+  throwOtpClaim,
+  type OtpClaimStore,
+} from '../../lib/otpClaim.js';
 
 export const publicAuthRouter = Router();
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 60 * 1000;
-const MAX_ATTEMPTS = 5;
 const BCRYPT_ROUNDS = 10;
 
 const emailLimiter = new RateLimiter(8, 60 * 60 * 1000);
@@ -39,7 +45,7 @@ function generateEmailCode(): string {
 
 function publicCustomer(c: {
   id: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   name: string | null;
   emailVerifiedAt: Date | null;
@@ -112,23 +118,31 @@ async function issueEmailOtp(email: string, purpose: 'VERIFY' | 'RESET') {
 
 async function consumeEmailOtp(email: string, purpose: 'VERIFY' | 'RESET', code: string) {
   const now = new Date();
-  const otp = await prisma.emailOtp.findFirst({
-    where: { email, purpose, usedAt: null },
-    orderBy: { createdAt: 'desc' },
-  });
-  if (!otp) throw badRequest('Код олдсонгүй. Дахин илгээнэ үү.');
-  if (otp.attempts >= MAX_ATTEMPTS) {
-    throw tooManyRequests('Хэт олон удаа буруу оруулсан тул түр блоклолоо. Шинэ код авна уу.');
-  }
-  if (otp.expiresAt <= now) throw badRequest('Кодны хугацаа дууссан байна.');
-  if (otp.code !== code) {
-    await prisma.emailOtp.update({
-      where: { id: otp.id },
-      data: { attempts: { increment: 1 } },
-    });
-    throw unauthorized('Код буруу байна.');
-  }
-  await prisma.emailOtp.update({ where: { id: otp.id }, data: { usedAt: now } });
+  const store: OtpClaimStore = {
+    findLatestUnused: () =>
+      prisma.emailOtp.findFirst({
+        where: { email, purpose, usedAt: null },
+        orderBy: { createdAt: 'desc' },
+      }),
+    tryMarkUsed: async (id, claimed, at) => {
+      const result = await prisma.emailOtp.updateMany({
+        where: prismaOtpWhere(id, at, claimed),
+        data: { usedAt: at },
+      });
+      return result.count === 1;
+    },
+    tryCountFailure: async (id, at) => {
+      const result = await prisma.emailOtp.updateMany({
+        where: prismaOtpWhere(id, at),
+        data: { attempts: { increment: 1 } },
+      });
+      if (result.count !== 1) return null;
+      const row = await prisma.emailOtp.findUnique({ where: { id }, select: { attempts: true } });
+      return row?.attempts ?? null;
+    },
+  };
+  const result = await consumeOtpWithStore(store, email, code, now);
+  throwOtpClaim(result);
   emailLimiter.reset(`${purpose}:${email}`);
 }
 
@@ -138,14 +152,14 @@ const phoneRequired = z
   .transform(normalizePhone)
   .refine((v) => PHONE_RE.test(v), 'Утасны дугаар буруу байна (8 орон).');
 
-/** POST /api/auth/register — шууд нэвтэрнэ. И-мэйл код илгээхгүй. */
+/** POST /api/auth/register — и-мэйл+нууц үг. Утас нэвтрэх эрх болохгүй (OTP-оор баталгаажуулна). */
 publicAuthRouter.post(
   '/register',
   validate({
     body: z.object({
       email: emailSchema,
       password: passwordSchema,
-      phone: phoneRequired,
+      phone: phoneRequired.optional(),
       name: z.string().trim().min(1).max(80).optional(),
     }),
   }),
@@ -154,14 +168,10 @@ publicAuthRouter.post(
       email: string;
       password: string;
       name?: string;
-      phone: string;
     };
 
     const existing = await prisma.customer.findUnique({ where: { email: body.email } });
     if (existing) throw conflict('Энэ и-мэйлээр бүртгэл байна.');
-
-    const phoneTaken = await prisma.customer.findFirst({ where: { phone: body.phone } });
-    if (phoneTaken) throw conflict('Энэ утасны дугаар өөр бүртгэлтэй холбогдсон.');
 
     const passwordHash = await bcrypt.hash(body.password, BCRYPT_ROUNDS);
     const customer = await prisma.customer.create({
@@ -169,7 +179,9 @@ publicAuthRouter.post(
         email: body.email,
         passwordHash,
         name: body.name ?? null,
-        phone: body.phone,
+        // Утас нэвтрэх эрх биш — OTP-оор баталгаажуулаагүй дугаарыг энд хадгалахгүй.
+        phone: null,
+        phoneVerifiedAt: null,
         emailVerifiedAt: new Date(),
       },
     });
@@ -304,6 +316,13 @@ publicAuthRouter.post(
 
     if (!customer?.passwordHash) throw unauthorized('Нэвтрэх мэдээлэл эсвэл нууц үг буруу.');
 
+    const loggedInByPhone = Boolean(
+      (raw && PHONE_RE.test(normalizePhone(raw)) && !raw.includes('@')) || body.phone,
+    );
+    if (loggedInByPhone && !isPhoneLoginVerified(customer)) {
+      throw unauthorized('Нэвтрэх мэдээлэл эсвэл нууц үг буруу.');
+    }
+
     const ok = await bcrypt.compare(body.password, customer.passwordHash);
     if (!ok) throw unauthorized('Нэвтрэх мэдээлэл эсвэл нууц үг буруу.');
 
@@ -385,10 +404,48 @@ publicAuthRouter.post(
   }),
 );
 
-// Хуучин утасны OTP — идэвхгүй.
-publicAuthRouter.post('/otp', (_req, res) => {
-  res.status(410).json({ error: { message: 'Утасны OTP нэвтрэлт хаагдсан. И-мэйлээр нэвтэрнэ үү.' } });
-});
-publicAuthRouter.post('/verify', (_req, res) => {
-  res.status(410).json({ error: { message: 'Утасны OTP нэвтрэлт хаагдсан. И-мэйлээр нэвтэрнэ үү.' } });
-});
+/** POST /api/auth/otp — утас руу 6 оронтой код. Хэрэглэгч кодыг баталгаажуулсны дараа үүснэ. */
+publicAuthRouter.post(
+  '/otp',
+  validate({
+    body: z.object({
+      phone: phoneRequired,
+      name: z.string().trim().min(1).max(80).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { phone: string; name?: string };
+    const otp = await issuePhoneOtp({
+      phone: body.phone,
+      name: body.name,
+      ip: req.ip,
+    });
+    res.json({ data: otp });
+  }),
+);
+
+/** POST /api/auth/verify — код шалгаад нэвтрүүлнэ / бүртгэнэ. */
+publicAuthRouter.post(
+  '/verify',
+  validate({
+    body: z.object({
+      phone: phoneRequired,
+      code: z.string().regex(/^\d{6}$/, 'Код 6 оронтой байна.'),
+      name: z.string().trim().min(1).max(80).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { phone: string; code: string; name?: string };
+    const customer = await consumePhoneOtp(body.phone, body.code, body.name);
+    res.json({
+      data: {
+        token: signCustomerToken({
+          sub: customer.id,
+          email: customer.email,
+          phone: customer.phone,
+        }),
+        customer: publicCustomer(customer),
+      },
+    });
+  }),
+);

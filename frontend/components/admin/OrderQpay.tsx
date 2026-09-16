@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { deferEffect } from "@/lib/deferEffect";
 import { Button, Card } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { dayTimeLabel, money } from "@/lib/format";
@@ -13,6 +14,24 @@ type OrderQpayApi = {
   cancelOrderQpayPayment: typeof adminApi.cancelOrderQpayPayment;
   refundOrderQpayPayment: typeof adminApi.refundOrderQpayPayment;
 };
+
+async function fetchQpayPaymentRows(
+  api: OrderQpayApi,
+  orderId: string,
+  invoiceId: string | null | undefined,
+  ready: boolean | undefined,
+): Promise<{ rows: QpayPaymentRow[]; error: string | null }> {
+  if (!invoiceId || !ready) return { rows: [], error: null };
+  try {
+    const list = await api.orderQpayPayments(orderId);
+    return { rows: list.rows, error: null };
+  } catch (e) {
+    return {
+      rows: [],
+      error: e instanceof ApiError ? e.message : "Жагсаалт авахад алдаа.",
+    };
+  }
+}
 
 export function OrderQpayCard({
   orderId,
@@ -38,24 +57,22 @@ export function OrderQpayCard({
   const [rows, setRows] = useState<QpayPaymentRow[]>([]);
   const [listError, setListError] = useState<string | null>(null);
 
-  const loadPayments = useCallback(async () => {
-    if (!qpay?.invoiceId || !qpay.ready) {
-      setRows([]);
-      setListError(null);
-      return;
-    }
-    try {
-      const list = await api.orderQpayPayments(orderId);
-      setRows(list.rows);
-      setListError(null);
-    } catch (e) {
-      setListError(e instanceof ApiError ? e.message : "Жагсаалт авахад алдаа.");
-    }
-  }, [orderId, qpay?.invoiceId, qpay?.ready, api]);
+  const loadPayments = async () => {
+    const result = await fetchQpayPaymentRows(api, orderId, qpay?.invoiceId, qpay?.ready);
+    setRows(result.rows);
+    setListError(result.error);
+  };
 
-  useEffect(() => {
-    void loadPayments();
-  }, [loadPayments]);
+  useEffect(
+    () =>
+      deferEffect(() => {
+        void fetchQpayPaymentRows(api, orderId, qpay?.invoiceId, qpay?.ready).then((result) => {
+          setRows(result.rows);
+          setListError(result.error);
+        });
+      }),
+    [api, orderId, qpay?.invoiceId, qpay?.ready],
+  );
 
   if (!qpay) return null;
 

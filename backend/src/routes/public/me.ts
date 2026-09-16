@@ -3,13 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import type { Customer } from "@prisma/client";
 import { prisma } from "../../prisma.js";
-import { normalizePhone, PHONE_RE } from "../../lib/code.js";
-import {
-  badRequest,
-  conflict,
-  notFound,
-  unauthorized,
-} from "../../lib/errors.js";
+import { badRequest, conflict, notFound, unauthorized } from "../../lib/errors.js";
 import { toIso } from "../../lib/date.js";
 import { orderCanChooseFulfilment } from "../../lib/itemFulfilment.js";
 import { requireCustomer } from "../../middleware/auth.js";
@@ -28,6 +22,8 @@ import { paidPayoutDaySet } from "../../services/returns.js";
 import { ipLimiters, RateLimiter } from "../../lib/rateLimit.js";
 import { currentLeasingPayGaps } from "../../services/settings.js";
 import { issueEmailChange } from "../../services/emailChange.js";
+import { issuePhoneChange, resendPhoneChange, verifyPhoneChange } from "../../services/phoneChange.js";
+import { signCustomerToken } from "../../lib/jwt.js";
 
 export const publicMeRouter = Router();
 
@@ -65,21 +61,6 @@ function serializeCustomer(c: Customer) {
   };
 }
 
-const phoneOptional = z
-  .string()
-  .trim()
-  .nullable()
-  .optional()
-  .transform((v) => {
-    if (v === undefined) return undefined;
-    if (v === null || v === "") return null;
-    return normalizePhone(v);
-  })
-  .refine(
-    (v) => v === null || v === undefined || PHONE_RE.test(v),
-    "Утасны дугаар буруу байна (8 орон).",
-  );
-
 /** GET /api/me */
 publicMeRouter.get(
   "/",
@@ -94,7 +75,6 @@ publicMeRouter.get(
 
 const patchBody = z.object({
   name: z.string().trim().min(1).max(80).nullable().optional(),
-  phone: phoneOptional,
   district: z.string().trim().max(60).nullable().optional(),
   khoroo: z.string().trim().max(30).nullable().optional(),
   addressText: z.string().trim().max(300).nullable().optional(),
@@ -113,17 +93,10 @@ publicMeRouter.patch(
   validate({ body: patchBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof patchBody>;
-    if (body.phone) {
-      const taken = await prisma.customer.findFirst({
-        where: { phone: body.phone, NOT: { id: req.auth!.sub } },
-      });
-      if (taken) throw conflict("Энэ утасны дугаар өөр бүртгэлтэй холбогдсон.");
-    }
     const customer = await prisma.customer.update({
       where: { id: req.auth!.sub },
       data: {
         ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.phone !== undefined ? { phone: body.phone } : {}),
         ...(body.district !== undefined ? { district: body.district } : {}),
         ...(body.khoroo !== undefined ? { khoroo: body.khoroo } : {}),
         ...(body.addressText !== undefined ? { addressText: body.addressText } : {}),
@@ -190,20 +163,20 @@ publicMeRouter.post(
         .email()
         .max(120)
         .transform((v) => v.toLowerCase()),
-      password: z.string().min(1).max(100),
+      password: z.string().min(1).max(100).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const { email, password } = req.body as { email: string; password: string };
+    const { email, password } = req.body as { email: string; password?: string };
     const customer = await prisma.customer.findUnique({
       where: { id: req.auth!.sub },
     });
     if (!customer) throw notFound("Хэрэглэгч олдсонгүй.");
-    if (!customer.passwordHash)
-      throw badRequest("Нууц үг тохируулаагүй байна.");
-
-    const ok = await bcrypt.compare(password, customer.passwordHash);
-    if (!ok) throw unauthorized("Нууц үг буруу.");
+    if (customer.passwordHash) {
+      if (!password) throw badRequest("Нууц үг оруулна уу.");
+      const ok = await bcrypt.compare(password, customer.passwordHash);
+      if (!ok) throw unauthorized("Нууц үг буруу.");
+    }
 
     if (email === customer.email)
       throw badRequest("Шинэ и-мэйл одоогийнтой адил.");
@@ -221,6 +194,77 @@ publicMeRouter.post(
       data: {
         ...otp,
         message: "Шинэ и-мэйл рүү баталгаажуулах код илгээлээ.",
+      },
+    });
+  }),
+);
+
+const phoneChangeBody = z.object({
+  phone: z
+    .string()
+    .trim()
+    .min(8)
+    .max(16),
+});
+
+/** POST /api/me/phone/change — шинэ дугаар руу OTP. Хуучин дугаар хэвээр. */
+publicMeRouter.post(
+  "/phone/change",
+  validate({ body: phoneChangeBody }),
+  asyncHandler(async (req, res) => {
+    const { phone } = req.body as { phone: string };
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.auth!.sub },
+    });
+    if (!customer) throw notFound("Хэрэглэгч олдсонгүй.");
+    const otp = await issuePhoneChange(customer, phone, req.ip);
+    res.json({
+      data: {
+        ...otp,
+        message: "Шинэ дугаар руу баталгаажуулах код илгээлээ.",
+      },
+    });
+  }),
+);
+
+/** POST /api/me/phone/resend */
+publicMeRouter.post(
+  "/phone/resend",
+  validate({ body: phoneChangeBody }),
+  asyncHandler(async (req, res) => {
+    const { phone } = req.body as { phone: string };
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.auth!.sub },
+    });
+    if (!customer) throw notFound("Хэрэглэгч олдсонгүй.");
+    const otp = await resendPhoneChange(customer, phone, req.ip);
+    res.json({ data: otp });
+  }),
+);
+
+/** POST /api/me/phone/verify */
+publicMeRouter.post(
+  "/phone/verify",
+  validate({
+    body: phoneChangeBody.extend({
+      code: z.string().regex(/^\d{6}$/, "Код 6 оронтой байна."),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { phone, code } = req.body as { phone: string; code: string };
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.auth!.sub },
+    });
+    if (!customer) throw notFound("Хэрэглэгч олдсонгүй.");
+    const updated = await verifyPhoneChange(customer, phone, code);
+    res.json({
+      data: {
+        token: signCustomerToken({
+          sub: updated.id,
+          email: updated.email,
+          phone: updated.phone,
+        }),
+        customer: serializeCustomer(updated),
       },
     });
   }),

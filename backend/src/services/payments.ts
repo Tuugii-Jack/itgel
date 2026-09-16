@@ -109,7 +109,7 @@ export async function recordPaymentWithTotals(
  */
 export async function confirmLeasingIfFeePaid(orderId: string, actor: string): Promise<void> {
   const order = await prisma.order.findFirst({
-    where: { id: orderId, deletedAt: null, status: 'NEW', isLeasing: true },
+    where: { id: orderId, deletedAt: null, status: 'NEW', isLeasing: true, debtClosedAt: null },
     select: {
       id: true,
       subtotal: true,

@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { deferEffect } from "@/lib/deferEffect";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { ProductCard } from "@/components/ProductCard";
@@ -62,9 +62,7 @@ function OrderProductsContent() {
     }
   }, [category]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const loadMore = async () => {
     setMoreLoading(true);

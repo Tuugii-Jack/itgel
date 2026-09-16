@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
 import { ProductImage } from "@/components/ProductImage";
@@ -39,9 +40,7 @@ export default function AdsPage() {
     }
   }, [toast]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const toggleActive = async (row: AdminAd) => {
     setBusy(true);

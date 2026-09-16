@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
 import {
@@ -44,9 +45,7 @@ export default function SettingsPage() {
     }
   }, [toast]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   if (loading || !settings) {
     return (
@@ -74,7 +73,6 @@ export default function SettingsPage() {
         address: settings.address,
         workHours: settings.workHours,
         facebookUrl: settings.facebookUrl,
-        smsOnArrival: settings.smsOnArrival,
         autoCloseOnDeadline: settings.autoCloseOnDeadline,
         deliveryDailyLimit: settings.deliveryDailyLimit,
         deliveryFees,
@@ -174,7 +172,7 @@ export default function SettingsPage() {
           </Field>
           <Field
             label="Төлбөр хүлээх хугацаа (цаг)"
-            hint="Мөнгө ороогүй захиалгыг автоматаар устгана (цуцлаад «Устсан»-д 10 хоног хадгална). 0 = унтраана. Шилжүүлсэн гэж мэдэгдсэн захиалгыг хөндөхгүй."
+            hint="Мөнгө огт ороогүй шинэ захиалгыг автоматаар устгана (цуцлаад «Устсан»-д 10 хоног хадгална). 0 = унтраана. QPay, шилжүүлэг, бэлэн — ямар ч мөнгө орсон бол устгахгүй."
           >
             <Input
               type="number"
@@ -207,18 +205,14 @@ export default function SettingsPage() {
         <Card className="flex flex-col gap-2 p-4">
           <div className="text-[15px] font-medium">Автомат үйлдэл</div>
           <Toggle
-            label="Захиалга ирэхэд SMS илгээх"
-            hint="Захиалга агуулахад ирмэгц захиалагч руу мессеж"
-            checked={settings.smsOnArrival}
-            onChange={(v) => patch({ smsOnArrival: v })}
-          />
-          <Divider />
-          <Toggle
             label="Хугацаа дуусахад захиалга хаах"
             hint="closeAt (огноо+цаг) хүрсэн барааг 10 минут тутам CLOSED болгоно"
             checked={settings.autoCloseOnDeadline}
             onChange={(v) => patch({ autoCloseOnDeadline: v })}
           />
+          <p className="m-0 text-[13px] text-ink-2">
+            Бараа ирсэн SMS автоматаар явахгүй. Ачааны багцыг «Агуулахад» болгосны дараа захиалагч бүр рүү товчоор илгээнэ.
+          </p>
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">
@@ -340,9 +334,7 @@ function StaffAccountsCard() {
     }
   };
 
-  useEffect(() => {
-    void load();
-  }, []);
+  useEffect(() => deferEffect(() => { void load(); }), []);
 
   const create = async () => {
     setBusy(true);

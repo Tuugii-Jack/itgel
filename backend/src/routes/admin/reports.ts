@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { addUbMonths, startOfUbMonth, ubMonthKey } from '../../lib/date.js';
+import { SHOP_SALES_ORDER_WHERE } from '../../lib/inventoryOwner.js';
+import { SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 
 export const adminReportsRouter = Router();
@@ -46,7 +48,7 @@ adminReportsRouter.get(
           cancelledAt: null,
           handedOverAt: { gte: from },
           ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
-          order: { deletedAt: null },
+          order: SHOP_SALES_ORDER_WHERE,
         },
         select: {
           qty: true,
@@ -59,7 +61,7 @@ adminReportsRouter.get(
         where: {
           cancelledAt: { gte: from },
           ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
-          order: { deletedAt: null },
+          order: SHOP_SALES_ORDER_WHERE,
         },
         select: {
           qty: true,
@@ -151,7 +153,7 @@ adminReportsRouter.get(
           cancelledAt: null,
           handedOverAt: { gte: from },
           ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
-          order: { deletedAt: null },
+          order: SHOP_SALES_ORDER_WHERE,
         },
         select: {
           productId: true,
@@ -165,7 +167,7 @@ adminReportsRouter.get(
         where: {
           cancelledAt: { gte: from },
           ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
-          order: { deletedAt: null },
+          order: SHOP_SALES_ORDER_WHERE,
         },
         select: {
           productId: true,
@@ -242,18 +244,23 @@ adminReportsRouter.get(
   asyncHandler(async (_req, res) => {
     const [newOrders, inTransit, arrived, pendingDeliveries, activeProducts, paymentClaims] =
       await Promise.all([
-        prisma.order.count({ where: { deletedAt: null, status: 'NEW', isLeasing: false } }),
-        prisma.order.count({ where: { deletedAt: null, status: 'IN_TRANSIT', isLeasing: false } }),
-        prisma.order.count({ where: { deletedAt: null, status: 'ARRIVED', isLeasing: false } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'NEW', ...SHOP_STAFF_ORDER_WHERE } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'IN_TRANSIT', ...SHOP_STAFF_ORDER_WHERE } }),
+        prisma.order.count({ where: { deletedAt: null, status: 'ARRIVED', ...SHOP_STAFF_ORDER_WHERE } }),
         prisma.delivery.count({ where: { status: { not: 'DELIVERED' } } }),
         prisma.productRound.count({
-          where: { deletedAt: null, status: 'ACTIVE', product: { deletedAt: null } },
+          where: {
+            deletedAt: null,
+            status: 'ACTIVE',
+            ownerKind: 'SHOP',
+            product: { deletedAt: null },
+          },
         }),
         prisma.order.count({
           where: {
             deletedAt: null,
             status: { not: 'CANCELLED' },
-            isLeasing: false,
+            ...SHOP_STAFF_ORDER_WHERE,
             paymentClaimedAt: { not: null },
             dueAmount: { gt: 0 },
           },

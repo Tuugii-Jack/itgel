@@ -161,6 +161,22 @@ export function phoneLabel(phone: string | null | undefined): string {
   return digits.length === 8 ? `${digits.slice(0, 4)}-${digits.slice(4)}` : phone;
 }
 
+/** Календарийн сарын нэр — хүлээлгэн өгөх, хүргэлт, буцаалт, архив. */
+export const MONTH_LABELS = [
+  "1-р сар",
+  "2-р сар",
+  "3-р сар",
+  "4-р сар",
+  "5-р сар",
+  "6-р сар",
+  "7-р сар",
+  "8-р сар",
+  "9-р сар",
+  "10-р сар",
+  "11-р сар",
+  "12-р сар",
+] as const;
+
 /** "2026-03" → "3-р сар" */
 export function monthLabel(key: string): string {
   const month = Number(key.split("-")[1]);

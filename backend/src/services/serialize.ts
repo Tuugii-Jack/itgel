@@ -73,6 +73,7 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     skuStocks: publicSkuStocks(round.skuStocks),
     stock: round.stock,
     type: round.closeAt === null ? ('ready' as const) : ('order' as const),
+    ownerKind: round.ownerKind === 'LEASING' ? ('LEASING' as const) : ('SHOP' as const),
     status: effectiveRoundStatus(round.status, round.closeAt, now),
     closeAt: toIso(round.closeAt),
     leadMinDays: round.leadMinDays,
@@ -166,6 +167,7 @@ export function adminProduct(
     })),
     rounds,
     roundCount: rounds.length,
+    ownerKind: product.ownerKind === 'LEASING' ? ('LEASING' as const) : ('SHOP' as const),
     /** Одоо зарагдаж буй тойрог — жагсаалтад үнэ, төлвийг харуулахад. */
     currentRound:
       rounds.find((r) => r.status === 'ACTIVE') ??
@@ -222,6 +224,8 @@ export function publicOrderItem(
     arrivedAt: toIso(item.arrivedAt),
     cancelledAt: toIso(item.cancelledAt),
     handedOverAt: toIso(item.handedOverAt),
+    transferredAt: toIso(item.transferredAt),
+    transferredQty: item.transferredQty,
     fulfilment: item.fulfilment,
     /** waiting | arrived | handed_over | cancelled */
     itemStatus,

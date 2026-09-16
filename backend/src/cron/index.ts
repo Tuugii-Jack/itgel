@@ -6,10 +6,10 @@ import { addDays, startOfUbDay, ubDateString, UB_TZ } from '../lib/date.js';
 import {
   changeOrderStatus,
   finalizeRoundClose,
-  notifyArrival,
 } from '../services/orders.js';
 import { getSettings } from '../services/settings.js';
 import { syncAllStorageFees } from '../services/storageFee.js';
+import { unpaidAutoDeleteWhere } from '../lib/unpaidCancel.js';
 
 const tasks: ScheduledTask[] = [];
 
@@ -74,32 +74,19 @@ export function scheduleCloseExpired(): void {
 }
 
 /**
- * 2. SMS мэдэгдэл — ARRIVED болсон ч мэдэгдэл очоогүй захиалгуудыг барина.
- * Ердийн урсгалд төлөв солигдох үед шууд илгээгддэг; энэ нь аюулгүйн тор.
+ * Хуучин автомат SMS — унтарсан. Бараа ирснийг админ багцаас товчоор илгээнэ.
  */
 export async function sendArrivalNotifications(): Promise<number> {
-  const settings = await getSettings();
-  if (!settings.smsOnArrival) return 0;
-
-  const pending = await prisma.order.findMany({
-    where: { deletedAt: null, status: 'ARRIVED', arrivalNotifiedAt: null },
-    take: 200,
-  });
-
-  let sent = 0;
-  for (const order of pending) {
-    if (await notifyArrival(order)) sent += 1;
-  }
-  if (sent > 0) console.info(`[cron] ${sent} захиалгад ирсэн мэдэгдэл илгээлээ.`);
-  return sent;
+  return 0;
 }
 
 /**
  * 4. Мөнгө ороогүй захиалгыг цуцалж soft-delete хийнэ.
  *
- * `unpaidCancelHours` нь 0 бол огт ажиллахгүй. Хэрэглэгч
- * "шилжүүлсэн" гэж мэдэгдсэн захиалгыг хөндөхгүй — админ гараар шалгана.
- * Зөвхөн NEW төлөвтэй, огт мөнгө ороогүй захиалгад хамаарна.
+ * `unpaidCancelHours` нь 0 бол огт ажиллахгүй.
+ * Зөвхөн NEW, огт мөнгө ороогүй (paidAmount 0, төлбөрийн мөр байхгүй)
+ * захиалгад хамаарна. QPay / шилжүүлэг / бэлэн — ямар ч орлого орсон бол үлдэнэ.
+ * «Шилжүүлсэн» гэж мэдэгдсэн нь мөнгө биш тул хамгаалахгүй.
  * Устгасны дараа «Устсан захиалга»-д 10 хоног үлдэж, дараа нь бүрмөсөн устгана.
  */
 export async function cancelUnpaidOrders(now = new Date()): Promise<number> {
@@ -109,13 +96,7 @@ export async function cancelUnpaidOrders(now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - settings.unpaidCancelHours * 60 * 60 * 1000);
 
   const expired = await prisma.order.findMany({
-    where: {
-      deletedAt: null,
-      status: 'NEW',
-      paidAmount: 0,
-      paymentClaimedAt: null,
-      createdAt: { lte: cutoff },
-    },
+    where: unpaidAutoDeleteWhere(cutoff),
     select: { id: true, code: true, subtotal: true },
     take: 200,
   });
@@ -261,11 +242,6 @@ export function startCron(): void {
   // 10 минут тутам — хаагдах цаг хүрсэн тойрог
   tasks.push(
     cron.schedule('*/10 * * * *', () => void closeExpiredProducts().catch(console.error), options),
-  );
-
-  // 10 минут тутам
-  tasks.push(
-    cron.schedule('*/10 * * * *', () => void sendArrivalNotifications().catch(console.error), options),
   );
 
   // Өдөрт нэг — 09:00

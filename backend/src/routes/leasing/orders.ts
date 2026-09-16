@@ -2,14 +2,23 @@ import { Router } from 'express';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { AppError, conflict, notFound } from '../../lib/errors.js';
+import { audit } from '../../lib/audit.js';
+import { AppError, badRequest, conflict, notFound } from '../../lib/errors.js';
 import { profitOf } from '../../lib/money.js';
-import { serializeLeasing, leasingGoodsWhere, buildLeasingPayPlan, LEASING_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
+import { serializeLeasing, leasingGoodsWhere, buildLeasingPayPlan, LEASING_STAFF_ORDER_WHERE, LEASING_INSTALLMENT_WHERE, SMS_TEMPLATE_MAX } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { adminPaymentsRouter } from '../admin/payments.js';
 import { adminOrderQpayRouter } from '../admin/orderQpay.js';
-import { adminOrderDetail } from '../admin/orders.js';
+import { assertLeasingOrder } from '../../modules/leasing/guards.js';
+import {
+  arrivedUnpaidReminderText,
+  assertSendSmsText,
+  payReminderPreview,
+  reminderTemplateOf,
+  scheduleReminderText,
+} from '../../modules/leasing/orderSms.js';
+import { adminOrderDetail } from '../../modules/orders/adminDetail.js';
 import {
   computeTotals,
   confirmThreshold,
@@ -20,7 +29,15 @@ import {
 import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { syncOrderStorageFee } from '../../services/storageFee.js';
-import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
+import { getSettingsCached, invalidateSettingsCache, leasingPayGapsOf } from '../../services/settings.js';
+import { leasingSms, stripSmsUrls } from '../../services/sms.js';
+import {
+  executeReadyTransfer,
+  loadTransferPreview,
+  serializeTransferPreview,
+  transferAvailability,
+} from '../../services/readyTransfer.js';
+import { selectionsOf } from '../../lib/options.js';
 
 export const leasingOrdersRouter = Router();
 
@@ -40,15 +57,6 @@ leasingOrdersRouter.use(
   }),
   adminOrderQpayRouter,
 );
-
-async function assertLeasingOrder(id: string) {
-  const order = await prisma.order.findFirst({
-    where: { id, isLeasing: true },
-    select: { id: true },
-  });
-  if (!order) throw notFound('Захиалга олдсонгүй.');
-  return order;
-}
 
 const orderStatus = z.enum([
   'NEW',
@@ -72,6 +80,7 @@ const listQuery = z.object({
       'arrived_paid',
       'pay_due_today',
       'pay_overdue',
+      'resale',
     ])
     .optional()
     .default('arrived_unpaid'),
@@ -86,7 +95,7 @@ leasingOrdersRouter.get(
     const arrived = leasingGoodsWhere('arrived') as Prisma.OrderWhereInput;
     const notArrived = leasingGoodsWhere('not_arrived') as Prisma.OrderWhereInput;
     const gaps = leasingPayGapsOf(await getSettingsCached());
-    const [total, notArrivedCount, arrivedUnpaid, arrivedPaid, open] = await Promise.all([
+    const [total, notArrivedCount, arrivedUnpaid, arrivedPaid, resaleCount, open] = await Promise.all([
       prisma.order.count({ where }),
       prisma.order.count({ where: { ...where, ...notArrived } }),
       prisma.order.count({
@@ -95,8 +104,11 @@ leasingOrdersRouter.get(
       prisma.order.count({
         where: { ...where, ...arrived, dueAmount: { lte: 0 } },
       }),
+      prisma.order.count({
+        where: { deletedAt: null, payeeKind: 'LEASING', isLeasing: false },
+      }),
       prisma.order.findMany({
-        where: { ...where, status: { not: 'CANCELLED' }, dueAmount: { gt: 0 } },
+        where: { ...LEASING_INSTALLMENT_WHERE, deletedAt: null, status: { not: 'CANCELLED' }, dueAmount: { gt: 0 }, debtClosedAt: null },
         select: {
           createdAt: true,
           subtotal: true,
@@ -122,6 +134,7 @@ leasingOrdersRouter.get(
         arrivedPaid,
         payDueToday,
         payOverdue,
+        resaleCount,
       },
     });
   }),
@@ -136,13 +149,15 @@ leasingOrdersRouter.get(
     const scheduleFilter = q.goods === 'pay_due_today' || q.goods === 'pay_overdue';
 
     const where: Prisma.OrderWhereInput = {
-      ...LEASING_STAFF_ORDER_WHERE,
+      ...(q.goods === 'resale' ? { payeeKind: 'LEASING', isLeasing: false } : LEASING_STAFF_ORDER_WHERE),
       deletedAt: q.deleted ? { not: null } : null,
-      ...(scheduleFilter
-        ? { status: { not: 'CANCELLED' }, dueAmount: { gt: 0 } }
-        : (leasingGoodsWhere(
-            q.goods as 'all' | 'arrived' | 'not_arrived' | 'arrived_unpaid' | 'arrived_paid',
-          ) as Prisma.OrderWhereInput)),
+      ...(q.goods === 'resale'
+        ? {}
+        : scheduleFilter
+          ? { status: { not: 'CANCELLED' }, dueAmount: { gt: 0 }, debtClosedAt: null }
+          : (leasingGoodsWhere(
+              q.goods as 'all' | 'arrived' | 'not_arrived' | 'arrived_unpaid' | 'arrived_paid',
+            ) as Prisma.OrderWhereInput)),
       ...(q.q
         ? {
             OR: [
@@ -203,6 +218,8 @@ leasingOrdersRouter.get(
         refundedAmount: order.refundedAmount,
         dueAmount: order.dueAmount,
         paymentState: paymentState(computeTotals(order)),
+        payeeKind: (order as { payeeKind?: string }).payeeKind,
+        isResale: order.payeeKind === 'LEASING' && !order.isLeasing,
         ...serializeLeasing(order, gaps),
         paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         profit: profitOf(order.items.filter((i) => i.cancelledAt === null)),
@@ -391,6 +408,316 @@ leasingOrdersRouter.post(
         succeeded: succeeded.length,
         failed,
         status,
+      },
+    });
+  }),
+);
+
+type ScheduleSmsKind = 'due_today' | 'overdue' | 'arrived_unpaid';
+
+/**
+ * POST /orders/sms-reminders — өнөөдөр төлөгдөөгүй, хуваарь хоцорсон, ирсэн·төлөөгүй бүгдэд.
+ * `/:id`-ээс өмнө бүртгэнэ.
+ */
+leasingOrdersRouter.post(
+  '/sms-reminders',
+  validate({
+    body: z.object({
+      kind: z.enum(['due_today', 'overdue', 'arrived_unpaid']),
+      orderIds: z.array(z.string().min(1).max(80)).min(1).max(500),
+      template: z.string().max(SMS_TEMPLATE_MAX).optional(),
+      overrides: z
+        .array(
+          z.object({
+            orderId: z.string().min(1).max(80),
+            text: z.string().min(1).max(400),
+          }),
+        )
+        .max(500)
+        .optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const { kind, orderIds, template: templateOverride, overrides } = req.body as {
+      kind: ScheduleSmsKind;
+      orderIds: string[];
+      template?: string;
+      overrides?: { orderId: string; text: string }[];
+    };
+    const ids = [...new Set(orderIds)];
+    const settings = await getSettingsCached();
+    const gaps = leasingPayGapsOf(settings);
+    const template = reminderTemplateOf(kind, templateOverride, settings);
+    const saved = templateOverride?.trim();
+    if (saved) {
+      await prisma.setting.update({
+        where: { id: 1 },
+        data:
+          kind === 'due_today'
+            ? { leasingSmsDueToday: saved }
+            : kind === 'overdue'
+              ? { leasingSmsOverdue: saved }
+              : { leasingSmsArrivedUnpaid: saved },
+      });
+      invalidateSettingsCache();
+    }
+    const where: Prisma.OrderWhereInput =
+      kind === 'arrived_unpaid'
+        ? {
+            ...LEASING_INSTALLMENT_WHERE,
+            deletedAt: null,
+            debtClosedAt: null,
+            id: { in: ids },
+            ...(leasingGoodsWhere('arrived_unpaid') as Prisma.OrderWhereInput),
+          }
+        : {
+            ...LEASING_INSTALLMENT_WHERE,
+            deletedAt: null,
+            debtClosedAt: null,
+            id: { in: ids },
+            status: { not: 'CANCELLED' },
+            dueAmount: { gt: 0 },
+          };
+    const orders = await prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        code: true,
+        createdAt: true,
+        subtotal: true,
+        leasingFee: true,
+        paidAmount: true,
+        refundedAmount: true,
+        dueAmount: true,
+        isLeasing: true,
+        customer: { select: { name: true, phone: true } },
+      },
+    });
+
+    const overrideById = new Map(
+      (overrides ?? []).map((row) => [row.orderId, row.text] as const),
+    );
+    const sent: string[] = [];
+    const skipped: string[] = [];
+    const failed: { orderId: string; code: string; error: string }[] = [];
+
+    for (const order of orders) {
+      const overrideRaw = overrideById.get(order.id);
+      let text: string | null = null;
+      if (overrideRaw != null) {
+        try {
+          text = assertSendSmsText(overrideRaw);
+        } catch (error) {
+          failed.push({
+            orderId: order.id,
+            code: order.code,
+            error: error instanceof AppError ? error.message : 'Мессеж буруу.',
+          });
+          continue;
+        }
+      } else {
+        const filled =
+          kind === 'arrived_unpaid'
+            ? arrivedUnpaidReminderText(order.customer.name, order.dueAmount, template)
+            : scheduleReminderText(
+                kind,
+                order.customer.name,
+                buildLeasingPayPlan({ ...order, payGaps: gaps }),
+                template,
+              );
+        text = filled ? stripSmsUrls(filled) : null;
+      }
+      if (!text) {
+        skipped.push(order.id);
+        continue;
+      }
+      if (!order.customer.phone) {
+        skipped.push(order.id);
+        continue;
+      }
+      const result = await leasingSms.send({ phone: order.customer.phone, text });
+      if (!result.ok) {
+        failed.push({ orderId: order.id, code: order.code, error: result.error ?? 'SMS илгээгдсэнгүй.' });
+        continue;
+      }
+      sent.push(order.id);
+    }
+
+    await audit({
+      actor: actorOf(req),
+      action: 'LEASING_SCHEDULE_SMS',
+      entity: 'Order',
+      entityId: kind,
+      after: { kind, requested: ids.length, sent: sent.length, skipped: skipped.length, failed: failed.length },
+    });
+
+    res.json({ data: { sent: sent.length, skipped: skipped.length, failed } });
+  }),
+);
+
+/**
+ * GET /orders/:id/sms — явуулах сануулгын урьдчилсан харагдац.
+ */
+leasingOrdersRouter.get(
+  '/:id/sms',
+  validate({ params: z.object({ id: z.string().min(1) }) }),
+  asyncHandler(async (req, res) => {
+    const preview = await payReminderPreview(param(req, 'id'));
+    res.json({
+      data: {
+        text: preview.text,
+        phone: preview.order.customer.phone,
+        name: preview.order.customer.name,
+        amount: preview.amount,
+      },
+    });
+  }),
+);
+
+/**
+ * POST /orders/:id/sms — төлбөрийн сануулга. Автомат биш.
+ */
+leasingOrdersRouter.post(
+  '/:id/sms',
+  validate({
+    params: z.object({ id: z.string().min(1) }),
+    body: z.object({
+      kind: z.enum(['pay_reminder']).default('pay_reminder'),
+      text: z.string().min(1).max(400).optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as { kind?: 'pay_reminder'; text?: string };
+    const preview = await payReminderPreview(param(req, 'id'));
+    const text = body.text != null ? assertSendSmsText(body.text) : preview.text;
+    const result = await leasingSms.send({
+      phone: preview.order.customer.phone!,
+      text,
+    });
+    if (!result.ok) throw badRequest(result.error ?? 'SMS илгээгдсэнгүй.');
+
+    await audit({
+      actor: actorOf(req),
+      action: 'LEASING_PAY_SMS',
+      entity: 'Order',
+      entityId: preview.order.id,
+      after: {
+        kind: 'pay_reminder',
+        amount: preview.amount,
+        customized: body.text != null,
+        smsId: result.id ?? null,
+      },
+    });
+
+    res.json({ data: { ok: true, amount: preview.amount } });
+  }),
+);
+
+const transferBody = z.object({
+  reason: z.string().trim().min(3).max(300),
+  lines: z
+    .array(
+      z.object({
+        orderItemId: z.string().min(1),
+        qty: z.coerce.number().int().min(1).max(1000),
+        resaleUnitPrice: z.coerce.number().int().min(0).max(100_000_000),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+
+leasingOrdersRouter.get(
+  '/:id/ready-transfer',
+  validate({ params: z.object({ id: z.string().min(1) }) }),
+  asyncHandler(async (req, res) => {
+    const orderId = param(req, 'id');
+    await assertLeasingOrder(orderId);
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, readyTransfers: { orderBy: { createdAt: 'desc' }, take: 20 } },
+    });
+    if (!order) throw notFound('Захиалга олдсонгүй.');
+    res.json({
+      data: {
+        isLeasing: order.isLeasing,
+        netPaid: order.paidAmount - order.refundedAmount,
+        dueAmount: order.dueAmount,
+        writtenOffAmount: order.writtenOffAmount,
+        debtClosedAt: order.debtClosedAt?.toISOString() ?? null,
+        items: order.items.map((item) => {
+          const avail = transferAvailability(item);
+          return {
+            id: item.id,
+            name: item.nameSnapshot,
+            qty: item.qty,
+            availableQty: avail.availableQty,
+            eligible: avail.ok,
+            reason: avail.reason ?? null,
+            unitPrice: item.unitPrice,
+            selections: selectionsOf(item.selections),
+            cancelled: item.cancelledAt !== null,
+            handedOver: item.handedOverAt !== null,
+            transferred: item.transferredAt !== null,
+          };
+        }),
+        transfers: order.readyTransfers.map((row) => ({
+          id: row.id,
+          reason: row.reason,
+          paidKeptAmount: row.paidKeptAmount,
+          dueClosedAmount: row.dueClosedAmount,
+          wroteOffDebt: row.wroteOffDebt,
+          remainingActiveQty: row.remainingActiveQty,
+          createdAt: row.createdAt.toISOString(),
+        })),
+      },
+    });
+  }),
+);
+
+leasingOrdersRouter.post(
+  '/:id/ready-transfer/preview',
+  validate({ params: z.object({ id: z.string().min(1) }), body: transferBody }),
+  asyncHandler(async (req, res) => {
+    const orderId = param(req, 'id');
+    await assertLeasingOrder(orderId);
+    const body = req.body as z.infer<typeof transferBody>;
+    const preview = await loadTransferPreview(orderId, body.lines);
+    res.json({ data: { ...serializeTransferPreview(preview), reason: body.reason } });
+  }),
+);
+
+leasingOrdersRouter.post(
+  '/:id/ready-transfer',
+  validate({ params: z.object({ id: z.string().min(1) }), body: transferBody }),
+  asyncHandler(async (req, res) => {
+    const orderId = param(req, 'id');
+    await assertLeasingOrder(orderId);
+    const body = req.body as z.infer<typeof transferBody>;
+    const adminId = req.auth!.sub;
+    const result = await executeReadyTransfer({
+      orderId,
+      ownerAdminId: adminId,
+      reason: body.reason,
+      lines: body.lines,
+      actor: actorOf(req),
+    });
+    const gaps = leasingPayGapsOf(await getSettingsCached());
+    const order = await prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: {
+        customer: true,
+        items: { include: { product: true } },
+        batch: true,
+        delivery: true,
+      },
+    });
+    res.status(201).json({
+      data: {
+        transferId: result.transferId,
+        destRoundIds: result.destRoundIds,
+        preview: serializeTransferPreview(result.preview),
+        order: adminOrderDetail(order, gaps),
       },
     });
   }),

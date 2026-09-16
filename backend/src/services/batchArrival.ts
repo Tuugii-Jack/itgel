@@ -1,4 +1,4 @@
-import type { Order, Prisma } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
@@ -9,7 +9,7 @@ import {
   variantKey,
 } from '../lib/options.js';
 import { isProductPaid } from './money.js';
-import { notifyArrival, promoteOrdersToArrived } from './orders.js';
+import { promoteOrdersToArrived } from './orders.js';
 
 export type WaitingLine = {
   id: string;
@@ -268,7 +268,6 @@ export async function registerBatchArrivals(
 ): Promise<RegisterArrivalResult> {
   if (lines.length === 0) throw badRequest('Ирсэн тоо оруулна уу.');
 
-  const arrivedOrderIds: string[] = [];
   const result = await prisma.$transaction(async (tx) => {
     const batch = await tx.batch.findFirst({
       where: { id: batchId, deletedAt: null },
@@ -419,7 +418,6 @@ export async function registerBatchArrivals(
       `Багц "${batch.name}" — ирсэн бараа бүртгэв`,
       now,
     );
-    arrivedOrderIds.push(...promoted);
 
     const reverted = await demoteOrdersMissingArrival(
       tx,
@@ -452,13 +450,6 @@ export async function registerBatchArrivals(
 
     return { allocated, released, unused, ordersArrived: promoted, ordersReverted: reverted };
   });
-
-  if (arrivedOrderIds.length > 0) {
-    void (async () => {
-      const orders = await prisma.order.findMany({ where: { id: { in: arrivedOrderIds } } });
-      for (const order of orders) await notifyArrival(order as Order);
-    })().catch((e) => console.warn('[sms] ирсэн мэдэгдэл алдаа:', e));
-  }
 
   return result;
 }

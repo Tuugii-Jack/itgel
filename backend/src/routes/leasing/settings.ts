@@ -5,9 +5,11 @@ import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import {
   SUGGESTED_LEASING_FEE_TIERS,
+  SMS_TEMPLATE_MAX,
   assertLeasingFeeTiers,
   assertLeasingPayGaps,
   leasingCopyOf,
+  leasingSmsTemplatesOf,
 } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
@@ -31,10 +33,18 @@ const patchBody = z.object({
   choiceHint: z.string().max(400).optional(),
   termsTitle: z.string().max(80).optional(),
   termsBody: z.string().max(2000).optional(),
+  smsDueToday: z.string().max(SMS_TEMPLATE_MAX).optional(),
+  smsOverdue: z.string().max(SMS_TEMPLATE_MAX).optional(),
+  smsArrivedUnpaid: z.string().max(SMS_TEMPLATE_MAX).optional(),
+  bankName: z.string().trim().max(60).optional(),
+  bankAccountNumber: z.string().trim().max(40).optional(),
+  bankAccountName: z.string().trim().max(80).optional(),
+  paymentNote: z.string().trim().max(300).optional(),
 });
 
 function serializeLeasingSettings(settings: Awaited<ReturnType<typeof getSettings>>) {
   const copy = leasingCopyOf(settings);
+  const sms = leasingSmsTemplatesOf(settings);
   return {
     feeTiers: leasingTiersOf(settings),
     suggestedFeeTiers: SUGGESTED_LEASING_FEE_TIERS,
@@ -42,6 +52,13 @@ function serializeLeasingSettings(settings: Awaited<ReturnType<typeof getSetting
     choiceHint: copy.choiceHint,
     termsTitle: copy.termsTitle,
     termsBody: copy.termsBody,
+    smsDueToday: sms.dueToday,
+    smsOverdue: sms.overdue,
+    smsArrivedUnpaid: sms.arrivedUnpaid,
+    bankName: settings.leasingBankName,
+    bankAccountNumber: settings.leasingBankAccountNumber,
+    bankAccountName: settings.leasingBankAccountName,
+    paymentNote: settings.leasingPaymentNote,
     updatedAt: settings.updatedAt.toISOString(),
   };
 }
@@ -70,6 +87,13 @@ leasingSettingsRouter.patch(
         ...(body.choiceHint != null ? { leasingChoiceHint: body.choiceHint.trim() } : {}),
         ...(body.termsTitle != null ? { leasingTermsTitle: body.termsTitle.trim() } : {}),
         ...(body.termsBody != null ? { leasingTermsBody: body.termsBody.trim() } : {}),
+        ...(body.smsDueToday != null ? { leasingSmsDueToday: body.smsDueToday.trim() } : {}),
+        ...(body.smsOverdue != null ? { leasingSmsOverdue: body.smsOverdue.trim() } : {}),
+        ...(body.smsArrivedUnpaid != null ? { leasingSmsArrivedUnpaid: body.smsArrivedUnpaid.trim() } : {}),
+        ...(body.bankName != null ? { leasingBankName: body.bankName } : {}),
+        ...(body.bankAccountNumber != null ? { leasingBankAccountNumber: body.bankAccountNumber } : {}),
+        ...(body.bankAccountName != null ? { leasingBankAccountName: body.bankAccountName } : {}),
+        ...(body.paymentNote != null ? { leasingPaymentNote: body.paymentNote } : {}),
       },
     });
     invalidateSettingsCache();

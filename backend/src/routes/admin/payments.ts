@@ -21,7 +21,7 @@ const methodEnum = z.enum(['BANK_TRANSFER', 'CASH', 'CARD', 'QPAY', 'OTHER']);
 async function loadLiveOrder(orderId: string) {
   const order = await prisma.order.findFirst({
     where: { id: orderId, deletedAt: null },
-    select: { id: true, isLeasing: true },
+    select: { id: true, isLeasing: true, payeeKind: true },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
   return order;
@@ -57,6 +57,7 @@ adminPaymentsRouter.get(
           refundedAmount: totals.refundedAmount,
           netPaid: totals.netPaid,
           dueAmount: totals.dueAmount,
+          writtenOffAmount: totals.writtenOffAmount,
         },
         paymentState: state,
         paymentStateLabel: PAYMENT_STATE_LABEL[state],
@@ -87,7 +88,7 @@ adminPaymentsRouter.post(
     };
 
     const order = await loadLiveOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+    assertCanWriteLeasingOrderMoney(order, req.auth?.role);
 
     const { payment, totals } = await recordPayment({
       orderId: order.id,
@@ -126,7 +127,7 @@ adminPaymentsRouter.post(
     };
 
     const order = await loadLiveOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+    assertCanWriteLeasingOrderMoney(order, req.auth?.role);
 
     const { payment, totals } = await recordPayment({
       orderId: order.id,
@@ -160,7 +161,7 @@ adminPaymentsRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as { reason?: string; refund: boolean };
     const order = await loadLiveOrder(param(req, 'id'));
-    if (order.isLeasing && req.auth?.role !== 'LEASING' && body.refund) {
+    if ((order.isLeasing || order.payeeKind === 'LEASING') && req.auth?.role !== 'LEASING' && body.refund) {
       throw forbidden('Лизинг захиалгын буцаалтыг лизингийн админ хийнэ.');
     }
 

@@ -29,6 +29,11 @@ describe('qpayAccountForOrder', () => {
     expect(qpayAccountForOrder(false)).toBe('shop');
     expect(qpayAccountForOrder(true)).toBe('leasing');
   });
+
+  it('бэлэн борлуулалтыг лизингийн данс руу чиглүүлнэ', () => {
+    expect(qpayAccountForOrder({ isLeasing: false, payeeKind: 'LEASING' })).toBe('leasing');
+    expect(qpayAccountForOrder({ isLeasing: false, payeeKind: 'SHOP' })).toBe('shop');
+  });
 });
 
 describe('toQpayDateTime', () => {

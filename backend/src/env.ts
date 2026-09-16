@@ -21,10 +21,26 @@ const schema = z.object({
   JWT_CUSTOMER_TTL: z.string().default('30d'),
   JWT_ADMIN_TTL: z.string().default('12h'),
 
-  SMS_PROVIDER: z.enum(['console', 'http']).default('console'),
+  SMS_PROVIDER: z
+    .enum(['console', 'http', 'callpro'])
+    .default(process.env.NODE_ENV === 'production' ? 'callpro' : 'console'),
   SMS_API_URL: z.preprocess(emptyToUndef, z.string().optional()),
   SMS_API_KEY: z.preprocess(emptyToUndef, z.string().optional()),
+  /** CallPro special number (from), ж: 72xxxxxx. Зөвхөн лизинг админ. */
+  SMS_FROM: z.preprocess(emptyToUndef, z.string().optional()),
   SMS_SENDER: z.string().default('itgel'),
+
+  /**
+   * Дэлгүүрийн OTP + шоп админы SMS (бараа ирсэн).
+   * Лизингийн SMS_API_KEY / SMS_FROM-г бүү дахин ашигла — тусдаа CallPro API.
+   */
+  SHOP_SMS_PROVIDER: z.preprocess(
+    emptyToUndef,
+    z.enum(['console', 'http', 'callpro']).optional(),
+  ),
+  SHOP_SMS_API_URL: z.preprocess(emptyToUndef, z.string().optional()),
+  SHOP_SMS_API_KEY: z.preprocess(emptyToUndef, z.string().optional()),
+  SHOP_SMS_FROM: z.preprocess(emptyToUndef, z.string().optional()),
 
   /** Gmail SMTP — нууц үг сэргээх / и-мэйл солих. */
   SMTP_HOST: z.preprocess(emptyToUndef, z.string().optional()),

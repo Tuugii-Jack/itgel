@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
@@ -32,9 +33,7 @@ export default function CategoriesPage() {
     }
   }, [toast]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const create = async () => {
     setBusyKey("create");

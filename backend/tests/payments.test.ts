@@ -107,6 +107,18 @@ describe('Төлбөрийн байдал', () => {
     expect(paymentState(t)).toBe('REFUNDED');
   });
 
+  it('өрийн хаалт төлөгдсөн гэж хуурамчаар тэмдэглэхгүй', () => {
+    const t = totals({
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 10_000,
+      writtenOffAmount: 100_000,
+    });
+    expect(t.dueAmount).toBe(0);
+    expect(t.netPaid).toBe(10_000);
+    expect(paymentState(t)).toBe('WRITTEN_OFF');
+  });
+
   it('баталгаажих болзол — бараа бүрэн төлөгдсөн байх', () => {
     expect(fullyPaid(totals({ subtotal: 100_000, paidAmount: 50_000 }))).toBe(false);
     expect(fullyPaid(totals({ subtotal: 100_000, paidAmount: 100_000 }))).toBe(true);
@@ -245,6 +257,33 @@ describe('Дэлгүүрийн кассын үлдэгдэл', () => {
         cargoFee: 8_000,
       }),
     ).toBe(0);
+  });
+
+  it('лизингийн бэлэн борлуулалтыг дэлгүүрийн кассанд нийлүүлэхгүй', () => {
+    expect(
+      shopDueAmount({
+        isLeasing: false,
+        payeeKind: 'LEASING',
+        subtotal: 80_000,
+        paidAmount: 0,
+        refundedAmount: 0,
+      }),
+    ).toBe(0);
+  });
+
+  it('хуваарьт лизингийн каргыг дэлгүүр авна', () => {
+    expect(
+      shopDueAmount({
+        isLeasing: true,
+        payeeKind: 'LEASING',
+        subtotal: 100_000,
+        leasingFee: 10_000,
+        paidAmount: 10_000,
+        refundedAmount: 0,
+        cargoFee: 8_000,
+        storageFee: 3_000,
+      }),
+    ).toBe(11_000);
   });
 });
 

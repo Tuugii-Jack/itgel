@@ -58,6 +58,12 @@ enum AdminRole {
   LEASING
 }
 
+/// Бараа/төлбөрийн эзэн — дэлгүүр эсвэл лизингийн админ.
+enum InventoryOwner {
+  SHOP
+  LEASING
+}
+
 enum PaymentKind {
   PAYMENT
   REFUND
@@ -69,6 +75,8 @@ enum PaymentMethod {
   CARD
   QPAY
   OTHER
+  /// Хуучин лизингийн админы бүртгэл. Шинэ төлбөрт ашиглахгүй.
+  LEASING
 }
 
 model Category {
@@ -102,14 +110,20 @@ model Product {
   updatedAt   DateTime @updatedAt
   deletedAt   DateTime?
 
+  /// Хэн эзэмших вэ. Лизингийн админ зөвхөн өөрийн загварыг засна.
+  ownerKind    InventoryOwner @default(SHOP)
+  ownerAdminId String?
+
   category   Category         @relation(fields: [categoryId], references: [id])
   variants   ProductVariant[]
   sizeChart  SizeChartRow[]
   rounds     ProductRound[]
   orderItems OrderItem[]
+  readyTransferLines ReadyStockTransferLine[]
 
   @@index([categoryId])
   @@index([deletedAt])
+  @@index([ownerKind, ownerAdminId])
 }
 
 /**
@@ -145,6 +159,10 @@ model ProductRound {
   /// Админд зориулсан дотоод тэмдэглэл (жишээ нь нийлүүлэгчийн нэр).
   note String?
 
+  /// Бэлэн барааны эзэн. Шинэ борлуулалтын QPay энэ эзэнд очно.
+  ownerKind    InventoryOwner @default(SHOP)
+  ownerAdminId String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -155,6 +173,7 @@ model ProductRound {
   optionPrices RoundOptionPrice[]
   skuStocks    RoundSkuStock[]
   cargoFees    RoundCargoFee[]
+  readyTransferLines ReadyStockTransferLine[]
 
   @@unique([productId, roundNo])
   @@index([status])
@@ -162,6 +181,7 @@ model ProductRound {
   @@index([productId, createdAt])
   @@index([batchId])
   @@index([deletedAt, status, closeAt])
+  @@index([ownerKind, ownerAdminId])
 }
 
 /// Гаргалт дээрх сонголтын үнэ — ж: Хэмжээ S = 10,000₮, M = 20,000₮.
@@ -242,12 +262,13 @@ model SizeChartRow {
 
 model Customer {
   id        String   @id @default(cuid())
-  /// Нэвтрэх и-мэйл — баталгаажсаны дараа л нэвтэрнэ.
-  email     String   @unique
+  /// Холбоо барих и-мэйл — тохиргоонд хадгална. Нэвтрэлт утасны OTP.
+  email     String?  @unique
   passwordHash String?
   emailVerifiedAt DateTime?
-  /// Холбоо барих утас — нэвтрэлтэд ашиглахгүй.
+  /// Нэвтрэх утас — зөвхөн phoneVerifiedAt тавигдсан бол нэвтрэх эрх.
   phone     String?  @unique
+  phoneVerifiedAt DateTime?
   name      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -271,6 +292,47 @@ model Customer {
   orders        Order[]
   refundPayouts RefundPayout[]
   emailOtps     EmailOtp[]
+  phoneOtps     PhoneOtp[]
+  checkoutKeys  CheckoutIdempotency[]
+}
+
+model PhoneOtp {
+  id        String    @id @default(cuid())
+  phone     String
+  code      String
+  /// LOGIN | CHANGE_PHONE
+  purpose   String    @default("LOGIN")
+  /// Хуучин клиент нэр илгээсэн бол verify дээр Customer-д бичнэ.
+  name      String?
+  customerId    String?
+  previousPhone String?
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([phone, createdAt])
+  @@index([phone, purpose, createdAt])
+  @@index([customerId, purpose, createdAt])
+}
+
+/// Нэг checkout үйлдлийн давхар захиалгыг (customerId, key) unique-аар хориглоно.
+model CheckoutIdempotency {
+  id             String   @id @default(cuid())
+  customerId     String
+  idempotencyKey String
+  payloadHash    String
+  /// Үүсгэсэн захиалгын нийтийн хариу. Ижил key+payload дахин ирвэл энэ JSON буцна.
+  response       Json?
+  orderIds       String[] @default([])
+  createdAt      DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, idempotencyKey])
+  @@index([createdAt])
 }
 
 model EmailOtp {
@@ -361,12 +423,21 @@ model Order {
   /// Нийт үнийн 10% — лизингийн шимтгэл. Лизинг биш бол 0.
   leasingFee Int     @default(0)
 
+  /// Төлбөр хүлээн авагч. Лизингийн бэлэн борлуулалт isLeasing=false ч LEASING байна.
+  payeeKind InventoryOwner @default(SHOP)
+
+  /// Өрийг төлөгдсөн гэж биш, тусдаа хаалтаар хаасан дүн. Payment мөр биш.
+  writtenOffAmount Int       @default(0)
+  debtClosedAt     DateTime?
+  debtCloseReason  String?
+
   customer Customer    @relation(fields: [customerId], references: [id])
   batch    Batch?      @relation(fields: [batchId], references: [id])
   items    OrderItem[]
   delivery Delivery?
   payments Payment[]
   qpayInvoices QpayInvoice[]
+  readyTransfers ReadyStockTransfer[]
 
   @@index([status])
   @@index([customerId])
@@ -376,6 +447,8 @@ model Order {
   @@index([dueAmount])
   @@index([deletedAt, status, createdAt])
   @@index([isLeasing, createdAt])
+  @@index([payeeKind, createdAt])
+  @@index([debtClosedAt])
 }
 
 /// Keep every invoice associated with its order, including replaced/cancelled invoices.
@@ -452,9 +525,15 @@ model OrderItem {
   /// Ирсэн мөр бүрийн авах арга — захиалгад хольж болно.
   fulfilment   Fulfilment?
 
+  /// Лизингийн бэлэн бараанд шилжүүлсэн. Цуцлалттой хамт, үлдэгдэл буцаахгүй.
+  transferredAt   DateTime?
+  transferredQty  Int       @default(0)
+  readyTransferId String?
+
   order   Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   round   ProductRound @relation(fields: [roundId], references: [id])
   product Product      @relation(fields: [productId], references: [id])
+  readyTransfer ReadyStockTransfer? @relation(fields: [readyTransferId], references: [id])
 
   @@index([orderId])
   @@index([productId])
@@ -462,6 +541,52 @@ model OrderItem {
   @@index([roundId, cancelledAt])
   @@index([arrivedAt])
   @@index([handedOverAt])
+  @@index([readyTransferId])
+  @@index([transferredAt])
+}
+
+/// Лизингийн захиалгаас бэлэн бараанд шилжүүлсэн бүртгэл. Орлого биш.
+model ReadyStockTransfer {
+  id               String   @id @default(cuid())
+  sourceOrderId    String
+  ownerAdminId     String
+  reason           String
+  /// Шилжүүлэх үеийн цэвэр орлого — дахин орлого болгон бүртгэхгүй.
+  paidKeptAmount   Int
+  /// Энэ үйлдлээр хаасан өр. Payment мөр биш.
+  dueClosedAmount  Int
+  wroteOffDebt     Boolean  @default(false)
+  remainingActiveQty Int    @default(0)
+  actor            String
+  createdAt        DateTime @default(now())
+
+  sourceOrder Order                    @relation(fields: [sourceOrderId], references: [id])
+  lines       ReadyStockTransferLine[]
+  items       OrderItem[]
+
+  @@index([sourceOrderId])
+  @@index([ownerAdminId, createdAt])
+}
+
+model ReadyStockTransferLine {
+  id              String @id @default(cuid())
+  transferId      String
+  orderItemId     String
+  sourceRoundId   String
+  destProductId   String
+  destRoundId     String
+  qty             Int
+  resaleUnitPrice Int
+  nameSnapshot    String
+  selections      Json   @default("{}")
+
+  transfer    ReadyStockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  destProduct Product            @relation(fields: [destProductId], references: [id])
+  destRound   ProductRound       @relation(fields: [destRoundId], references: [id])
+
+  @@index([transferId])
+  @@index([destRoundId])
+  @@index([orderItemId])
 }
 
 model Batch {
@@ -556,6 +681,16 @@ model Setting {
   leasingTermsBody    String @default("")
   /// Үндсэн төлбөрийн хоногийн зай. Ж: [5,8,8] = 3 төлөлт, нийт 21 хоног.
   leasingPayGaps      Json   @default("[5,8,8]")
+  /// Сануулгын SMS загвар. Хоосон бол үндсэн текст. {ner} {dun} {ognoo} {honog}
+  leasingSmsDueToday      String @default("")
+  leasingSmsOverdue       String @default("")
+  leasingSmsArrivedUnpaid String @default("")
+
+  /// Лизингийн бэлэн борлуулалт / шилжүүлгийн данс. Дэлгүүрийн данс руу буцахгүй.
+  leasingBankName          String @default("")
+  leasingBankAccountNumber String @default("")
+  leasingBankAccountName   String @default("")
+  leasingPaymentNote       String @default("")
 
   updatedAt DateTime @updatedAt
 }

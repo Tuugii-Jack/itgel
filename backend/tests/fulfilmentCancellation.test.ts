@@ -19,7 +19,12 @@ vi.mock('../src/prisma.js', () => ({ prisma: { $transaction: db.transaction } })
 vi.mock('../src/lib/audit.js', () => ({ audit: vi.fn() }));
 vi.mock('../src/services/cargoFee.js', () => ({ syncOrderCargoFee: vi.fn() }));
 vi.mock('../src/services/mail.js', () => ({ sendMail: vi.fn(), mailTemplates: {} }));
-vi.mock('../src/services/sms.js', () => ({ sms: vi.fn(), smsTemplates: {} }));
+vi.mock('../src/services/sms.js', () => ({
+  sms: vi.fn(),
+  shopSms: { send: vi.fn() },
+  leasingSms: { send: vi.fn() },
+  smsTemplates: {},
+}));
 
 import { cancelOrderItem } from '../src/services/payments.js';
 import { changeOrderStatus, handOverItems } from '../src/services/orders.js';

@@ -99,6 +99,37 @@ export function fillLeasingCopy(
     .replaceAll("{fee}", vars.feeText);
 }
 
+export const SMS_TEMPLATE_MAX = 400;
+
+export const DEFAULT_LEASING_SMS_TEMPLATES = {
+  dueToday:
+    "ИтгэлШоп: Сайн байна уу, {ner}. Таны лизингийн эргэн төлөлтийн {dun}₮ төлбөрийг өнөөдөр ({ognoo}) төлөх хуваарьтай байна. Төлбөрөө хугацаанд нь төлнө үү. Баярлалаа.",
+  overdue:
+    "ИтгэлШоп: Сайн байна уу, {ner}. Таны лизингийн {dun}₮ төлбөр {honog} хоногийн хугацаа хэтэрсэн байна. Та аль болох хурдан төлбөл зохино. Баярлалаа.",
+  arrivedUnpaid:
+    "ИтгэлШоп: Сайн байна уу, {ner}. Таны захиалсан бараа амжилттай ирлээ. Үлдэгдэл төлбөр {dun}₮-өө төлсний дараа бараагаа хүлээн авах боломжтой. Баярлалаа.",
+} as const;
+
+export type LeasingSmsKind = "due_today" | "overdue" | "arrived_unpaid";
+
+export function defaultLeasingSmsTemplate(kind: LeasingSmsKind): string {
+  if (kind === "due_today") return DEFAULT_LEASING_SMS_TEMPLATES.dueToday;
+  if (kind === "overdue") return DEFAULT_LEASING_SMS_TEMPLATES.overdue;
+  return DEFAULT_LEASING_SMS_TEMPLATES.arrivedUnpaid;
+}
+
+export function fillLeasingSmsTemplate(
+  template: string,
+  vars: { ner: string; dun: number | string; ognoo?: string; honog?: number | string },
+): string {
+  const dun = typeof vars.dun === "number" ? vars.dun.toLocaleString("mn-MN") : vars.dun;
+  return template
+    .replaceAll("{ner}", vars.ner)
+    .replaceAll("{dun}", dun)
+    .replaceAll("{ognoo}", vars.ognoo ?? "")
+    .replaceAll("{honog}", vars.honog == null ? "" : String(vars.honog));
+}
+
 type LeasingPayOrder = {
   isLeasing?: boolean;
   leasingFee?: number;

@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { deferEffect } from "@/lib/deferEffect";
+import { useOnKeyChange } from "@/lib/syncKey";
 import { Metric, PageHead, Select, Table, Td, Th } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { useAdminSession } from "@/lib/admin-session";
 import { isFullAdmin } from "@/lib/admin-role";
 import { adminApi, ApiError } from "@/lib/api";
-import { dayKey, money, phoneLabel } from "@/lib/format";
+import { dayKey, money, phoneLabel, MONTH_LABELS } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import {
   DEFAULT_RETURNS_PRINT,
@@ -15,10 +17,6 @@ import {
 } from "@/lib/printReturns";
 import type { ReturnPayout, ReturnProduct, ReturnsCalendar, ReturnsList } from "@/lib/types";
 
-const MONTHS = [
-  "1-р сар", "2-р сар", "3-р сар", "4-р сар", "5-р сар", "6-р сар",
-  "7-р сар", "8-р сар", "9-р сар", "10-р сар", "11-р сар", "12-р сар",
-];
 
 const WEEKDAYS = ["Да", "Мя", "Лх", "Пү", "Ба", "Бя", "Ня"];
 
@@ -95,20 +93,23 @@ export default function AdminReturnsPage() {
 
   useEffect(() => {
     let alive = true;
-    setLoadingCal(true);
-    setError(null);
-    adminApi
-      .returnsCalendar(year, month)
-      .then((c) => {
-        if (!alive) return;
-        setCalendar(c);
-        setSelected([]);
-        setData(null);
-      })
-      .catch((e) => alive && setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."))
-      .finally(() => alive && setLoadingCal(false));
+    const stop = deferEffect(() => {
+      setLoadingCal(true);
+      setError(null);
+      adminApi
+        .returnsCalendar(year, month)
+        .then((c) => {
+          if (!alive) return;
+          setCalendar(c);
+          setSelected([]);
+          setData(null);
+        })
+        .catch((e) => alive && setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."))
+        .finally(() => alive && setLoadingCal(false));
+    });
     return () => {
       alive = false;
+      stop();
     };
   }, [year, month]);
 
@@ -129,11 +130,12 @@ export default function AdminReturnsPage() {
     }
   }, []);
 
-  useEffect(() => {
+  useOnKeyChange(selected.join(","), () => {
     setChecked(new Set());
     setAsk(false);
-    void loadList(selected);
-  }, [selected, loadList]);
+  });
+
+  useEffect(() => deferEffect(() => { void loadList(selected); }), [selected, loadList]);
 
   const toggleDay = (date: string) => {
     if (!byDate.has(date)) return;
@@ -213,7 +215,7 @@ export default function AdminReturnsPage() {
         <Select
           value={String(month)}
           onChange={(v) => setMonth(Number(v))}
-          options={MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))}
+          options={MONTH_LABELS.map((m, i) => ({ value: String(i + 1), label: m }))}
         />
         <Button size="sm" variant="outline" onClick={() => shiftMonth(1)}>
           Дараах

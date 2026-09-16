@@ -1,16 +1,17 @@
-import { Prisma, type Order } from '@prisma/client';
+import { type Order } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
-import { generateOrderCode } from '../lib/code.js';
+import { createOrderWithUniqueCode } from '../modules/orders/createWithCode.js';
+import { snapshotOrderLines } from '../modules/orders/lineSnapshots.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { subtotalOf } from '../lib/money.js';
-import { resolveOptionPrice } from '../lib/optionPrices.js';
 import { comboLabel, findSku } from '../lib/skuStock.js';
-import { normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../lib/options.js';
+import { normalizeSelections, optionsFromVariants } from '../lib/options.js';
 import { consumeReadyStock } from './readyStock.js';
 import { changeOrderStatus } from './orders.js';
 import { recordPayment } from './payments.js';
 import { leasingFeeFromSettings } from './settings.js';
+import { isLeasingOwned } from '../lib/inventoryOwner.js';
 
 export interface CreateOrderItemInput {
   /** Тойргийн id (дэлгүүрийн productId). */
@@ -57,7 +58,9 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     if (!round) throw badRequest(`Бараа олдсонгүй: ${item.productId}`);
     const name = round.product.name;
 
-    if (round.product.deletedAt !== null) throw conflict(`"${name}" олдсонгүй.`);
+    if (isLeasingOwned(round.ownerKind)) {
+      throw conflict(`"${name}" нь лизингийн эзэмшлийн бараа. Дэлгүүрийн захиалгаар оруулах боломжгүй.`);
+    }
     if (round.status !== 'ACTIVE' && !(input.allowClosed && round.status === 'CLOSED')) {
       throw conflict(`"${name}" одоогоор захиалах боломжгүй байна.`);
     }
@@ -97,31 +100,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
     }
   }
 
-  const items = input.items.map((item) => {
-    const round = byId.get(item.productId)!;
-    const options = optionsFromVariants(round.product.variants);
-    const raw = normalizeSelections({
-      selections: item.selections,
-      size: item.size,
-      color: item.color,
-    });
-    const selections = Object.fromEntries(options.map((opt) => [opt.name, raw[opt.name]!]));
-    const { size, color } = sizeColorFromSelections(selections);
-    const priced = resolveOptionPrice(round, round.optionPrices, selections);
-    return {
-      roundId: round.id,
-      productId: round.productId,
-      nameSnapshot: round.product.name,
-      selections,
-      size,
-      color,
-      qty: item.qty,
-      unitPrice: priced.sellPrice,
-      costPriceSnapshot: priced.costPrice,
-      arriveFrom: null,
-      arriveTo: null,
-    };
-  });
+  const items = snapshotOrderLines(input.items, byId);
 
   const subtotal = subtotalOf(items);
   const isLeasing = Boolean(input.leasing);
@@ -141,11 +120,12 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       await consumeReadyStock(tx, round, mapped.qty, mapped.selections);
     }
 
-    const created = await createWithUniqueCode(tx, {
+    const created = await createOrderWithUniqueCode(tx, {
       customerId: input.customerId,
       subtotal,
       isLeasing,
       leasingFee,
+      payeeKind: isLeasing ? 'LEASING' : 'SHOP',
       note: input.note ?? null,
       items,
     });
@@ -189,54 +169,4 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   }
 
   return prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-}
-
-type TxClient = Prisma.TransactionClient;
-
-async function createWithUniqueCode(
-  tx: TxClient,
-  data: {
-    customerId: string;
-    subtotal: number;
-    isLeasing?: boolean;
-    leasingFee?: number;
-    note: string | null;
-    items: {
-      roundId: string;
-      productId: string;
-      nameSnapshot: string;
-      selections: Record<string, string>;
-      size: string | null;
-      color: string | null;
-      qty: number;
-      unitPrice: number;
-      costPriceSnapshot: number;
-      arriveFrom: Date | null;
-      arriveTo: Date | null;
-    }[];
-  },
-) {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try {
-      return await tx.order.create({
-        data: {
-          code: generateOrderCode(),
-          customerId: data.customerId,
-          subtotal: data.subtotal,
-          isLeasing: data.isLeasing ?? false,
-          leasingFee: data.leasingFee ?? 0,
-          paidAmount: 0,
-          refundedAmount: 0,
-          dueAmount: data.subtotal + (data.leasingFee ?? 0),
-          note: data.note,
-          items: { create: data.items },
-        },
-      });
-    } catch (error) {
-      const isDuplicate =
-        error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-      if (!isDuplicate) throw error;
-    }
-  }
-  throw conflict('Захиалгын код үүсгэж чадсангүй. Дахин оролдоно уу.');
 }

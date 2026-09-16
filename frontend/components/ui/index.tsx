@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEventHandler, ReactNode } from "react";
+import type { KeyboardEventHandler, ReactNode, Ref } from "react";
 
 /*
  * Дизайн системийн үндсэн элементүүд.
@@ -197,6 +197,18 @@ export function Input({
   className = "",
   autoFocus,
   onKeyDown,
+  id,
+  name,
+  autoComplete,
+  enterKeyHint,
+  autoCapitalize,
+  spellCheck,
+  pattern,
+  required,
+  inputRef,
+  "aria-invalid": ariaInvalid,
+  "aria-describedby": ariaDescribedBy,
+  "aria-label": ariaLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -208,9 +220,24 @@ export function Input({
   className?: string;
   autoFocus?: boolean;
   onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
+  id?: string;
+  name?: string;
+  autoComplete?: string;
+  enterKeyHint?: "enter" | "done" | "go" | "next" | "previous" | "search" | "send";
+  autoCapitalize?: string;
+  spellCheck?: boolean;
+  pattern?: string;
+  required?: boolean;
+  inputRef?: Ref<HTMLInputElement>;
+  "aria-invalid"?: boolean;
+  "aria-describedby"?: string;
+  "aria-label"?: string;
 }) {
   return (
     <input
+      ref={inputRef}
+      id={id}
+      name={name}
       type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -219,7 +246,16 @@ export function Input({
       maxLength={maxLength}
       disabled={disabled}
       autoFocus={autoFocus}
+      autoComplete={autoComplete}
+      enterKeyHint={enterKeyHint}
+      autoCapitalize={autoCapitalize}
+      spellCheck={spellCheck}
+      pattern={pattern}
+      required={required}
       onKeyDown={onKeyDown}
+      aria-invalid={ariaInvalid || undefined}
+      aria-describedby={ariaDescribedBy}
+      aria-label={ariaLabel}
       className={`h-11 w-full rounded-[8px] border border-line bg-bg px-3 text-[15px]
         placeholder:text-muted disabled:bg-surface ${className}`}
     />
@@ -357,9 +393,19 @@ export function Empty({ children }: { children: ReactNode }) {
   );
 }
 
-export function ErrorNote({ children }: { children: ReactNode }) {
+export function ErrorNote({
+  children,
+  id,
+}: {
+  children: ReactNode;
+  id?: string;
+}) {
   return (
-    <div className='rounded-[8px] border border-line bg-danger-bg px-3 py-2.5 text-[13px] text-danger'>
+    <div
+      id={id}
+      role='alert'
+      className='rounded-[8px] border border-line bg-danger-bg px-3 py-2.5 text-[13px] text-danger'
+    >
       {children}
     </div>
   );

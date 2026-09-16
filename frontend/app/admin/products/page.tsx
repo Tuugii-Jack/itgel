@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { Metric, PageHead, Select, Table, Td, Th } from "@/components/admin/shared";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
@@ -75,9 +76,7 @@ export default function ProductsPage() {
     }
   }, [fetchProducts]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const loadMore = async () => {
     setMoreLoading(true);

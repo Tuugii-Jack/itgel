@@ -13,84 +13,19 @@ import { selectionsOf, variantRowsFromOptions, type ProductOption } from '../../
 import { roundStats } from '../../services/roundStats.js';
 import { adminProduct } from '../../services/serialize.js';
 import { presignProductImage, uploadProductImage } from '../../services/storage.js';
+import {
+  optionPriceRow,
+  productStatus,
+  roundFields,
+  skuStockRow,
+  templateFields,
+} from '../../modules/catalog/productFields.js';
 
 export const adminProductsRouter = Router();
 
+export { optionPriceRow, productStatus, roundFields, skuStockRow };
+
 const idParams = z.object({ id: z.string().min(1) });
-
-export const productStatus = z.enum([
-  'ACTIVE',
-  'HIDDEN',
-  'DRAFT',
-  'CLOSED',
-  'SOLD_OUT',
-  'ARCHIVED',
-]);
-
-const sizeChartSchema = z.array(
-  z.object({
-    size: z.string().trim().min(1).max(20),
-    heightRange: z.string().trim().max(40).default(''),
-    chestCm: z.string().trim().max(40).default(''),
-  }),
-);
-
-/** Загварын талбарууд — тойрог болгонд давтагдахгүй хэсэг. */
-const templateFields = {
-  name: z.string().trim().min(1).max(160),
-  description: z.string().trim().max(4000).optional(),
-  categoryId: z.string().min(1),
-  images: z.array(z.string().url()).max(12).default([]),
-  options: z
-    .array(
-      z.object({
-        name: z.string().trim().min(1).max(40),
-        values: z.array(z.string().trim().min(1).max(40)).max(40),
-      }),
-    )
-    .max(12)
-    .default([]),
-  /** Хуучин клиент — options руу хөрвүүлнэ. */
-  sizes: z.array(z.string().trim().min(1).max(40)).max(40).optional(),
-  colors: z.array(z.string().trim().min(1).max(40)).max(40).optional(),
-  sizeChart: sizeChartSchema.max(30).default([]),
-};
-
-/** Тойргийн талбарууд — гаргалт бүрд өөр байж болно. */
-export const optionPriceRow = z
-  .object({
-    kind: z.string().trim().max(40).optional().default(''),
-    value: z.string().trim().max(40).optional().default(''),
-    selections: z
-      .record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(40))
-      .optional(),
-    sellPrice: z.coerce.number().int().min(0).max(100_000_000),
-    costPrice: z.coerce.number().int().min(0).max(100_000_000).default(0),
-  })
-  .refine(
-    (row) =>
-      (row.selections && Object.keys(row.selections).length > 0) ||
-      (row.kind.trim().length > 0 && row.value.trim().length > 0),
-    { message: 'Сонголтын үнэ — selections эсвэл kind+value.' },
-  );
-
-export const skuStockRow = z.object({
-  selections: z.record(z.string().trim().min(1).max(40), z.string().trim().min(1).max(40)),
-  stock: z.number().int().min(0).max(1_000_000),
-});
-
-export const roundFields = {
-  costPrice: z.coerce.number().int().min(0),
-  sellPrice: z.coerce.number().int().min(0),
-  stock: z.coerce.number().int().min(0).default(0),
-  closeAt: z.coerce.date().nullable().optional(),
-  leadMinDays: z.coerce.number().int().min(0).max(365).optional(),
-  leadMaxDays: z.coerce.number().int().min(0).max(365).optional(),
-  status: productStatus.default('DRAFT'),
-  note: z.string().trim().max(300).optional(),
-  optionPrices: z.array(optionPriceRow).max(400).optional(),
-  skuStocks: z.array(skuStockRow).max(400).optional(),
-};
 
 /** Бараа үүсгэх — зөвхөн загвар. Үнэ, огноо нь тусад нь «гаргалт»-аар нэмэгдэнэ. */
 const createBody = z.object(templateFields);
@@ -141,6 +76,7 @@ adminProductsRouter.get(
 
     const where: Prisma.ProductWhereInput = {
       ...(q.includeDeleted ? {} : { deletedAt: null }),
+      ownerKind: 'SHOP',
       ...(q.category ? { categoryId: q.category } : {}),
       ...(q.q ? { name: { contains: q.q, mode: 'insensitive' } } : {}),
       ...(filteringRounds ? { rounds: { some: roundFilter } } : {}),
@@ -174,7 +110,7 @@ adminProductsRouter.get(
       where: { id: req.params.id },
       include: roundInclude,
     });
-    if (!product) throw notFound('Бараа олдсонгүй.');
+    if (!product || product.ownerKind !== 'SHOP') throw notFound('Бараа олдсонгүй.');
     const stats = await roundStats(product.rounds.map((r) => r.id));
     res.json({ data: adminProduct(product, new Date(), stats) });
   }),
@@ -199,6 +135,7 @@ adminProductsRouter.post(
         description: body.description ?? null,
         categoryId: body.categoryId,
         images: body.images,
+        ownerKind: 'SHOP',
         variants: { create: variantRowsFromOptions(options) },
         sizeChart: { create: body.sizeChart.map((row, i) => ({ ...row, sortOrder: i })) },
       },
@@ -225,7 +162,7 @@ adminProductsRouter.patch(
     const body = req.body as z.infer<typeof updateBody>;
 
     const before = await prisma.product.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: req.params.id, deletedAt: null, ownerKind: 'SHOP' },
       include: roundInclude,
     });
     if (!before) throw notFound('Бараа олдсонгүй.');
@@ -326,7 +263,7 @@ adminProductsRouter.post(
     };
 
     const product = await prisma.product.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: req.params.id, deletedAt: null, ownerKind: 'SHOP' },
       include: {
         rounds: {
           where: { deletedAt: null },
@@ -379,6 +316,8 @@ adminProductsRouter.post(
           closeAt: body.closeAt === undefined ? null : body.closeAt,
           status: body.status ?? 'DRAFT',
           note: body.note ?? null,
+          ownerKind: product.ownerKind,
+          ownerAdminId: product.ownerAdminId,
         },
       });
       const prices = body.optionPrices ?? last?.optionPrices;
@@ -415,7 +354,7 @@ adminProductsRouter.delete(
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
     const product = await prisma.product.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: req.params.id, deletedAt: null, ownerKind: 'SHOP' },
     });
     if (!product) throw notFound('Бараа олдсонгүй.');
 
@@ -466,7 +405,7 @@ adminProductsRouter.post(
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
     const product = await prisma.product.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: req.params.id, deletedAt: null, ownerKind: 'SHOP' },
     });
     if (!product) throw notFound('Бараа олдсонгүй.');
     if (product.images.length >= 12) throw conflict('Нэг бараанд дээд тал нь 12 зураг.');
@@ -492,7 +431,7 @@ adminProductsRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const product = await prisma.product.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: req.params.id, deletedAt: null, ownerKind: 'SHOP' },
     });
     if (!product) throw notFound('Бараа олдсонгүй.');
     if (product.images.length >= 12) throw conflict('Нэг бараанд дээд тал нь 12 зураг.');
@@ -511,7 +450,7 @@ adminProductsRouter.patch(
   }),
   asyncHandler(async (req, res) => {
     const product = await prisma.product.findFirst({
-      where: { id: req.params.id, deletedAt: null },
+      where: { id: req.params.id, deletedAt: null, ownerKind: 'SHOP' },
     });
     if (!product) throw notFound('Бараа олдсонгүй.');
 

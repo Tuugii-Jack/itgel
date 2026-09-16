@@ -1,11 +1,19 @@
+import { Prisma, type Order } from '@prisma/client';
 import { Router } from 'express';
-import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { scheduleCloseExpired } from '../../cron/index.js';
 import { audit } from '../../lib/audit.js';
-import { generateOrderCode } from '../../lib/code.js';
+import { createOrderWithUniqueCode } from '../../modules/orders/createWithCode.js';
+import { snapshotOrderLines } from '../../modules/orders/lineSnapshots.js';
 import { startOfUbDay } from '../../lib/date.js';
+import {
+  hashCheckoutPayload,
+  idempotencyInFlight,
+  idempotencyKeyReused,
+  isUniqueConstraintError,
+  readCheckoutIdempotencyKey,
+} from '../../lib/checkoutIdempotency.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
@@ -19,13 +27,12 @@ import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '
 import { syncOrderCargoFee, lineCargoFee } from '../../services/cargoFee.js';
 import { getSettings, getSettingsCached, districtNames, leasingFeeFromSettings, leasingTiersOf, leasingPayGapsOf } from '../../services/settings.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
-import { sms, smsTemplates } from '../../services/sms.js';
-import { resolveOptionPrice } from '../../lib/optionPrices.js';
 import { comboLabel, findSku } from '../../lib/skuStock.js';
 import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } from '../../lib/itemFulfilment.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
-import { itemSelections, normalizeSelections, optionsFromVariants, sizeColorFromSelections } from '../../lib/options.js';
+import { itemSelections, normalizeSelections, optionsFromVariants } from '../../lib/options.js';
 import { leasingFlagOf, leasingHoldsGoods, serializeLeasing } from '../../lib/leasing.js';
+import { checkoutFlagsForGroup, splitItemsByPayee } from '../../lib/inventoryOwner.js';
 import { cancelQpayInvoice, qpayAccountForOrder, rememberQpayInvoice } from '../../services/qpay.js';
 
 export const publicOrdersRouter = Router();
@@ -34,6 +41,13 @@ const createBody = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   note: z.string().trim().max(500).optional(),
   leasing: z.boolean().optional(),
+  idempotencyKey: z
+    .string()
+    .trim()
+    .min(8)
+    .max(128)
+    .regex(/^[A-Za-z0-9._:-]+$/)
+    .optional(),
   items: z
     .array(
       z.object({
@@ -58,6 +72,11 @@ publicOrdersRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof createBody>;
     const customerId = req.auth!.sub;
+    const idempotencyKey = readCheckoutIdempotencyKey(
+      req.headers['idempotency-key'],
+      body.idempotencyKey,
+    );
+    const payloadHash = hashCheckoutPayload(body);
     const now = new Date();
     scheduleCloseExpired();
 
@@ -117,39 +136,17 @@ publicOrdersRouter.post(
       }
     }
 
-    const items = body.items.map((item) => {
-      const round = byId.get(item.productId)!;
-      const options = optionsFromVariants(round.product.variants);
-      const raw = normalizeSelections({
-        selections: item.selections,
-        size: item.size,
-        color: item.color,
-      });
-      const selections = Object.fromEntries(
-        options.map((opt) => [opt.name, raw[opt.name]!]),
-      );
-      const { size, color } = sizeColorFromSelections(selections);
-      const priced = resolveOptionPrice(round, round.optionPrices, selections);
-      return {
-        roundId: round.id,
-        productId: round.productId,
-        nameSnapshot: round.product.name,
-        selections,
-        size,
-        color,
-        qty: item.qty,
-        unitPrice: priced.sellPrice,
-        costPriceSnapshot: priced.costPrice,
-        arriveFrom: null,
-        arriveTo: null,
-      };
-    });
+    const items = snapshotOrderLines(body.items, byId);
 
-    const subtotal = subtotalOf(items);
-    const isLeasing = Boolean(body.leasing);
-    const leasingFee = isLeasing ? await leasingFeeFromSettings(subtotal) : 0;
+    const { shop: shopItems, leasing: leasingOwnedItems } = splitItemsByPayee(items, byId);
 
-    const order = await prisma.$transaction(async (tx) => {
+    const shopSubtotal = subtotalOf(shopItems);
+    const leasingSubtotal = subtotalOf(leasingOwnedItems);
+    const shopFlags = checkoutFlagsForGroup('SHOP', shopItems.length > 0 && Boolean(body.leasing));
+    const leasingFlags = checkoutFlagsForGroup('LEASING', false);
+    const shopLeasingFee = shopFlags.isLeasing ? await leasingFeeFromSettings(shopSubtotal) : 0;
+
+    const persistOrders = async (tx: Prisma.TransactionClient) => {
       if (body.name && body.name !== customer.name) {
         await tx.customer.update({ where: { id: customerId }, data: { name: body.name } });
       }
@@ -160,103 +157,133 @@ publicOrdersRouter.post(
         await consumeReadyStock(tx, round, mapped.qty, mapped.selections);
       }
 
-      const created = await createWithUniqueCode(tx, {
-        customerId,
-        subtotal,
-        isLeasing,
-        leasingFee,
-        note: body.note ?? null,
-        items,
-      });
-
-      await audit(
-        {
-          actor: actorOf(req),
-          action: 'CREATE',
-          entity: 'Order',
-          entityId: created.id,
-          after: { code: created.code, subtotal, isLeasing, leasingFee },
-        },
-        tx,
-      );
-
+      const created: Order[] = [];
+      if (shopItems.length > 0) {
+        const order = await createOrderWithUniqueCode(tx, {
+          customerId,
+          subtotal: shopSubtotal,
+          isLeasing: shopFlags.isLeasing,
+          leasingFee: shopLeasingFee,
+          payeeKind: shopFlags.payeeKind,
+          note: body.note ?? null,
+          items: shopItems,
+        });
+        await audit(
+          {
+            actor: actorOf(req),
+            action: 'CREATE',
+            entity: 'Order',
+            entityId: order.id,
+            after: {
+              code: order.code,
+              subtotal: shopSubtotal,
+              isLeasing: shopFlags.isLeasing,
+              leasingFee: shopLeasingFee,
+              payeeKind: order.payeeKind,
+            },
+          },
+          tx,
+        );
+        created.push(order);
+      }
+      if (leasingOwnedItems.length > 0) {
+        const order = await createOrderWithUniqueCode(tx, {
+          customerId,
+          subtotal: leasingSubtotal,
+          isLeasing: leasingFlags.isLeasing,
+          leasingFee: 0,
+          payeeKind: leasingFlags.payeeKind,
+          note: body.note ?? null,
+          items: leasingOwnedItems,
+        });
+        await audit(
+          {
+            actor: actorOf(req),
+            action: 'CREATE',
+            entity: 'Order',
+            entityId: order.id,
+            after: {
+              code: order.code,
+              subtotal: leasingSubtotal,
+              isLeasing: false,
+              leasingFee: 0,
+              payeeKind: 'LEASING',
+            },
+          },
+          tx,
+        );
+        created.push(order);
+      }
       return created;
-    });
+    };
 
-    // Лизинг: шимтгэл төлөгдсөний дараа л захиалга үүссэнд тооцогдоно.
-    if (customer.phone && !isLeasing) {
-      void sms
-        .send({ phone: customer.phone, text: smsTemplates.orderCreated(order.code, subtotal) })
-        .then((r) => {
-          if (!r.ok) console.warn(`[sms] ${order.code} захиалгын мэдэгдэл илгээгдсэнгүй: ${r.error}`);
-        })
-        .catch((e) => console.warn(`[sms] ${order.code} захиалгын мэдэгдэл алдаа:`, e));
-    }
-
-    res.status(201).json({
-      data: {
+    const serializeCreated = (createdOrders: Awaited<ReturnType<typeof persistOrders>>) => {
+      const order = createdOrders[0]!;
+      const extras = createdOrders.slice(1);
+      return {
         code: order.code,
         status: order.status,
         statusLabel: customerFacingStatusLabel(order),
-        subtotal,
-        dueAmount: subtotal + leasingFee,
-        isLeasing,
-        leasingFee,
+        subtotal: order.subtotal,
+        dueAmount: order.dueAmount,
+        isLeasing: order.isLeasing,
+        leasingFee: order.leasingFee,
+        payeeKind: order.payeeKind,
         createdAt: order.createdAt.toISOString(),
-      },
+        splitOrders: extras.map((row) => ({
+          code: row.code,
+          status: row.status,
+          statusLabel: customerFacingStatusLabel(row),
+          subtotal: row.subtotal,
+          dueAmount: row.dueAmount,
+          isLeasing: row.isLeasing,
+          leasingFee: row.leasingFee,
+          payeeKind: row.payeeKind,
+          createdAt: row.createdAt.toISOString(),
+        })),
+      };
+    };
+
+    if (!idempotencyKey) {
+      const createdOrders = await prisma.$transaction(persistOrders);
+      res.status(201).json({ data: serializeCreated(createdOrders) });
+      return;
+    }
+
+    try {
+      const createdOrders = await prisma.$transaction(
+        async (tx) => {
+          await tx.checkoutIdempotency.create({
+            data: { customerId, idempotencyKey, payloadHash },
+          });
+          const createdOrders = await persistOrders(tx);
+          const data = serializeCreated(createdOrders);
+          await tx.checkoutIdempotency.update({
+            where: { customerId_idempotencyKey: { customerId, idempotencyKey } },
+            data: {
+              response: data as Prisma.InputJsonValue,
+              orderIds: createdOrders.map((row) => row.id),
+            },
+          });
+          return createdOrders;
+        },
+        { timeout: 20_000 },
+      );
+      res.status(201).json({ data: serializeCreated(createdOrders) });
+      return;
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+    }
+
+    const existing = await prisma.checkoutIdempotency.findUnique({
+      where: { customerId_idempotencyKey: { customerId, idempotencyKey } },
     });
+    if (!existing) throw conflict('Захиалга давхардсан байна. Дахин оролдоно уу.');
+    if (existing.payloadHash !== payloadHash) throw idempotencyKeyReused();
+    if (existing.response == null) throw idempotencyInFlight();
+    res.status(201).json({ data: existing.response });
   }),
 );
-
-type TxClient = Prisma.TransactionClient;
-
-interface NewOrderData {
-  customerId: string;
-  subtotal: number;
-  isLeasing: boolean;
-  leasingFee: number;
-  note: string | null;
-  items: {
-    roundId: string;
-    productId: string;
-    nameSnapshot: string;
-    size: string | null;
-    color: string | null;
-    qty: number;
-    unitPrice: number;
-    costPriceSnapshot: number;
-    arriveFrom: Date | null;
-    arriveTo: Date | null;
-  }[];
-}
-
-/** `PH-XXXXXX` код давхардвал дахин оролдоно. */
-async function createWithUniqueCode(tx: TxClient, data: NewOrderData) {
-  for (let attempt = 0; attempt < 6; attempt++) {
-    try {
-      return await tx.order.create({
-        data: {
-          code: generateOrderCode(),
-          customerId: data.customerId,
-          subtotal: data.subtotal,
-          isLeasing: data.isLeasing,
-          leasingFee: data.leasingFee,
-          // Мөнгө ороогүй: төлбөр нь дэвтэрт бүртгэгдэх үед л тоологдоно.
-          paidAmount: 0,
-          refundedAmount: 0,
-          dueAmount: data.subtotal + data.leasingFee,
-          note: data.note,
-          items: { create: data.items },
-        },
-      });
-    } catch (error) {
-      const isDuplicate =
-        error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-      if (!isDuplicate) throw error;
-    }
-  }
-  throw conflict('Захиалгын код үүсгэж чадсангүй. Дахин оролдоно уу.');
-}
 
 /** Карго/хадгалалтыг GET-ийн хариуны дараа ард нь бичнэ. */
 async function persistPublicOrderFees(
@@ -314,6 +341,7 @@ publicOrdersRouter.get(
       leasingFee: order.leasingFee,
       paidAmount,
       refundedAmount,
+      writtenOffAmount: order.writtenOffAmount,
     });
     const dueAmount = totals.dueAmount;
     const leasing = serializeLeasing(
@@ -357,6 +385,9 @@ publicOrdersRouter.get(
         refundedAmount,
         dueAmount,
         paymentState: paymentState(totals),
+        payeeKind: order.payeeKind,
+        writtenOffAmount: order.writtenOffAmount,
+        debtClosedAt: order.debtClosedAt?.toISOString() ?? null,
         ...leasing,
         paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         fulfilment: order.fulfilment,
@@ -399,6 +430,9 @@ publicOrdersRouter.post(
 
     if (order.status === 'CANCELLED') {
       throw conflict('Цуцлагдсан захиалга дээр төлбөр мэдэгдэх боломжгүй.');
+    }
+    if (order.debtClosedAt) {
+      throw conflict('Хаалттай өр дээр төлбөр мэдэгдэх боломжгүй.');
     }
     if (order.dueAmount <= 0) {
       throw conflict('Энэ захиалгын төлбөр аль хэдийн бүрэн орсон байна.');
@@ -451,6 +485,12 @@ publicOrdersRouter.patch(
     if (order.status === 'CANCELLED') {
       throw conflict('Цуцлагдсан захиалга дээр төлбөрийн хэлбэр солих боломжгүй.');
     }
+    if (order.payeeKind === 'LEASING' && !order.isLeasing) {
+      throw conflict('Лизингийн бэлэн барааны захиалгыг лизингээр төлөх боломжгүй.');
+    }
+    if (order.debtClosedAt) {
+      throw conflict('Хаалттай өр дээр төлбөрийн хэлбэр солих боломжгүй.');
+    }
     if (order.paidAmount - order.refundedAmount > 0) {
       throw conflict('Төлбөр орсон тул төлбөрийн хэлбэр солих боломжгүй.');
     }
@@ -474,10 +514,10 @@ publicOrdersRouter.patch(
     }
 
     if (order.qpayInvoiceId) {
-      await rememberQpayInvoice(order.id, order.qpayInvoiceId, qpayAccountForOrder(order.isLeasing));
+      await rememberQpayInvoice(order.id, order.qpayInvoiceId, qpayAccountForOrder(order));
       await cancelQpayInvoice(order.qpayInvoiceId, {
         silent: true,
-        kind: qpayAccountForOrder(order.isLeasing),
+        kind: qpayAccountForOrder(order),
       });
     }
 
@@ -487,6 +527,7 @@ publicOrdersRouter.patch(
         data: {
           isLeasing: flag.isLeasing,
           leasingFee: flag.leasingFee,
+          payeeKind: flag.isLeasing ? 'LEASING' : 'SHOP',
           qpayInvoiceId: null,
           qpayInvoiceAt: null,
         },

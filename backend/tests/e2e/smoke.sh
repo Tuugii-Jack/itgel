@@ -18,15 +18,13 @@ PID=$(curl -s "$API/products?type=order" | python3 -c "import sys,json;d=json.lo
 echo "=== 4. product detail $PID ==="
 curl -s "$API/products/$PID" | j "(d['data']['name'],d['data']['sizes'],d['data']['colors'],len(d['data']['sizeChart']))"
 
-echo "=== 5. auth otp + verify ==="
-CODE=$(curl -s -X POST $API/auth/otp -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['devCode'])")
-echo "devCode=$CODE"
+echo "=== 5. auth otp (код зөвхөн SMS, API-д буцахгүй) ==="
+OTP=$(curl -s -X POST $API/auth/otp -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\",\"name\":\"Тест Хэрэглэгч\"}")
+echo "$OTP" | j "(d['data']['phone'],d['data']['expiresInSec'],'devCode' in d['data'])"
 echo "-- 60 сек дотор дахин илгээхийг хориглох:"
-curl -s -X POST $API/auth/otp -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\"}" | j "d['error']['message']"
+curl -s -X POST $API/auth/otp -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\",\"name\":\"Тест Хэрэглэгч\"}" | j "(d.get('data') or {}).get('resendAfterSec') or d.get('error',{}).get('message')"
 echo "-- буруу код:"
-curl -s -X POST $API/auth/verify -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\",\"code\":\"0000\"}" | j "d['error']['message']"
-echo "-- зөв код:"
-curl -s -X POST $API/auth/verify -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\",\"code\":\"$CODE\",\"name\":\"Тест Хэрэглэгч\"}" | j "(d['data']['customer'],len(d['data']['token'])>50)"
+curl -s -X POST $API/auth/verify -H 'content-type: application/json' -d "{\"phone\":\"$PHONE\",\"code\":\"000000\"}" | j "d['error']['message']"
 
 echo "=== 6a. хаагдсан бараа захиалах → 409 ==="
 CLOSEDID=$(curl -s "$API/products?type=order" | python3 -c "import sys,json;d=json.load(sys.stdin)['data'];print([p for p in d if p['status']=='CLOSED'][0]['id'])")

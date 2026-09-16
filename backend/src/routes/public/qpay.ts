@@ -124,6 +124,8 @@ publicQpayRouter.post(
         storageFee: true,
         cargoFee: true,
         isLeasing: true,
+        payeeKind: true,
+        debtClosedAt: true,
         leasingFee: true,
         customerId: true,
         qpayInvoiceId: true,
@@ -134,11 +136,14 @@ publicQpayRouter.post(
     if (order.status === 'CANCELLED') {
       throw conflict('Цуцлагдсан захиалга дээр QPay үүсгэх боломжгүй.');
     }
+    if (order.debtClosedAt) {
+      throw conflict('Хаалттай өр дээр QPay үүсгэх боломжгүй.');
+    }
     if (order.dueAmount <= 0) {
       throw conflict('Энэ захиалгын төлбөр аль хэдийн бүрэн орсон байна.');
     }
 
-    const kind = qpayAccountForOrder(order.isLeasing);
+    const kind = qpayAccountForOrder(order);
     if (!isQpayReady(kind)) {
       throw conflict(
         kind === 'leasing'
@@ -267,19 +272,20 @@ publicQpayRouter.post(
         storageFee: true,
         cargoFee: true,
         isLeasing: true,
+        payeeKind: true,
         leasingFee: true,
       },
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
-    if (!order.qpayInvoiceId || !isQpayReady(qpayAccountForOrder(order.isLeasing))) {
+    if (!order.qpayInvoiceId || !isQpayReady(qpayAccountForOrder(order))) {
       res.json({
         data: { paid: order.dueAmount <= 0, paidAmount: order.paidAmount, invoiceId: order.qpayInvoiceId },
       });
       return;
     }
 
-    const kind = qpayAccountForOrder(order.isLeasing);
+    const kind = qpayAccountForOrder(order);
     const check = await checkQpayInvoice(order.qpayInvoiceId, kind);
     if (check.paid && check.paidAmount > 0) {
       await applyQpayPayment(

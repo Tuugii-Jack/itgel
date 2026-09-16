@@ -3,6 +3,7 @@ import { env } from './env.js';
 import { prisma } from './prisma.js';
 import { startCron, stopCron } from './cron/index.js';
 import { qpayPublicStatus, leasingQpayPublicStatus } from './services/qpay.js';
+import { leasingSms, shopSms } from './services/sms.js';
 import { activeStorageProvider } from './services/storage.js';
 import { ensureStorageBucket, supabaseConfigured } from './services/supabase.js';
 
@@ -19,6 +20,7 @@ if (!onVercel) {
     const leasingQpay = leasingQpayPublicStatus();
     console.info(`[qpay] enabled=${qpay.enabled} ready=${qpay.ready}`);
     console.info(`[leasing-qpay] enabled=${leasingQpay.enabled} ready=${leasingQpay.ready}`);
+    console.info(`[sms] leasing=${leasingSms.name} shop=${shopSms.name}`);
     if (supabaseConfigured) console.info(`[supabase] ${env.SUPABASE_URL}`);
     if (provider === 'supabase') void ensureStorageBucket();
   });

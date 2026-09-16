@@ -14,9 +14,9 @@ let invoices: Map<string, Record<string, any>>;
 let tail: Promise<void>;
 
 beforeEach(() => {
-  order = { id: 'o1', code: 'TEST', status: 'NEW', isLeasing: false, subtotal: 100000,
+  order = { id: 'o1', code: 'TEST', status: 'NEW', isLeasing: false, payeeKind: 'SHOP', subtotal: 100000,
     storageFee: 0, cargoFee: 0, leasingFee: 0, paidAmount: 0, refundedAmount: 0,
-    dueAmount: 100000, deletedAt: null, qpayInvoiceId: 'i1' };
+    writtenOffAmount: 0, debtClosedAt: null, dueAmount: 100000, deletedAt: null, qpayInvoiceId: 'i1' };
   payments = [];
   invoices = new Map();
   tail = Promise.resolve();
@@ -132,6 +132,21 @@ describe('QPay ledger reconciliation', () => {
     await rememberQpayInvoice('o1', 'i1', 'shop');
     await expect(rememberQpayInvoice('other', 'i1', 'shop')).rejects.toMatchObject({ status: 409 });
     expect(invoices.get('i1')!.orderId).toBe('o1');
+  });
+
+  it('records a late callback after write-off without reopening debt', async () => {
+    order.subtotal = 0;
+    order.writtenOffAmount = 100000;
+    order.debtClosedAt = new Date('2026-09-15T00:00:00Z');
+    order.dueAmount = 0;
+    client.orderItem.findMany = vi.fn(async () => []);
+    expect(await applyQpayPayment('o1', 'i1', 30000, 'late')).toBe(true);
+    expect(payments).toHaveLength(1);
+    expect(payments[0]!.amount).toBe(30000);
+    expect(order.paidAmount).toBe(30000);
+    expect(order.debtClosedAt).toBeInstanceOf(Date);
+    expect(order.writtenOffAmount).toBe(100000);
+    expect(order.dueAmount).toBe(-130000);
   });
 
   it('serializes different payment entries before recalculating the order', async () => {

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { deferEffect } from "@/lib/deferEffect";
 import { PageHead } from "@/components/admin/shared";
 import { Button, Card, ErrorNote, Field, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
@@ -52,29 +53,30 @@ export default function AdminCreateOrderPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  if (!canWrite && loading) setLoading(false);
+
   useEffect(() => {
-    if (!canWrite) {
-      setLoading(false);
-      return;
-    }
-    void (async () => {
-      try {
-        const list = await adminApi.products({ pageSize: 100 });
-        setProducts(list.data);
-      } catch (e) {
-        setError(e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.");
-      } finally {
-        setLoading(false);
-      }
-    })();
+    if (!canWrite) return;
+    return deferEffect(() => {
+      void (async () => {
+        try {
+          const list = await adminApi.products({ pageSize: 100 });
+          setProducts(list.data);
+        } catch (e) {
+          setError(e instanceof ApiError ? e.message : "Бараа ачаалж чадсангүй.");
+        } finally {
+          setLoading(false);
+        }
+      })();
+    });
   }, [canWrite]);
+
+  const q = customerQ.trim();
+  if (q.length < 2 && customers.length > 0) setCustomers([]);
 
   useEffect(() => {
     const q = customerQ.trim();
-    if (q.length < 2) {
-      setCustomers([]);
-      return;
-    }
+    if (q.length < 2) return;
     const timer = setTimeout(() => {
       void adminApi
         .customers({ q, pageSize: 8 })
@@ -86,7 +88,7 @@ export default function AdminCreateOrderPage() {
 
   const pickCustomer = (c: AdminCustomer) => {
     setCustomerId(c.id);
-    setEmail(c.email);
+    setEmail(c.email ?? "");
     setPhone(c.phone ?? "");
     setName(c.name ?? "");
     setCustomerQ("");

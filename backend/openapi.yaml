@@ -116,7 +116,6 @@ paths:
                       phone: { type: string }
                       expiresInSec: { type: integer }
                       resendAfterSec: { type: integer }
-                      devCode: { type: string, description: Зөвхөн dev орчинд }
         '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/auth/verify:
@@ -132,7 +131,7 @@ paths:
               required: [phone, code]
               properties:
                 phone: { type: string }
-                code: { type: string, pattern: '^\d{4}$' }
+                code: { type: string, pattern: '^\d{6}$' }
                 name: { type: string }
       responses:
         '200':
@@ -189,6 +188,61 @@ paths:
       responses:
         '200': { description: Шинэчлэгдсэн профайл }
 
+  /api/me/phone/change:
+    post:
+      tags: [public]
+      security: [{ bearerAuth: [] }]
+      summary: Шинэ нэвтрэх дугаар руу OTP илгээх. Хуучин дугаар хэвээр.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, example: '88112233' }
+      responses:
+        '200': { description: Код илгээгдлээ }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /api/me/phone/resend:
+    post:
+      tags: [public]
+      security: [{ bearerAuth: [] }]
+      summary: Утас солих кодыг дахин илгээх
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string }
+      responses:
+        '200': { description: Код }
+
+  /api/me/phone/verify:
+    post:
+      tags: [public]
+      security: [{ bearerAuth: [] }]
+      summary: Шинэ дугаарын OTP-ыг баталгаажуулж нэвтрэх утас солих
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone: { type: string }
+                code: { type: string, pattern: '^\d{6}$' }
+      responses:
+        '200':
+          description: Шинэ JWT
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /api/me/orders:
     get:
       tags: [public]
@@ -220,18 +274,28 @@ paths:
     post:
       tags: [public]
       summary: Захиалга үүсгэх
-      description: IP-ээр 10 минутад 10 удаа хязгаартай.
+      description: |
+        IP-ээр 10 минутад 10 удаа хязгаартай.
+        Нэг checkout үйлдэлд `Idempotency-Key` илгээнэ. Ижил хэрэглэгч+key+payload
+        дахин ирвэл өмнөх захиалгын хариу (mixed-cart `splitOrders` оролцуулаад) буцна.
+        Ижил key өөр payload-тай бол 409. Шинэ худалдан авалтад шинэ key хэрэгтэй.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, minLength: 8, maxLength: 128 }
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [phone, items]
+              required: [items]
               properties:
-                phone: { type: string }
                 name: { type: string }
                 note: { type: string }
+                leasing: { type: boolean }
+                idempotencyKey: { type: string, minLength: 8, maxLength: 128 }
                 items:
                   type: array
                   minItems: 1
@@ -241,11 +305,14 @@ paths:
                     properties:
                       productId: { type: string }
                       qty: { type: integer, minimum: 1 }
+                      selections:
+                        type: object
+                        additionalProperties: { type: string }
                       size: { type: string }
                       color: { type: string }
       responses:
         '201':
-          description: Үүссэн захиалга
+          description: Үүссэн захиалга эсвэл ижил checkout-ийн хадгалсан хариу
           content:
             application/json:
               schema:
@@ -258,6 +325,13 @@ paths:
                       status: { $ref: '#/components/schemas/OrderStatus' }
                       subtotal: { type: integer }
                       dueAmount: { type: integer }
+                      splitOrders:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            code: { type: string }
+                            payeeKind: { type: string }
         '409': { $ref: '#/components/responses/Conflict' }
 
   /api/orders/{code}:

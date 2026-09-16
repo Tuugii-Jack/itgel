@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
 import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
@@ -8,6 +9,8 @@ import { leasingApi, ApiError } from "@/lib/api";
 import { money } from "@/lib/format";
 import {
   DEFAULT_LEASING_PAY_GAPS,
+  DEFAULT_LEASING_SMS_TEMPLATES,
+  SMS_TEMPLATE_MAX,
   buildLeasingPayPlan,
   fillLeasingCopy,
   leasingFeeOf,
@@ -43,6 +46,13 @@ export default function LeasingSettingsPage() {
   const [choiceHint, setChoiceHint] = useState("");
   const [termsTitle, setTermsTitle] = useState("");
   const [termsBody, setTermsBody] = useState("");
+  const [smsDueToday, setSmsDueToday] = useState("");
+  const [smsOverdue, setSmsOverdue] = useState("");
+  const [smsArrivedUnpaid, setSmsArrivedUnpaid] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [bankAccountNumber, setBankAccountNumber] = useState("");
+  const [bankAccountName, setBankAccountName] = useState("");
+  const [paymentNote, setPaymentNote] = useState("");
   const [gapInputs, setGapInputs] = useState<string[]>(["5", "8", "8"]);
   const [sample, setSample] = useState("350000");
   const [loading, setLoading] = useState(true);
@@ -58,6 +68,13 @@ export default function LeasingSettingsPage() {
       setChoiceHint(data.choiceHint);
       setTermsTitle(data.termsTitle);
       setTermsBody(data.termsBody);
+      setSmsDueToday(data.smsDueToday);
+      setSmsOverdue(data.smsOverdue);
+      setSmsArrivedUnpaid(data.smsArrivedUnpaid);
+      setBankName(data.bankName ?? "");
+      setBankAccountNumber(data.bankAccountNumber ?? "");
+      setBankAccountName(data.bankAccountName ?? "");
+      setPaymentNote(data.paymentNote ?? "");
       setGapInputs((data.payGaps?.length ? data.payGaps : DEFAULT_LEASING_PAY_GAPS).map(String));
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
@@ -68,9 +85,7 @@ export default function LeasingSettingsPage() {
     }
   }, [toast]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const previewTiers = useMemo(() => parseRows(rows), [rows]);
   const previewGaps = useMemo(
@@ -115,12 +130,26 @@ export default function LeasingSettingsPage() {
         choiceHint,
         termsTitle,
         termsBody,
+        smsDueToday,
+        smsOverdue,
+        smsArrivedUnpaid,
+        bankName,
+        bankAccountNumber,
+        bankAccountName,
+        paymentNote,
       });
       setSettings(updated);
       setRows(tiersToRows(updated.feeTiers));
       setChoiceHint(updated.choiceHint);
       setTermsTitle(updated.termsTitle);
       setTermsBody(updated.termsBody);
+      setSmsDueToday(updated.smsDueToday);
+      setSmsOverdue(updated.smsOverdue);
+      setSmsArrivedUnpaid(updated.smsArrivedUnpaid);
+      setBankName(updated.bankName ?? "");
+      setBankAccountNumber(updated.bankAccountNumber ?? "");
+      setBankAccountName(updated.bankAccountName ?? "");
+      setPaymentNote(updated.paymentNote ?? "");
       setGapInputs(updated.payGaps.map(String));
       toast.success("Лизингийн тохиргоо хадгалагдлаа.");
     } catch (e) {
@@ -144,7 +173,7 @@ export default function LeasingSettingsPage() {
     <div className="max-w-[720px]">
       <PageHead
         title="Лизингийн тохиргоо"
-        hint="Шимтгэл, үндсэн төлбөрийн хоногийн зай, хэрэглэгчид харагдах нөхцөл"
+        hint="Шимтгэл, үндсэн төлбөрийн хоногийн зай, SMS загвар, хэрэглэгчид харагдах нөхцөл"
       />
 
       <div className="flex flex-col gap-4">
@@ -331,6 +360,51 @@ export default function LeasingSettingsPage() {
         </Card>
 
         <Card className="flex flex-col gap-3 p-4">
+          <div className="text-[15px] font-medium">Сануулгын SMS</div>
+          <p className="m-0 text-[13px] text-ink-2">
+            {"{ner}"} нэр, {"{dun}"} дүн, {"{ognoo}"} огноо, {"{honog}"} хоног. Хоосон бол
+            үндсэн бичвэр явна.
+          </p>
+          <SmsTemplateField
+            label="Өнөөдөр төлөгдөөгүй"
+            value={smsDueToday}
+            onChange={setSmsDueToday}
+            fallback={DEFAULT_LEASING_SMS_TEMPLATES.dueToday}
+          />
+          <SmsTemplateField
+            label="Хуваарь хоцорсон"
+            value={smsOverdue}
+            onChange={setSmsOverdue}
+            fallback={DEFAULT_LEASING_SMS_TEMPLATES.overdue}
+          />
+          <SmsTemplateField
+            label="Ирсэн · төлөөгүй"
+            value={smsArrivedUnpaid}
+            onChange={setSmsArrivedUnpaid}
+            fallback={DEFAULT_LEASING_SMS_TEMPLATES.arrivedUnpaid}
+          />
+        </Card>
+
+        <Card className="flex flex-col gap-3 p-4">
+          <div className="text-[15px] font-medium">Шилжүүлгийн данс</div>
+          <p className="m-0 text-[13px] text-ink-2">
+            Лизингийн бэлэн борлуулалт болон хуваарьт төлбөрийн шилжүүлэг. Дэлгүүрийн данс руу буцахгүй.
+          </p>
+          <Field label="Банк">
+            <Input value={bankName} onChange={setBankName} />
+          </Field>
+          <Field label="Дансны дугаар">
+            <Input value={bankAccountNumber} onChange={setBankAccountNumber} />
+          </Field>
+          <Field label="Хүлээн авагч">
+            <Input value={bankAccountName} onChange={setBankAccountName} />
+          </Field>
+          <Field label="Нэмэлт заавар">
+            <Textarea value={paymentNote} onChange={setPaymentNote} rows={2} />
+          </Field>
+        </Card>
+
+        <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Урьдчилан харах</div>
           <Field label="Жишээ барааны үнэ">
             <Input value={sample} onChange={setSample} inputMode="numeric" />
@@ -351,11 +425,50 @@ export default function LeasingSettingsPage() {
 
         {error && <ErrorNote>{error}</ErrorNote>}
         <div>
-          <Button loading={busy} onClick={() => void save()}>
+          <Button
+            loading={busy}
+            disabled={
+              smsDueToday.length > SMS_TEMPLATE_MAX ||
+              smsOverdue.length > SMS_TEMPLATE_MAX ||
+              smsArrivedUnpaid.length > SMS_TEMPLATE_MAX
+            }
+            onClick={() => void save()}
+          >
             Хадгалах
           </Button>
         </div>
       </div>
     </div>
+  );
+}
+
+function SmsTemplateField({
+  label,
+  value,
+  onChange,
+  fallback,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  fallback: string;
+}) {
+  const over = value.length > SMS_TEMPLATE_MAX;
+  return (
+    <Field label={label}>
+      <Textarea value={value} onChange={onChange} rows={5} resize="y" className="min-h-[110px]" />
+      <div className="mt-1 flex items-center justify-between gap-2 text-[12px]">
+        <span className={`tnum ${over ? "text-danger" : "text-muted"}`}>
+          {value.length}/{SMS_TEMPLATE_MAX}
+        </span>
+        <button
+          type="button"
+          className="cursor-pointer border-0 bg-transparent p-0 text-muted underline"
+          onClick={() => onChange(fallback)}
+        >
+          Анхны бичвэр
+        </button>
+      </div>
+    </Field>
   );
 }

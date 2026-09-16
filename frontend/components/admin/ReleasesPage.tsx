@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -109,9 +110,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
     }
   }, [query, kind]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const allRows = useMemo<ReleaseRow[]>(() => {
     const rows: ReleaseRow[] = [];

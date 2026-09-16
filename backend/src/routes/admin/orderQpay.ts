@@ -36,6 +36,7 @@ async function loadOrder(orderId: string) {
       qpayInvoiceId: true,
       qpayInvoiceAt: true,
       isLeasing: true,
+      payeeKind: true,
     },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
@@ -47,7 +48,7 @@ adminOrderQpayRouter.get(
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
     const order = await loadOrder(param(req, 'id'));
-    const kind = qpayAccountForOrder(order.isLeasing);
+    const kind = qpayAccountForOrder(order);
     const status = kind === 'leasing' ? leasingQpayPublicStatus() : qpayPublicStatus();
     res.json({
       data: {
@@ -71,7 +72,7 @@ adminOrderQpayRouter.post(
     const order = await loadOrder(param(req, 'id'));
     assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
     if (!order.qpayInvoiceId) throw conflict('QPay нэхэмжлэл алга.');
-    const kind = qpayAccountForOrder(order.isLeasing);
+    const kind = qpayAccountForOrder(order);
     if (!isQpayReady(kind)) throw conflict('QPay одоогоор идэвхжээгүй.', { code: 'QPAY_NOT_READY' });
 
     const check = await checkQpayInvoice(order.qpayInvoiceId, kind);
@@ -105,7 +106,7 @@ adminOrderQpayRouter.get(
       res.json({ data: { count: 0, rows: [] } });
       return;
     }
-    const kind = qpayAccountForOrder(order.isLeasing);
+    const kind = qpayAccountForOrder(order);
     if (!isQpayReady(kind)) throw conflict('QPay одоогоор идэвхжээгүй.', { code: 'QPAY_NOT_READY' });
 
     const list = await listQpayPayments(
@@ -142,7 +143,7 @@ adminOrderQpayRouter.post(
       paymentId: param(req, 'paymentId'),
       mode: 'cancel',
       actor: actorOf(req),
-      kind: qpayAccountForOrder(order.isLeasing),
+      kind: qpayAccountForOrder(order),
     });
     res.json({ data: result });
   }),
@@ -158,7 +159,7 @@ adminOrderQpayRouter.post(
       paymentId: param(req, 'paymentId'),
       mode: 'refund',
       actor: actorOf(req),
-      kind: qpayAccountForOrder(order.isLeasing),
+      kind: qpayAccountForOrder(order),
     });
     res.json({ data: result });
   }),

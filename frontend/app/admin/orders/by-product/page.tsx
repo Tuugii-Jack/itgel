@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Metric, PageHead, ProductStatusBadge } from "@/components/admin/shared";
@@ -116,9 +117,7 @@ export default function OrdersByProductPage() {
     }
   }, [fetchPage]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const loadMore = async () => {
     setMoreLoading(true);

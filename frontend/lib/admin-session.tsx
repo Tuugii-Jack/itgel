@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { adminApi, readToken, writeToken } from "./api";
+import { deferEffect } from "./deferEffect";
 
 interface AdminUser {
   id: string;
@@ -46,29 +47,36 @@ export function AdminSessionProvider({
   const onLoginPage = pathname === loginPath;
 
   const homeFor = (role: string) => (role === "LEASING" ? "/leasing" : "/admin");
-  const allowed = (role: string) =>
-    portal === "leasing" ? role === "LEASING" : role === "ADMIN" || role === "STAFF";
+  const allowed = useCallback(
+    (role: string) =>
+      portal === "leasing" ? role === "LEASING" : role === "ADMIN" || role === "STAFF",
+    [portal],
+  );
 
-  useEffect(() => {
-    if (!readToken("admin")) {
-      writeToken("admin", null); // cookie-г цэвэрлэнэ
-      setUser(null);
-      setLoading(false);
-      return;
-    }
-    adminApi
-      .me()
-      .then((me) => {
-        setUser(me);
-        // Хуучин session-д cookie байхгүй байж болно — нөхнө.
-        writeToken("admin", readToken("admin"));
-      })
-      .catch(() => {
-        writeToken("admin", null);
-        setUser(null);
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  useEffect(
+    () =>
+      deferEffect(() => {
+        if (!readToken("admin")) {
+          writeToken("admin", null); // cookie-г цэвэрлэнэ
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        adminApi
+          .me()
+          .then((me) => {
+            setUser(me);
+            // Хуучин session-д cookie байхгүй байж болно — нөхнө.
+            writeToken("admin", readToken("admin"));
+          })
+          .catch(() => {
+            writeToken("admin", null);
+            setUser(null);
+          })
+          .finally(() => setLoading(false));
+      }),
+    [],
+  );
 
   // Нэвтрээгүй → зөвхөн login; нэвтэрсэн → зөв портал руу.
   useEffect(() => {
@@ -76,7 +84,7 @@ export function AdminSessionProvider({
     if (!user && !onLoginPage) router.replace(loginPath);
     if (user && onLoginPage) router.replace(homeFor(user.role));
     if (user && !onLoginPage && !allowed(user.role)) router.replace(homeFor(user.role));
-  }, [user, loading, onLoginPage, router, loginPath]);
+  }, [user, loading, onLoginPage, router, loginPath, allowed]);
 
   // Login дээр JWT байхгүй бол cookie-г цэвэрлэ — stale cookie-оос сэргийлнэ.
   useEffect(() => {

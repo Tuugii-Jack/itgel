@@ -170,6 +170,14 @@ export async function publicStorePayload() {
     deliveryDistricts: districtNames(settings),
     deliveryFees: districtList(settings),
     bank: null,
+    leasingBank: settings.leasingBankAccountNumber
+      ? {
+          name: settings.leasingBankName,
+          accountNumber: settings.leasingBankAccountNumber,
+          accountName: settings.leasingBankAccountName,
+          note: settings.leasingPaymentNote,
+        }
+      : null,
     qpay: qpayPublicStatus(),
     leasingQpay: leasingQpayPublicStatus(),
     unpaidCancelHours: settings.unpaidCancelHours,

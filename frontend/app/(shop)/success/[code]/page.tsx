@@ -1,8 +1,10 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
-import { use, useCallback, useEffect, useState } from "react";
-import { EmailAuthForm } from "@/components/EmailAuthForm";
+import { use, useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useSearchParams } from "next/navigation";
+import { PhoneAuthForm } from "@/components/PhoneAuthForm";
 import { PaymentPanel } from "@/components/PaymentPanel";
 import { Qr } from "@/components/Qr";
 import { Button, Card, ErrorNote, Skeleton, Spinner } from "@/components/ui";
@@ -30,40 +32,55 @@ import type { PublicOrder, Store } from "@/lib/types";
  */
 export default function SuccessPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
+  const also = useSearchParams().get("also");
   const session = useSession();
   const [order, setOrder] = useState<PublicOrder | null>(null);
+  const [alsoOrder, setAlsoOrder] = useState<PublicOrder | null>(null);
   const [store, setStore] = useState<Store | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [trackUrl, setTrackUrl] = useState("");
+  const origin = useSyncExternalStore(
+    () => () => {},
+    () => window.location.origin,
+    () => "",
+  );
+  const trackUrl = origin ? `${origin}/t/${code}` : "";
 
   const load = useCallback(async () => {
     if (!session.me) return;
     try {
-      const [o, s] = await Promise.all([api.order(code), api.store()]);
+      const [o, s, extra] = await Promise.all([
+        api.order(code),
+        api.store(),
+        also ? api.order(also).catch(() => null) : Promise.resolve(null),
+      ]);
       setOrder(o);
+      setAlsoOrder(extra);
       setStore(s);
       setError(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     }
-  }, [code, session.me]);
+  }, [code, also, session.me]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useEffect(() => {
-    setTrackUrl(`${window.location.origin}/t/${code}`);
-  }, [code]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const feeHold = Boolean(order && leasingFeeHold(order));
+  const extraHold = Boolean(alsoOrder && leasingFeeHold(alsoOrder));
+  const extraPending =
+    !!alsoOrder &&
+    alsoOrder.status !== "CANCELLED" &&
+    (extraHold ||
+      (!alsoOrder.isLeasing &&
+        awaitingPayment(alsoOrder.paymentState) &&
+        alsoOrder.dueAmount > 0));
   const pending =
     !!order &&
     order.status !== "CANCELLED" &&
     (feeHold ||
       (!order.isLeasing &&
         awaitingPayment(order.paymentState) &&
-        order.dueAmount > 0));
+        order.dueAmount > 0) ||
+      extraPending);
 
   // Админ төлбөрийг бүртгэмэгц хуудас өөрөө «Баталгаажлаа» болно —
   // хэрэглэгч refresh дарах шаардлагагүй.
@@ -83,10 +100,7 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
         <div className="px-4 pt-6 lg:mx-auto lg:max-w-[420px] lg:px-0 lg:pt-10">
           <div className="mb-4 text-[20px] font-medium">Захиалга</div>
           <Card className="flex flex-col gap-3 p-4 lg:p-6">
-            <p className="m-0 text-[13px] text-ink-2">
-              Нэвтэрсний дараа зөвхөн өөрийн захиалгыг харна.
-            </p>
-            <EmailAuthForm />
+            <PhoneAuthForm />
           </Card>
         </div>
       </div>
@@ -117,7 +131,13 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
   return (
     <div className="screen pb-8">
       {pending ? (
-        <Pending order={order} store={store} onClaimed={load} feeHold={feeHold} />
+        <Pending
+          order={order}
+          extraOrder={alsoOrder}
+          store={store}
+          onClaimed={load}
+          feeHold={feeHold}
+        />
       ) : (
         <Confirmed order={order} store={store} trackUrl={trackUrl} />
       )}
@@ -129,11 +149,13 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
 
 function Pending({
   order,
+  extraOrder,
   store,
   onClaimed,
   feeHold,
 }: {
   order: PublicOrder;
+  extraOrder?: PublicOrder | null;
   store: Store | null;
   onClaimed: () => void;
   feeHold?: boolean;
@@ -141,10 +163,12 @@ function Pending({
   return (
     <div className="px-4 pt-8 lg:mx-auto lg:max-w-[1000px] lg:px-10">
       <div className="text-[20px] font-medium lg:text-[24px]">
-        {feeHold ? "Шимтгэл төлнө үү" : "Төлбөр хүлээгдэж байна"}
+        {feeHold ? "Шимтгэл төлнө үү" : extraOrder ? "Хоёр захиалгын төлбөр" : "Төлбөр хүлээгдэж байна"}
       </div>
       <p className="mt-1 mb-0 max-w-[560px] text-[14px] leading-[1.6] text-ink-2">
-        {feeHold
+        {extraOrder
+          ? "Дэлгүүрийн болон лизингийн бараа хоёр захиалга болсон. Төлбөрийг тус тусад нь төлнө үү."
+          : feeHold
           ? "Лизингийн шимтгэлийг QPay-ээр төлнө. Төлсний дараа захиалга үүснэ."
           : "Төлбөрийн хураангуй, QPay энд байна. Төлсний дараа захиалга баталгаажна."}
       </p>
@@ -152,7 +176,16 @@ function Pending({
       <div className="mt-5 flex flex-col gap-5 lg:mt-7 lg:grid lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-8">
         <div className="flex flex-col gap-5">
           {store ? (
-            <PaymentPanel order={order} store={store} onClaimed={onClaimed} feeHold={feeHold} />
+            <>
+              <PaymentPanel order={order} store={store} onClaimed={onClaimed} feeHold={feeHold} />
+              {extraOrder && (
+                <PaymentPanel
+                  order={extraOrder}
+                  store={store}
+                  onClaimed={onClaimed}
+                />
+              )}
+            </>
           ) : (
             <Skeleton className="h-56 w-full rounded-[12px]" />
           )}

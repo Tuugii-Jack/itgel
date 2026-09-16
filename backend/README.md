@@ -3,17 +3,23 @@
 Захиалгын дэлгүүрийн API. Node.js + TypeScript + Express + PostgreSQL (Prisma).
 Заавар: [`backend-prompt.md`](backend-prompt.md). API лавлах: [`openapi.yaml`](openapi.yaml).
 
-## 2026-09-12 засварыг байрлуулах
+## 2026-09-16 засварыг байрлуулах
 
-Шинэ backend-ийг эхлүүлэхээс өмнө `npx prisma migrate deploy` ажиллуулна.
-`20260912090000_payment_history_email_changes` migration нь QPay нэхэмжлэлийн түүх,
-төлбөрийн холбоос болон баталгаажуулалт хүлээж буй и-мэйл солих мэдээллийн талбаруудыг нэмнэ.
-Одоо хадгалагдаж байгаа QPay нэхэмжлэлүүдийг түүх рүү хуулна; хуучин мөнгөн дүнг өөрчлөхгүй.
-Өмнө нь дарагдаж алга болсон нэхэмжлэл, буруу бүртгэгдсэн төлбөрийг энэ migration
-автоматаар нөхөхгүй — шаардлагатай бол банкны гүйлгээтэй тусад нь тулгана.
+Шинэ backend-ийг эхлүүлэхээс өмнө `npx prisma migrate deploy` ажиллуулна
+(`DIRECT_URL` нь pooler биш, шууд 5432).
+
+Энэ удаад нэмэгдсэн гол migration:
+`20260916120000_checkout_idempotency` — checkout давхар даралтад `CheckoutIdempotency`
+хүснэгт. Мөн утасны OTP баталгаа, лизингийн SMS загвар, бэлэн барааны эзэн/өрний хаалт
+(`20260912*`–`20260915*`) орно.
+
+Vercel дээр frontend `NEXT_PUBLIC_API_URL=https://api.itgelshop.mn/api` байх ёстой.
+Лизингийн QPay-г асаахдаа дэлгүүрийн `QPAY_*`-г бүү хуул — `LEASING_QPAY_ENABLED=true`
+болон `LEASING_QPAY_CLIENT_ID` / `CLIENT_SECRET` / `INVOICE_CODE` /
+`CALLBACK_URL=https://api.itgelshop.mn/api/orders/leasing-qpay/callback` тусдаа тавина.
 
 Шалгалт: backend дээр `npm test` болон `npm run typecheck`; frontend дээр
-`node --test tests/trackedOrders.test.mjs` (Node 22.18+) болон `npx tsc --noEmit --incremental false`.
+`node --test tests/*.test.mjs` (Node 22.18+) болон `npx tsc --noEmit --incremental false`.
 
 ## Эхлүүлэх
 
@@ -111,18 +117,33 @@ Redis рүү шилжүүлнэ — интерфейс нь адил.
 | Хугацаа | Ажил |
 | --- | --- |
 | Өдөр бүр 00:05 | `closeAt` хүрсэн барааг `CLOSED` (`autoCloseOnDeadline` асаалттай үед) |
-| 10 мин тутам | `ARRIVED` болсон захиалгад ирсэн мэдэгдэл (`smsOnArrival`) |
 | Өдөр бүр 09:00 | 2+ хоног хүлээлгэн өгөөгүй захиалгын сануулга (audit log + console) |
 | 15 мин тутам | Rate limiter-ийн хугацаа дууссан бичлэг цэвэрлэх |
 
-Мэдэгдэл ердийн урсгалд төлөв солигдох үед шууд илгээгддэг; cron нь аюулгүйн тор.
+Бараа ирсэн SMS автоматаар явахгүй — админ ачааны багцыг «Агуулахад» болгосны дараа товчоор илгээнэ.
 `CRON_ENABLED=false` болгож унтраана.
 
 ## Гадаад үйлчилгээ
 
-**SMS** — `SmsProvider` интерфейс (`src/services/sms.ts`). Dev дээр `ConsoleSmsProvider`
-(console руу бичнэ), production-д `SMS_PROVIDER=http` + `SMS_API_URL`/`SMS_API_KEY`.
-Өөр провайдер холбоход зөвхөн интерфейсийг шинээр хэрэгжүүлнэ.
+**SMS** — хоёр CallPro бүртгэл (`src/services/sms.ts`).
+
+Лизинг админ (сануулга, чөлөөт SMS):
+
+```bash
+SMS_PROVIDER=callpro
+SMS_API_KEY=           # лизингийн CallPro API key
+SMS_FROM=              # лизингийн special number, ж: 72xxxxxx
+```
+
+Дэлгүүрийн OTP + шоп админ (бараа ирсэн). Тусдаа API key — лизингийнхээ бүү хуул:
+
+```bash
+SHOP_SMS_PROVIDER=callpro   # local: console гэж тодорхой заана
+SHOP_SMS_API_KEY=
+SHOP_SMS_FROM=
+```
+
+Түлхүүр орсон суваг `POST https://api-text.callpro.mn/v1/sms/send` (`x-api-key`) ашиглана. CallPro тохиргоо дутуу бол алдаа буцаана, console руу автоматаар шилжихгүй. Console зөвхөн `SMS_PROVIDER=console` / `SHOP_SMS_PROVIDER=console` үед.
 
 **Зураг** — presigned PUT URL. `POST /api/admin/products/:id/images` → `uploadUrl` руу файлаа
 шууд PUT хийж, дараа нь `PATCH /api/admin/products/:id/images` -ээр `publicUrl`-уудыг бүртгэнэ.

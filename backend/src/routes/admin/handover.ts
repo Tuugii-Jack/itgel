@@ -5,17 +5,18 @@ import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
 import { itemPickableAtStore } from '../../lib/itemFulfilment.js';
-import { leasingFeeHold, leasingHoldsGoods, leasingView } from '../../lib/leasing.js';
+import { isLeasingResale } from '../../lib/inventoryOwner.js';
+import { leasingFeeHold, leasingHoldsGoods, leasingView, SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { handOverItems } from '../../services/orders.js';
 import { recordPayment } from '../../services/payments.js';
-import { shopDueAmount } from '../../services/money.js';
+import { isProductPaid, shopDueAmount } from '../../services/money.js';
 import { HANDOVER_PAY_NOTE, handoverHistory } from '../../services/handoverHistory.js';
 import { adminOrderItem, publicOrderItem } from '../../services/serialize.js';
 import { syncOrderCargoFee, syncOrdersCargoFees } from '../../services/cargoFee.js';
 import { syncOrderStorageFee, syncOrdersStorageFees } from '../../services/storageFee.js';
-import { adminOrderDetail } from './orders.js';
+import { adminOrderDetail } from '../../modules/orders/adminDetail.js';
 import { currentLeasingPayGaps } from '../../services/settings.js';
 
 export const adminHandoverRouter = Router();
@@ -77,6 +78,7 @@ adminHandoverRouter.get(
         refundedAmount: true,
         subtotal: true,
         isLeasing: true,
+        payeeKind: true,
         leasingFee: true,
       },
     });
@@ -87,13 +89,14 @@ adminHandoverRouter.get(
       (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt && i.fulfilment === 'DELIVERY',
     );
     const leasingHeld = leasingHoldsGoods(fresh);
+    const leasingUnpaid = isLeasingResale(fresh) && !isProductPaid(fresh);
     const gaps = await currentLeasingPayGaps();
 
     res.json({
       data: {
         ...adminOrderDetail(fresh, gaps),
         canHandOver:
-          pickable.length > 0 && fresh.status !== 'CANCELLED' && !leasingHeld,
+          pickable.length > 0 && fresh.status !== 'CANCELLED' && !leasingHeld && !leasingUnpaid,
         blockReason:
           fresh.status === 'CANCELLED'
             ? 'Захиалга цуцлагдсан.'
@@ -101,11 +104,13 @@ adminHandoverRouter.get(
               ? 'Энэ захиалгыг аль хэдийн хүлээлгэн өгсөн байна.'
               : leasingHeld
                 ? 'Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.'
-                : pickable.length === 0
-                  ? deliveryHeld.length > 0
-                    ? 'Эдгээр бараа хүргэлтээр авахаар сонгогдсон.'
-                    : 'Авах боломжтой (ирсэн) бараа алга.'
-                  : null,
+                : leasingUnpaid
+                  ? 'Лизингийн бэлэн барааны төлбөр дутуу. Лизингийн QPay-ээр төлнө.'
+                  : pickable.length === 0
+                    ? deliveryHeld.length > 0
+                      ? 'Эдгээр бараа хүргэлтээр авахаар сонгогдсон.'
+                      : 'Авах боломжтой (ирсэн) бараа алга.'
+                    : null,
         pickableItemIds: pickable.map((i) => i.id),
       },
     });
@@ -135,7 +140,7 @@ adminHandoverRouter.get(
       orderBy: { updatedAt: 'desc' },
       include: {
         orders: {
-          where: { deletedAt: null, status: { not: 'CANCELLED' }, isLeasing: false },
+          where: { deletedAt: null, status: { not: 'CANCELLED' }, ...SHOP_STAFF_ORDER_WHERE },
           orderBy: { createdAt: 'desc' },
           include: {
             items: { include: { product: true } },
@@ -159,7 +164,7 @@ adminHandoverRouter.get(
           where: {
             deletedAt: null,
             status: { notIn: ['CANCELLED'] },
-            isLeasing: false,
+            ...SHOP_STAFF_ORDER_WHERE,
           },
           orderBy: { createdAt: 'desc' },
           include: {
@@ -288,6 +293,7 @@ adminHandoverRouter.post(
         where: { id: orderId },
         select: {
           isLeasing: true,
+          payeeKind: true,
           subtotal: true,
           leasingFee: true,
           storageFee: true,
@@ -299,6 +305,12 @@ adminHandoverRouter.post(
       if (leasingHoldsGoods(order)) {
         throw conflict('Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.', {
           code: 'LEASING_BALANCE_DUE',
+          orderId,
+        });
+      }
+      if (isLeasingResale(order) && !isProductPaid(order)) {
+        throw conflict('Лизингийн бэлэн барааны төлбөр дутуу. Лизингийн QPay-ээр төлнө.', {
+          code: 'LEASING_RESALE_UNPAID',
           orderId,
         });
       }
@@ -398,6 +410,11 @@ adminHandoverRouter.post(
     if (leasingHoldsGoods(order)) {
       throw conflict('Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.', {
         code: 'LEASING_BALANCE_DUE',
+      });
+    }
+    if (isLeasingResale(order) && !isProductPaid(order)) {
+      throw conflict('Лизингийн бэлэн барааны төлбөр дутуу. Лизингийн QPay-ээр төлнө.', {
+        code: 'LEASING_RESALE_UNPAID',
       });
     }
 

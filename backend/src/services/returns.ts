@@ -31,7 +31,7 @@ export type ReturnPayout = {
   customerId: string;
   name: string | null;
   phone: string | null;
-  email: string;
+  email: string | null;
   bankName: string;
   bankAccountNumber: string;
   bankAccountName: string;
@@ -85,7 +85,7 @@ type CustomerRow = {
   id: string;
   name: string | null;
   phone: string | null;
-  email: string;
+  email: string | null;
   bankName: string;
   bankAccountNumber: string;
   bankAccountName: string;
@@ -194,7 +194,7 @@ function finalize(products: Map<string, ProductAgg>, payouts: Map<string, Payout
       days,
       orderCodes: [...codes].sort(),
     }))
-    .sort((a, b) => (a.name ?? a.email).localeCompare(b.name ?? b.email, 'mn'));
+    .sort((a, b) => (a.name ?? a.email ?? '').localeCompare(b.name ?? b.email ?? '', 'mn'));
 
   return {
     products: productRows,

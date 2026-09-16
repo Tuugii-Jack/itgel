@@ -34,14 +34,14 @@ export function findPendingEmailChange(email: string) {
 }
 
 /** Keep the login/recovery address until ownership of the new address is proven. */
-export async function issueEmailChange(customer: { id: string; email: string }, email: string) {
+export async function issueEmailChange(customer: { id: string; email: string | null }, email: string) {
   const code = String(randomInt(100_000, 1_000_000));
   await sendCode(email, code);
   const now = new Date();
   const otp = await prisma.$transaction(async (tx) => {
     // Serialize replacement codes and verification for this account.
     const rows = await tx.$queryRaw<{ id: string }[]>`
-      SELECT "id" FROM "Customer" WHERE "id" = ${customer.id} AND "email" = ${customer.email} FOR UPDATE
+      SELECT "id" FROM "Customer" WHERE "id" = ${customer.id} FOR UPDATE
     `;
     if (!rows.length) throw conflict('И-мэйл өөрчлөгдсөн байна. Дахин оролдоно уу.');
     await tx.emailOtp.updateMany({
@@ -63,7 +63,7 @@ export async function issueEmailChange(customer: { id: string; email: string }, 
 }
 
 export async function resendEmailChange(otp: EmailOtp) {
-  if (!otp.customerId || !otp.previousEmail) throw badRequest('Код олдсонгүй. Дахин илгээнэ үү.');
+  if (!otp.customerId) throw badRequest('Код олдсонгүй. Дахин илгээнэ үү.');
   const customer = await prisma.customer.findUnique({ where: { id: otp.customerId } });
   if (!customer || customer.email !== otp.previousEmail) {
     throw conflict('И-мэйл өөрчлөгдсөн байна. Дахин оролдоно уу.');
@@ -91,7 +91,7 @@ export async function resendEmailChange(otp: EmailOtp) {
 
 export async function verifyEmailChange(pending: EmailOtp, code: string) {
   const now = new Date();
-  if (!pending.customerId || !pending.previousEmail) throw badRequest('Код олдсонгүй. Дахин илгээнэ үү.');
+  if (!pending.customerId) throw badRequest('Код олдсонгүй. Дахин илгээнэ үү.');
   if (pending.attempts >= MAX_ATTEMPTS) {
     throw tooManyRequests('Хэт олон удаа буруу оруулсан тул түр блоклолоо. Шинэ код авна уу.');
   }
@@ -112,6 +112,7 @@ export async function verifyEmailChange(pending: EmailOtp, code: string) {
       const claimed = await tx.emailOtp.updateMany({
         where: {
           id: pending.id,
+          code,
           usedAt: null,
           expiresAt: { gt: now },
           attempts: { lt: MAX_ATTEMPTS },
@@ -123,7 +124,10 @@ export async function verifyEmailChange(pending: EmailOtp, code: string) {
       const taken = await tx.customer.findUnique({ where: { email: pending.email } });
       if (taken) throw conflict('Энэ и-мэйлээр бүртгэл байна.');
       const updated = await tx.customer.updateMany({
-        where: { id: pending.customerId!, email: pending.previousEmail! },
+        where: {
+          id: pending.customerId!,
+          email: pending.previousEmail,
+        },
         data: { email: pending.email, emailVerifiedAt: now },
       });
       if (updated.count !== 1) throw conflict('И-мэйл өөрчлөгдсөн байна. Дахин оролдоно уу.');

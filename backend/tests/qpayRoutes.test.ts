@@ -19,7 +19,10 @@ vi.mock('../src/lib/leasing.js', () => ({
 vi.mock('../src/services/qpay.js', () => ({
   ...mocks,
   isQpayReady: () => true,
-  qpayAccountForOrder: (leasing: boolean) => leasing ? 'leasing' : 'shop',
+  qpayAccountForOrder: (order: boolean | { isLeasing?: boolean; payeeKind?: string }) =>
+    typeof order === 'boolean'
+      ? (order ? 'leasing' : 'shop')
+      : (order.payeeKind === 'LEASING' || order.isLeasing ? 'leasing' : 'shop'),
 }));
 import { publicQpayRouter } from '../src/routes/public/qpay.js';
 import { adminQpayRouter } from '../src/routes/admin/qpay.js';

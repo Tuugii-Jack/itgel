@@ -10,9 +10,9 @@ export function generateOrderCode(): string {
   return `PH-${out}`;
 }
 
-/** OTP — 4 орон. */
+/** OTP — 6 орон. */
 export function generateOtp(): string {
-  return String(randomInt(1000, 10000));
+  return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
 /** Утасны дугаарыг нэг хэлбэрт (8 орон, зөвхөн тоо). */

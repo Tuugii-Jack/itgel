@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -111,9 +112,7 @@ export default function AdminOrdersPage() {
     }
   }, [fetchOrders]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const loadMore = async () => {
     setMoreLoading(true);

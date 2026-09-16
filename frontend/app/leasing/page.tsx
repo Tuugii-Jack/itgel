@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { deferEffect } from "@/lib/deferEffect";
+import { useOnKeyChange } from "@/lib/syncKey";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LeasingBadge,
   LeasingGoodsBadge,
@@ -13,6 +15,7 @@ import {
 } from "@/components/admin/shared";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
+import { LeasingScheduleSms } from "@/components/admin/LeasingScheduleSms";
 import { leasingApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { leasingArrivalUnpaid } from "@/lib/leasing";
@@ -26,7 +29,17 @@ type GoodsFilter =
   | "not_arrived"
   | "all"
   | "pay_due_today"
-  | "pay_overdue";
+  | "pay_overdue"
+  | "resale";
+
+type SmsKind = "due_today" | "overdue" | "arrived_unpaid";
+
+function smsKindOf(goods: GoodsFilter): SmsKind | null {
+  if (goods === "pay_due_today") return "due_today";
+  if (goods === "pay_overdue") return "overdue";
+  if (goods === "arrived_unpaid") return "arrived_unpaid";
+  return null;
+}
 
 export default function LeasingOrdersPage() {
   const [summary, setSummary] = useState<{
@@ -36,6 +49,7 @@ export default function LeasingOrdersPage() {
     arrivedPaid: number;
     payDueToday: number;
     payOverdue: number;
+    resaleCount: number;
   } | null>(null);
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [pageMeta, setPageMeta] = useState({ page: 1, pages: 1, total: 0 });
@@ -46,6 +60,7 @@ export default function LeasingOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadGen = useRef(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 350);
@@ -53,20 +68,46 @@ export default function LeasingOrdersPage() {
   }, [search]);
 
   const fetchOrders = useCallback(
-    (page: number) =>
-      leasingApi.orders({
+    async (page: number) => {
+      const sms = smsKindOf(goods) !== null;
+      const first = await leasingApi.orders({
         goods,
         q: query || undefined,
         page,
         pageSize: PAGE_SIZE,
-      }),
+      });
+      if (!sms || page !== 1) return first;
+      const pages = first.meta?.pages ?? 1;
+      const data = [...first.data];
+      for (let p = 2; p <= pages; p++) {
+        const next = await leasingApi.orders({
+          goods,
+          q: query || undefined,
+          page: p,
+          pageSize: PAGE_SIZE,
+        });
+        data.push(...next.data);
+      }
+      return {
+        data,
+        meta: {
+          page: 1,
+          pages: 1,
+          pageSize: data.length,
+          total: first.meta?.total ?? data.length,
+        },
+      };
+    },
     [goods, query],
   );
 
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
+    setLoading(true);
     setError(null);
     try {
       const [s, list] = await Promise.all([leasingApi.summary(), fetchOrders(1)]);
+      if (gen !== loadGen.current) return;
       setSummary(s);
       setOrders(list.data);
       setPageMeta({
@@ -75,15 +116,29 @@ export default function LeasingOrdersPage() {
         total: list.meta?.total ?? list.data.length,
       });
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, [fetchOrders]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useOnKeyChange(`${goods}|${query}`, () => {
+    setOrders([]);
+    setPageMeta({ page: 1, pages: 1, total: 0 });
+  });
+
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
+
+  const selectGoods = (next: GoodsFilter) => {
+    if (next === goods) return;
+    loadGen.current += 1;
+    setGoods(next);
+    setOrders([]);
+    setPageMeta({ page: 1, pages: 1, total: 0 });
+    setLoading(true);
+    setError(null);
+  };
 
   const loadMore = async () => {
     setMoreLoading(true);
@@ -126,18 +181,22 @@ export default function LeasingOrdersPage() {
             ? "Өнөөдөр төлөгдөх хуваарь алга."
             : goods === "pay_overdue"
               ? "Хоцорсон хуваарь алга."
-              : "Лизинг захиалга олдсонгүй.";
+              : goods === "resale"
+                ? "Бэлэн борлуулалт алга."
+                : "Лизинг захиалга олдсонгүй.";
+
+  const smsKind = smsKindOf(goods);
 
   return (
     <div>
       <PageHead
         title="Лизинг захиалга"
-        hint="Өнөөдрийн хуваарь болон хоцорсон төлөлтийг эндээс хар. Бараа ирсэн эсэхээр ч шүүнэ."
+        hint="Өнөөдөр төлөгдөөгүй, хоцорсон, ирсэн·төлөөгүй хэсэгт дугаарын жагсаалт гарна. Илгээх товч дарахад л SMS явна."
       />
 
       {summary && (
         <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-          <button type="button" className="text-left" onClick={() => setGoods("pay_due_today")}>
+          <button type="button" className="text-left" onClick={() => selectGoods("pay_due_today")}>
             <div className={goods === "pay_due_today" ? "rounded-[12px] ring-2 ring-ink" : ""}>
               <Metric
                 label="Өнөөдөр төлөгдөөгүй"
@@ -146,7 +205,7 @@ export default function LeasingOrdersPage() {
               />
             </div>
           </button>
-          <button type="button" className="text-left" onClick={() => setGoods("pay_overdue")}>
+          <button type="button" className="text-left" onClick={() => selectGoods("pay_overdue")}>
             <div className={goods === "pay_overdue" ? "rounded-[12px] ring-2 ring-ink" : ""}>
               <Metric
                 label="Хуваарь хоцорсон"
@@ -155,7 +214,7 @@ export default function LeasingOrdersPage() {
               />
             </div>
           </button>
-          <button type="button" className="text-left" onClick={() => setGoods("arrived_unpaid")}>
+          <button type="button" className="text-left" onClick={() => selectGoods("arrived_unpaid")}>
             <div className={goods === "arrived_unpaid" ? "rounded-[12px] ring-2 ring-ink" : ""}>
               <Metric
                 label="Ирсэн · төлөөгүй"
@@ -164,7 +223,7 @@ export default function LeasingOrdersPage() {
               />
             </div>
           </button>
-          <button type="button" className="text-left" onClick={() => setGoods("arrived")}>
+          <button type="button" className="text-left" onClick={() => selectGoods("arrived")}>
             <div className={goods === "arrived" ? "rounded-[12px] ring-2 ring-ink" : ""}>
               <Metric
                 label="Ирсэн"
@@ -173,20 +232,25 @@ export default function LeasingOrdersPage() {
               />
             </div>
           </button>
-          <button type="button" className="text-left" onClick={() => setGoods("not_arrived")}>
+          <button type="button" className="text-left" onClick={() => selectGoods("not_arrived")}>
             <div className={goods === "not_arrived" ? "rounded-[12px] ring-2 ring-ink" : ""}>
               <Metric label="Ирээгүй" value={String(summary.notArrived)} />
             </div>
           </button>
-          <button type="button" className="text-left" onClick={() => setGoods("all")}>
+          <button type="button" className="text-left" onClick={() => selectGoods("all")}>
             <div className={goods === "all" ? "rounded-[12px] ring-2 ring-ink" : ""}>
               <Metric label="Нийт" value={String(summary.total)} />
+            </div>
+          </button>
+          <button type="button" className="text-left" onClick={() => selectGoods("resale")}>
+            <div className={goods === "resale" ? "rounded-[12px] ring-2 ring-ink" : ""}>
+              <Metric label="Бэлэн борлуулалт" value={String(summary.resaleCount ?? 0)} />
             </div>
           </button>
         </div>
       )}
 
-      <div className="mb-4 flex flex-wrap gap-2">
+      <div className="mb-4">
         <Input value={search} onChange={setSearch} placeholder="Код, нэр, утас" className="w-52" />
       </div>
 
@@ -196,7 +260,16 @@ export default function LeasingOrdersPage() {
         </div>
       )}
 
-      {loading && orders.length === 0 ? (
+      {smsKind ? (
+        <LeasingScheduleSms
+          key={`${goods}:${query}`}
+          kind={smsKind}
+          orders={loading ? [] : orders}
+          loading={loading}
+          emptyText={emptyText}
+          onOpenOrder={setOpenId}
+        />
+      ) : loading && orders.length === 0 ? (
         <div className="flex flex-col gap-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-16 w-full rounded-[12px]" />
@@ -246,8 +319,14 @@ export default function LeasingOrdersPage() {
                           {order.code}
                         </button>
                         <div className="mt-1 flex flex-wrap gap-1">
-                          <LeasingBadge />
-                          <LeasingPayBadge overdue={overdue} dueToday={dueToday} />
+                          {order.isResale ? (
+                            <span className="text-[12px] text-ink-2">Бэлэн борлуулалт</span>
+                          ) : (
+                            <>
+                              <LeasingBadge />
+                              <LeasingPayBadge overdue={overdue} dueToday={dueToday} />
+                            </>
+                          )}
                         </div>
                       </Td>
                       <Td>
@@ -317,8 +396,14 @@ export default function LeasingOrdersPage() {
                   </div>
                   <div className="mt-2 text-[14px]">{order.customer.name ?? "Нэргүй"}</div>
                   <div className="mt-2 flex flex-wrap gap-1">
-                    <LeasingBadge />
-                    <LeasingPayBadge overdue={overdue} dueToday={dueToday} />
+                    {order.isResale ? (
+                      <span className="text-[12px] text-ink-2">Бэлэн борлуулалт</span>
+                    ) : (
+                      <>
+                        <LeasingBadge />
+                        <LeasingPayBadge overdue={overdue} dueToday={dueToday} />
+                      </>
+                    )}
                   </div>
                   <div
                     className={`mt-2 tnum text-[13px] ${unpaidArrived ? "text-danger" : "text-ink-2"}`}

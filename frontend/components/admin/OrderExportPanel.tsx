@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { deferEffect } from "@/lib/deferEffect";
 import { Button, Card } from "@/components/ui";
 import {
   DEFAULT_ORDER_EXPORT_SELECTION,
@@ -24,9 +25,13 @@ export function OrderExportPanel({
 }) {
   const [sel, setSel] = useState<OrderExportSelection>(DEFAULT_ORDER_EXPORT_SELECTION);
 
-  useEffect(() => {
-    setSel(loadOrderExportSelection());
-  }, []);
+  useEffect(
+    () =>
+      deferEffect(() => {
+        setSel(loadOrderExportSelection());
+      }),
+    [],
+  );
 
   const update = (next: OrderExportSelection) => {
     setSel(next);

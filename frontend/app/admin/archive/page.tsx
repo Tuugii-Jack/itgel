@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { deferEffect } from "@/lib/deferEffect";
 import { Metric, OrderBadge, PageHead, ProductStatusBadge, Select } from "@/components/admin/shared";
 import { ArchiveOrderList } from "@/components/admin/ArchiveOrderList";
 import { ProductImage } from "@/components/ProductImage";
 import { Badge, Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { dayLabel, money, phoneLabel, MONTH_LABELS } from "@/lib/format";
 import { formatPlaceLine } from "@/lib/locations";
 import { formatSelections } from "@/lib/options";
 import type {
@@ -25,10 +26,6 @@ const TABS: { key: Tab; label: string; hint: string }[] = [
   { key: "customer", label: "Хэрэглэгчээр", hint: "Нэг хүний бүх захиалга" },
 ];
 
-const MONTHS = [
-  "1-р сар", "2-р сар", "3-р сар", "4-р сар", "5-р сар", "6-р сар",
-  "7-р сар", "8-р сар", "9-р сар", "10-р сар", "11-р сар", "12-р сар",
-];
 
 /**
  * Архив — ажлын дэлгэцүүдээс тусдаа, юу ч алдагдахгүй түүх.
@@ -85,20 +82,23 @@ function ByDay() {
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setError(null);
-    adminApi
-      .archiveCalendar(year, month)
-      .then((c) => {
-        if (!alive) return;
-        setCalendar(c);
-        setDate(null);
-        setDay(null);
-      })
-      .catch((e) => alive && setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."))
-      .finally(() => alive && setLoading(false));
+    const stop = deferEffect(() => {
+      setLoading(true);
+      setError(null);
+      adminApi
+        .archiveCalendar(year, month)
+        .then((c) => {
+          if (!alive) return;
+          setCalendar(c);
+          setDate(null);
+          setDay(null);
+        })
+        .catch((e) => alive && setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."))
+        .finally(() => alive && setLoading(false));
+    });
     return () => {
       alive = false;
+      stop();
     };
   }, [year, month]);
 
@@ -130,7 +130,7 @@ function ByDay() {
         <Select
           value={String(month)}
           onChange={(v) => setMonth(Number(v))}
-          options={MONTHS.map((m, i) => ({ value: String(i + 1), label: m }))}
+          options={MONTH_LABELS.map((m, i) => ({ value: String(i + 1), label: m }))}
         />
       </div>
 
@@ -488,8 +488,9 @@ function useArchiveSearch() {
   useEffect(() => {
     const q = search.trim();
     if (q.length === 0) {
-      setResults(null);
-      return;
+      return deferEffect(() => {
+        setResults(null);
+      });
     }
     let alive = true;
     const timer = setTimeout(() => {

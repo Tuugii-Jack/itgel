@@ -67,9 +67,8 @@ export async function sendMail(opts: {
   html?: string;
 }): Promise<SendMailResult> {
   if (!transporter) {
-    const msg = `[mail] SMTP тохируулаагүй — ${opts.to}: ${opts.subject}\n${opts.text}`;
-    console.info(msg);
     if (isProd) return { ok: false, error: 'И-мэйл илгээх тохиргоо дутуу байна.' };
+    console.info(`[mail] SMTP тохируулаагүй — ${opts.to}: ${opts.subject}`);
     return { ok: true };
   }
 

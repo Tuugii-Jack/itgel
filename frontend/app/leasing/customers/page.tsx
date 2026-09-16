@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { LeasingBadge, LeasingGoodsBadge, PageHead, Table, Td, Th } from "@/components/admin/shared";
@@ -53,19 +54,20 @@ export default function LeasingCustomersPage() {
     }
   }, [query]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   useEffect(() => {
     if (!openId) {
-      setDetail(null);
-      return;
+      return deferEffect(() => {
+        setDetail(null);
+      });
     }
-    void leasingApi
-      .customer(openId)
-      .then(setDetail)
-      .catch((e) => setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."));
+    return deferEffect(() => {
+      void leasingApi
+        .customer(openId)
+        .then(setDetail)
+        .catch((e) => setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."));
+    });
   }, [openId]);
 
   if (openOrderId) {
@@ -87,7 +89,7 @@ export default function LeasingCustomersPage() {
     return (
       <div>
         <PageHead
-          title={detail.name ?? detail.email}
+          title={detail.name ?? detail.email ?? "Хэрэглэгч"}
           hint={phoneLabel(detail.phone)}
           actions={
             <button

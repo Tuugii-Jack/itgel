@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { BankAccountFields } from "@/components/BankAccountFields";
@@ -7,6 +8,7 @@ import { LocationFields } from "@/components/LocationFields";
 import {
   Metric,
   OrderBadge,
+  LeasingBadge,
   PageHead,
   Table,
   Td,
@@ -35,6 +37,7 @@ type CustomerOrder = {
   code: string;
   status: import("@/lib/types").OrderStatus;
   statusLabel: string;
+  isLeasing?: boolean;
   subtotal: number;
   dueAmount: number;
   fulfilment: string | null;
@@ -90,21 +93,23 @@ export default function CustomersPage() {
     }
   }, [query, toast]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
-  useEffect(() => {
-    try {
-      const id = sessionStorage.getItem("itgel.admin.openCustomer");
-      if (id) {
-        sessionStorage.removeItem("itgel.admin.openCustomer");
-        setOpenId(id);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
+  useEffect(
+    () =>
+      deferEffect(() => {
+        try {
+          const id = sessionStorage.getItem("itgel.admin.openCustomer");
+          if (id) {
+            sessionStorage.removeItem("itgel.admin.openCustomer");
+            setOpenId(id);
+          }
+        } catch {
+          /* ignore */
+        }
+      }),
+    [],
+  );
 
   if (openOrderId) {
     return (
@@ -350,7 +355,7 @@ function CustomerDetailView({
     try {
       const detail = await adminApi.customer(customerId);
       setData(detail as CustomerDetail);
-      setEmail(detail.email);
+      setEmail(detail.email ?? "");
       setName(detail.name ?? "");
       setPhone(detail.phone ?? "");
       setEmailVerified(detail.emailVerified);
@@ -368,9 +373,7 @@ function CustomerDetailView({
     }
   }, [customerId]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const save = async () => {
     setBusy(true);
@@ -433,8 +436,8 @@ function CustomerDetailView({
       </div>
 
       <PageHead
-        title={data.name ?? data.email}
-        hint={`${data.email} · бүртгэгдсэн ${dayLabel(data.createdAt)}`}
+        title={data.name ?? data.email ?? "Хэрэглэгч"}
+        hint={`${data.email ?? "и-мэйлгүй"} · бүртгэгдсэн ${dayLabel(data.createdAt)}`}
         actions={
           canWrite ? (
           <Button onClick={save} loading={busy}>
@@ -532,6 +535,11 @@ function CustomerDetailView({
                   <Td>
                     <span className="tnum underline underline-offset-2">{order.code}</span>
                     <div className="text-[12px] text-muted">{itemCount} ш</div>
+                    {order.isLeasing ? (
+                      <div className="mt-1">
+                        <LeasingBadge />
+                      </div>
+                    ) : null}
                   </Td>
                   <Td className="tnum text-[13px] text-ink-2">{dayLabel(order.createdAt)}</Td>
                   <Td className="text-right">

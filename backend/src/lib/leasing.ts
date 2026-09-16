@@ -37,6 +37,52 @@ export const DEFAULT_LEASING_TERMS_BODY =
 /** Үндсэн төлбөрийг 2–3 хуваах хоногийн зай. 5+8+8 = 21 хоног ≈ ирэх хугацаа. */
 export const DEFAULT_LEASING_PAY_GAPS = [5, 8, 8];
 
+export const SMS_TEMPLATE_MAX = 400;
+
+export const DEFAULT_LEASING_SMS_TEMPLATES = {
+  dueToday:
+    'ИтгэлШоп: Сайн байна уу, {ner}. Таны лизингийн эргэн төлөлтийн {dun}₮ төлбөрийг өнөөдөр ({ognoo}) төлөх хуваарьтай байна. Төлбөрөө хугацаанд нь төлнө үү. Баярлалаа.',
+  overdue:
+    'ИтгэлШоп: Сайн байна уу, {ner}. Таны лизингийн {dun}₮ төлбөр {honog} хоногийн хугацаа хэтэрсэн байна. Та аль болох хурдан төлбөл зохино. Баярлалаа.',
+  arrivedUnpaid:
+    'ИтгэлШоп: Сайн байна уу, {ner}. Таны захиалсан бараа амжилттай ирлээ. Үлдэгдэл төлбөр {dun}₮-өө төлсний дараа бараагаа хүлээн авах боломжтой. Баярлалаа.',
+} as const;
+
+export type LeasingSmsKind = 'due_today' | 'overdue' | 'arrived_unpaid';
+
+export function leasingSmsTemplatesOf(input: {
+  leasingSmsDueToday?: string | null;
+  leasingSmsOverdue?: string | null;
+  leasingSmsArrivedUnpaid?: string | null;
+}): { dueToday: string; overdue: string; arrivedUnpaid: string } {
+  return {
+    dueToday: input.leasingSmsDueToday?.trim() || DEFAULT_LEASING_SMS_TEMPLATES.dueToday,
+    overdue: input.leasingSmsOverdue?.trim() || DEFAULT_LEASING_SMS_TEMPLATES.overdue,
+    arrivedUnpaid: input.leasingSmsArrivedUnpaid?.trim() || DEFAULT_LEASING_SMS_TEMPLATES.arrivedUnpaid,
+  };
+}
+
+export function leasingSmsTemplateOf(
+  templates: ReturnType<typeof leasingSmsTemplatesOf>,
+  kind: LeasingSmsKind,
+): string {
+  if (kind === 'due_today') return templates.dueToday;
+  if (kind === 'overdue') return templates.overdue;
+  return templates.arrivedUnpaid;
+}
+
+export function fillLeasingSmsTemplate(
+  template: string,
+  vars: { ner: string; dun: number | string; ognoo?: string; honog?: number | string },
+): string {
+  const dun = typeof vars.dun === 'number' ? vars.dun.toLocaleString('mn-MN') : vars.dun;
+  return template
+    .replaceAll('{ner}', vars.ner)
+    .replaceAll('{dun}', dun)
+    .replaceAll('{ognoo}', vars.ognoo ?? '')
+    .replaceAll('{honog}', vars.honog == null ? '' : String(vars.honog));
+}
+
 export function leasingCopyOf(input: {
   leasingChoiceHint?: string | null;
   leasingTermsTitle?: string | null;
@@ -186,6 +232,8 @@ export function leasingView(order: {
   cargoFee?: number | null;
   dueAmount?: number | null;
   createdAt?: Date | string | null;
+  debtClosedAt?: Date | string | null;
+  writtenOffAmount?: number | null;
 }): LeasingView {
   const isLeasing = Boolean(order.isLeasing);
   const stored = order.leasingFee ?? 0;
@@ -207,7 +255,7 @@ export function leasingView(order: {
       (order.storageFee ?? 0) +
       (order.cargoFee ?? 0) -
       netPaid;
-  const remaining = Math.max(0, dueAmount);
+  const remaining = order.debtClosedAt ? 0 : Math.max(0, dueAmount);
 
   let nextPayKind: LeasingPayKind = 'NONE';
   let nextPayAmount = 0;
@@ -259,13 +307,24 @@ export const LEASING_FEE_HOLD_WHERE = {
   ...LEASING_FEE_HOLD_FILTER,
 };
 
-/** Дэлгүүрийн админ — лизинг захиалга харагдахгүй. */
-export const SHOP_STAFF_ORDER_WHERE = { isLeasing: false as const };
+/** Үндсэн админ — шимтгэл төлсөн бүх захиалга. Шимтгэл төлөөгүй лизинг харагдахгүй. */
+export const SHOP_STAFF_ORDER_WHERE = { NOT: LEASING_FEE_HOLD_WHERE };
 
-/** Лизингийн админ — шимтгэл төлөгдсөний дараа. */
-export const LEASING_STAFF_ORDER_WHERE = {
+/** Лизингийн хуваарьт захиалга — шимтгэл төлөгдсөний дараа. */
+export const LEASING_INSTALLMENT_WHERE = {
   isLeasing: true as const,
   NOT: LEASING_FEE_HOLD_FILTER,
+};
+
+/** Лизингийн эзэмшлийн бэлэн борлуулалт — хуваарь/шимтгэлгүй. */
+export const LEASING_RESALE_WHERE = {
+  payeeKind: 'LEASING' as const,
+  isLeasing: false as const,
+};
+
+/** Лизингийн админ — хуваарьт захиалга + өөрийн бэлэн борлуулалт. */
+export const LEASING_STAFF_ORDER_WHERE = {
+  OR: [LEASING_INSTALLMENT_WHERE, LEASING_RESALE_WHERE],
 };
 
 export function parseLeasingPayGaps(raw: unknown): number[] {
@@ -388,6 +447,50 @@ export function buildLeasingPayPlan(input: {
   };
 }
 
+export function leasingSmsName(name?: string | null): string {
+  const n = name?.trim();
+  return n || 'харилцагч';
+}
+
+export function leasingSmsDate(dueDay: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDay);
+  if (!m) return dueDay;
+  return `${Number(m[2])}-р сарын ${Number(m[3])}`;
+}
+
+export function leasingDueTodayReminder(plan: LeasingPayPlan | null | undefined): {
+  amount: number;
+  dueDay: string;
+} | null {
+  if (!plan) return null;
+  const steps = plan.steps.filter((s) => s.status === 'due_today' && s.remaining > 0);
+  if (steps.length === 0) return null;
+  return {
+    amount: steps.reduce((sum, s) => sum + s.remaining, 0),
+    dueDay: steps[0]!.dueDay,
+  };
+}
+
+export function leasingOverdueReminder(
+  plan: LeasingPayPlan | null | undefined,
+  now = new Date(),
+): { amount: number; overdueDays: number } | null {
+  if (!plan) return null;
+  const steps = plan.steps.filter((s) => s.status === 'overdue' && s.remaining > 0);
+  if (steps.length === 0) return null;
+  const today = startOfUbDay(now);
+  const overdueDays = Math.max(
+    1,
+    ...steps.map((s) =>
+      diffUbDays(today, startOfUbDay(new Date(`${s.dueDay}T12:00:00+08:00`))),
+    ),
+  );
+  return {
+    amount: steps.reduce((sum, s) => sum + s.remaining, 0),
+    overdueDays,
+  };
+}
+
 export function serializeLeasing(
   order: Parameters<typeof leasingView>[0],
   payGaps?: number[] | null,
@@ -444,6 +547,7 @@ export function resolveInvoiceAmount(
 
 /** Үндсэн төлбөр дутуу бол бараа өгөхгүй — лизингийн данс тусдаа. */
 export function leasingHoldsGoods(order: Parameters<typeof leasingView>[0]): boolean {
+  if (order.debtClosedAt) return false;
   const view = leasingView(order);
   return view.isLeasing && view.principalDue > 0;
 }
@@ -479,13 +583,23 @@ export function leasingGoodsWhere(goods: LeasingGoodsFilter): {
 }
 
 /** Лизинг захиалгын мөнгийг зөвхөн лизингийн админ бүртгэнэ. */
-export function canWriteLeasingOrderMoney(isLeasing: boolean, role?: string): boolean {
-  if (isLeasing !== true) return true;
+export function canWriteLeasingOrderMoney(
+  orderOrFlag: boolean | { isLeasing?: boolean | null; payeeKind?: string | null },
+  role?: string,
+): boolean {
+  const needs =
+    typeof orderOrFlag === 'boolean'
+      ? orderOrFlag === true
+      : orderOrFlag.isLeasing === true || orderOrFlag.payeeKind === 'LEASING';
+  if (!needs) return true;
   return role === 'LEASING';
 }
 
-export function assertCanWriteLeasingOrderMoney(isLeasing: boolean, role?: string): void {
-  if (!canWriteLeasingOrderMoney(isLeasing, role)) {
+export function assertCanWriteLeasingOrderMoney(
+  orderOrFlag: boolean | { isLeasing?: boolean | null; payeeKind?: string | null },
+  role?: string,
+): void {
+  if (!canWriteLeasingOrderMoney(orderOrFlag, role)) {
     throw forbidden('Лизинг захиалгын төлбөрийг зөвхөн лизингийн админ бүртгэнэ.');
   }
 }

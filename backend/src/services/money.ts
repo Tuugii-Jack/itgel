@@ -32,7 +32,9 @@ export interface OrderTotals {
   refundedAmount: number;
   /** Цэвэр орлого: төлсөн − буцаасан. */
   netPaid: number;
-  /** total − netPaid. Сөрөг бол илүү төлсөн байна. */
+  /** Үлдсэн өрийн хаалт — Payment мөр биш. */
+  writtenOffAmount: number;
+  /** total − netPaid − writtenOffAmount. Сөрөг бол илүү төлсөн байна. */
   dueAmount: number;
 }
 
@@ -47,6 +49,7 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
       isLeasing: true,
       leasingFee: true,
       subtotal: true,
+      writtenOffAmount: true,
     },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
@@ -88,6 +91,7 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
     leasingFee,
     paidAmount,
     refundedAmount,
+    writtenOffAmount: order.writtenOffAmount,
   });
 
   await tx.order.update({
@@ -114,10 +118,12 @@ export function computeTotals(input: {
   leasingFee?: number;
   paidAmount: number;
   refundedAmount: number;
+  writtenOffAmount?: number;
 }): OrderTotals {
   const storageFee = input.storageFee ?? 0;
   const cargoFee = input.cargoFee ?? 0;
   const leasingFee = input.leasingFee ?? 0;
+  const writtenOffAmount = Math.max(0, input.writtenOffAmount ?? 0);
   const total = input.subtotal + leasingFee + storageFee + cargoFee;
   const netPaid = input.paidAmount - input.refundedAmount;
   return {
@@ -130,11 +136,12 @@ export function computeTotals(input: {
     paidAmount: input.paidAmount,
     refundedAmount: input.refundedAmount,
     netPaid,
-    dueAmount: total - netPaid,
+    writtenOffAmount,
+    dueAmount: total - netPaid - writtenOffAmount,
   };
 }
 
-export type PaymentState = 'UNPAID' | 'PARTIAL' | 'PAID' | 'OVERPAID' | 'REFUNDED';
+export type PaymentState = 'UNPAID' | 'PARTIAL' | 'PAID' | 'OVERPAID' | 'REFUNDED' | 'WRITTEN_OFF';
 
 /**
  * Төлбөрийн байдал — хадгалагдахгүй, дүнгээс гарна.
@@ -143,6 +150,9 @@ export type PaymentState = 'UNPAID' | 'PARTIAL' | 'PAID' | 'OVERPAID' | 'REFUNDE
 export function paymentState(totals: OrderTotals): PaymentState {
   if (totals.netPaid <= 0) return totals.refundedAmount > 0 ? 'REFUNDED' : 'UNPAID';
   if (totals.dueAmount < 0) return 'OVERPAID';
+  if (totals.writtenOffAmount > 0 && totals.dueAmount === 0 && totals.netPaid < totals.total) {
+    return 'WRITTEN_OFF';
+  }
   if (totals.dueAmount === 0) return 'PAID';
   return 'PARTIAL';
 }
@@ -196,12 +206,14 @@ export function unpaidCargoFee(input: {
 
 type ShopDueInput = {
   isLeasing?: boolean | null;
+  payeeKind?: string | null;
   subtotal: number;
   leasingFee?: number | null;
   storageFee?: number | null;
   cargoFee?: number | null;
   paidAmount: number;
   refundedAmount: number;
+  writtenOffAmount?: number | null;
 };
 
 /**
@@ -210,13 +222,14 @@ type ShopDueInput = {
  * Энгийн захиалгад нийт үлдэгдэлтэй ижил (сөрөгийг 0 болгоно).
  */
 export function shopDueAmount(input: ShopDueInput): number {
+  if (input.payeeKind === 'LEASING' && !Boolean(input.isLeasing)) return 0;
   const storageFee = Math.max(0, input.storageFee ?? 0);
   const cargoFee = Math.max(0, input.cargoFee ?? 0);
   const leasingFee = Math.max(0, input.leasingFee ?? 0);
   const netPaid = input.paidAmount - input.refundedAmount;
   const leasing = Boolean(input.isLeasing) || leasingFee > 0;
   if (!leasing) {
-    return Math.max(0, input.subtotal + storageFee + cargoFee - netPaid);
+    return Math.max(0, input.subtotal + storageFee + cargoFee - netPaid - (input.writtenOffAmount ?? 0));
   }
   const towardShop = Math.max(0, netPaid - leasingFee - input.subtotal);
   return Math.max(0, storageFee + cargoFee - towardShop);
@@ -224,6 +237,17 @@ export function shopDueAmount(input: ShopDueInput): number {
 
 /** Лизингийн дансны үлдэгдэл (шимтгэл + үндсэн). Дэлгүүрийн кассанд оруулахгүй. */
 export function leasingAccountDue(input: ShopDueInput): number {
+  if (input.payeeKind === 'LEASING' && !Boolean(input.isLeasing) && !(input.leasingFee ?? 0)) {
+    return Math.max(0, computeTotals({
+      subtotal: input.subtotal,
+      storageFee: input.storageFee ?? 0,
+      cargoFee: input.cargoFee ?? 0,
+      leasingFee: 0,
+      paidAmount: input.paidAmount,
+      refundedAmount: input.refundedAmount,
+      writtenOffAmount: input.writtenOffAmount ?? 0,
+    }).dueAmount);
+  }
   if (!Boolean(input.isLeasing) && !(input.leasingFee ?? 0)) return 0;
   const view = leasingView(input);
   return view.feeDue + view.principalDue;
@@ -235,6 +259,7 @@ export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
   PAID: 'Бүрэн төлсөн',
   OVERPAID: 'Илүү төлсөн',
   REFUNDED: 'Буцаасан',
+  WRITTEN_OFF: 'Өр хаасан',
 };
 
 /** Буцаалт нь цэвэр орлогоос хэтрэхгүй байх. */
@@ -259,6 +284,7 @@ export async function loadOrderTotals(orderId: string): Promise<OrderTotals> {
       leasingFee: true,
       paidAmount: true,
       refundedAmount: true,
+      writtenOffAmount: true,
     },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');

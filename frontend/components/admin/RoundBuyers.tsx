@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { Metric, OrderBadge, PageHead, Table, Td, Th } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Spinner } from "@/components/ui";
@@ -52,9 +53,7 @@ export function RoundBuyers({
     }
   }, [roundId]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   if (loading) {
     return (

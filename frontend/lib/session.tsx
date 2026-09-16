@@ -13,7 +13,7 @@ import {
 import { api, isAuthError, readToken, writeToken } from "./api";
 import type { Me } from "./types";
 
-/** Хэрэглэгчийн нэвтрэлт — и-мэйл + нууц үг. */
+/** Хэрэглэгчийн нэвтрэлт — утас + OTP. */
 interface Session {
   me: Me | null;
   loading: boolean;

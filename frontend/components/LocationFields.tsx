@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Input } from "@/components/ui";
+import { useOnKeyChange } from "@/lib/syncKey";
 import {
   AIMAGS,
   aimagDisplayName,
@@ -32,9 +33,9 @@ export function LocationFields({
   const [zone, setZone] = useState<DeliveryZone | null>(inferred);
   const [query, setQuery] = useState("");
 
-  useEffect(() => {
+  useOnKeyChange(inferred ?? "", () => {
     if (inferred) setZone(inferred);
-  }, [inferred]);
+  });
 
   const pickZone = (next: DeliveryZone) => {
     if (readOnly) return;

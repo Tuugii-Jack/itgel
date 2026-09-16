@@ -10,7 +10,9 @@ import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 
 const NAV = [
   { href: "/leasing", label: "Захиалга" },
+  { href: "/leasing/ready", label: "Бэлэн бараа" },
   { href: "/leasing/customers", label: "Хэрэглэгчид" },
+  { href: "/leasing/sms", label: "SMS" },
   { href: "/leasing/settings", label: "Тохиргоо" },
 ];
 

@@ -5,7 +5,7 @@ import type { AdminToken, CustomerToken, TokenPayload } from './jwt.js';
 
 /**
  * Supabase Auth-ийн олгосон access token-ыг JWKS-ээр шалгана.
- * И-мэйлээр Customer холбоно (утасны OTP байхгүй).
+ * И-мэйлээр Customer холбоно (утасны OTP-оос тусдаа).
  */
 const jwks = env.SUPABASE_JWKS_URL ? createRemoteJWKSet(new URL(env.SUPABASE_JWKS_URL)) : null;
 

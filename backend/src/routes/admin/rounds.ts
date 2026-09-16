@@ -19,7 +19,7 @@ import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
 import { replaceRoundSkuStocks, skuStockSum } from '../../lib/skuStock.js';
 import { selectionsOf, sizeColorFromSelections, tallyVariants } from '../../lib/options.js';
 import { diffUbDays } from '../../lib/date.js';
-import { productStatus, roundFields } from './products.js';
+import { productStatus, roundFields } from '../../modules/catalog/productFields.js';
 
 /**
  * Барааны тойрог — үнэ, хаах огноо, үлдэгдэл, төлөв нь энд байна.
@@ -49,7 +49,7 @@ adminRoundsRouter.get(
       where: { id: req.params.id },
       include: roundInclude,
     });
-    if (!round) throw notFound('Тойрог олдсонгүй.');
+    if (!round || round.ownerKind === 'LEASING') throw notFound('Тойрог олдсонгүй.');
     res.json({ data: adminRound(round) });
   }),
 );
@@ -70,7 +70,7 @@ adminRoundsRouter.get(
       where: { id: req.params.id },
       include: { product: { select: { id: true, name: true } } },
     });
-    if (!round) throw notFound('Тойрог олдсонгүй.');
+    if (!round || round.ownerKind === 'LEASING') throw notFound('Тойрог олдсонгүй.');
 
     const items = await prisma.orderItem.findMany({
       where: { roundId: round.id, order: { deletedAt: null } },
@@ -299,6 +299,7 @@ adminRoundsRouter.post(
       where: {
         id: { in: ids },
         deletedAt: null,
+        ownerKind: 'SHOP',
         ...(status === 'ACTIVE'
           ? { OR: [{ closeAt: null }, { closeAt: { gt: new Date() } }] }
           : {}),
@@ -343,7 +344,7 @@ adminRoundsRouter.delete(
       where: { id: req.params.id, deletedAt: null },
       include: { _count: { select: { orderItems: true } } },
     });
-    if (!round) throw notFound('Тойрог олдсонгүй.');
+    if (!round || round.ownerKind === 'LEASING') throw notFound('Тойрог олдсонгүй.');
 
     if (round._count.orderItems > 0) {
       throw conflict(

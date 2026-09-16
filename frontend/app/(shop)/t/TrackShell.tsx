@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { EmailAuthForm } from "@/components/EmailAuthForm";
+import { PhoneAuthForm } from "@/components/PhoneAuthForm";
 import { Badge, Card, Skeleton, Spinner, type Tone } from "@/components/ui";
 import { api } from "@/lib/api";
 import { dayLabel, money } from "@/lib/format";
@@ -123,10 +123,7 @@ export function TrackChrome({ children }: { children: ReactNode }) {
         <div className="px-4 pt-6 lg:mx-auto lg:max-w-[420px] lg:px-0 lg:pt-10">
           <div className="mb-4 text-[20px] font-medium lg:text-[24px]">Захиалга хянах</div>
           <Card className="flex flex-col gap-3 p-4 lg:p-6">
-            <p className="m-0 text-[13px] text-ink-2">
-              Нэвтэрсний дараа зөвхөн өөрийн захиалгыг харна.
-            </p>
-            <EmailAuthForm />
+            <PhoneAuthForm />
           </Card>
         </div>
       </div>

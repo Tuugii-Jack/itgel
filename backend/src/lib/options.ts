@@ -3,7 +3,9 @@ import type { ProductVariant } from '@prisma/client';
 export type ProductOption = { name: string; values: string[] };
 
 /** Variant мөрүүдийг бүлэг нэр → утгууд болгоно (sortOrder-оор). */
-export function optionsFromVariants(variants: ProductVariant[] | undefined): ProductOption[] {
+export function optionsFromVariants(
+  variants: Pick<ProductVariant, 'kind' | 'value' | 'sortOrder'>[] | undefined,
+): ProductOption[] {
   const map = new Map<string, { values: string[]; minSort: number }>();
   for (const v of variants ?? []) {
     const entry = map.get(v.kind);

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { FloatingCart } from "@/components/FloatingCart";
-import { ShopHeader } from "@/components/ShopHeader";
+import { FloatingCart } from "@/components/layout/FloatingCart";
+import { ShopHeader } from "@/components/layout/ShopHeader";
 import { CartProvider } from "@/lib/cart";
 import { SessionProvider } from "@/lib/session";
 

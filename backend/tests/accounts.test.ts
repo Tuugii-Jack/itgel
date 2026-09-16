@@ -143,15 +143,15 @@ describe('customer partial updates', () => {
     expect(mocks.customer.update.mock.calls[0]![0].data).not.toHaveProperty('phone');
   });
 
-  it.each([null, ''])('still permits explicitly clearing phone with %s', async (phone) => {
-    await invoke(publicMeRouter, 'patch', '/', { phone });
-    expect(customer.phone).toBeNull();
-  });
-
-  it('still normalizes an explicitly supplied phone', async () => {
-    await invoke(publicMeRouter, 'patch', '/', { phone: '+976 8811 2233' });
-    expect(customer.phone).toBe('88112233');
-  });
+  it.each([null, '', '+976 8811 2233'])(
+    'profile PATCH ignores phone %s so login identity cannot change',
+    async (phone) => {
+      await invoke(publicMeRouter, 'patch', '/', { phone, name: 'Still here' });
+      expect(customer.phone).toBe('99112233');
+      expect(customer.name).toBe('Still here');
+      expect(mocks.customer.update.mock.calls[0]![0].data).not.toHaveProperty('phone');
+    },
+  );
 });
 
 describe('email changes', () => {
@@ -255,5 +255,40 @@ describe('email changes', () => {
     ]);
     expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
     expect(mocks.customer.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('adds a first email when the phone account has none', async () => {
+    customer.email = null;
+    customer.passwordHash = null;
+    customer.emailVerifiedAt = null;
+    const requested = await invoke(publicMeRouter, 'post', '/email/change', {
+      email: 'new@example.com',
+    });
+    expect(requested.data.email).toBe('new@example.com');
+    expect(otps[0]).toMatchObject({
+      customerId: customer.id,
+      previousEmail: null,
+      purpose: 'CHANGE_EMAIL',
+    });
+    expect(customer.email).toBeNull();
+
+    otps[0]!.createdAt = new Date(Date.now() - 61_000);
+    const resent = await invoke(publicAuthRouter, 'post', '/email/resend', {
+      email: 'new@example.com',
+    });
+    expect(resent.data.email).toBe('new@example.com');
+    expect(mocks.sendMail).toHaveBeenCalledTimes(2);
+    expect(customer.email).toBeNull();
+
+    const verified = await invoke(publicAuthRouter, 'post', '/email/verify', {
+      email: 'new@example.com',
+      code: otps[0]!.code,
+    });
+    expect(verified.data).toMatchObject({
+      token: 'new-session-token',
+      customer: { email: 'new@example.com', emailVerified: true },
+    });
+    expect(customer.email).toBe('new@example.com');
+    expect(otps[0]!.usedAt).toBeInstanceOf(Date);
   });
 });

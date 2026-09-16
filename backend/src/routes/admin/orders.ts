@@ -7,10 +7,11 @@ import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { profitOf } from '../../lib/money.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
+import { adminOrderDetail } from '../../modules/orders/adminDetail.js';
 import { createOrder } from '../../services/createOrder.js';
 import { adminPaymentsRouter } from './payments.js';
 import { adminOrderQpayRouter } from './orderQpay.js';
-import { serializeLeasing } from '../../lib/leasing.js';
+import { serializeLeasing, SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import {
   computeTotals,
   fullyPaid,
@@ -25,11 +26,11 @@ import {
   adminOrderItem,
   batchSummary,
   orderStatusLabel,
-  publicDelivery,
 } from '../../services/serialize.js';
 import { syncOrderStorageFee } from '../../services/storageFee.js';
 import { listOrdersByProduct, ordersByProductDates } from '../../services/ordersByProduct.js';
 import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
+import { staffPhoneFields } from '../../services/phoneOtp.js';
 
 export const adminOrdersRouter = Router();
 
@@ -69,7 +70,7 @@ adminOrdersRouter.get(
 
     const where: Prisma.OrderWhereInput = {
       deletedAt: q.deleted ? { not: null } : null,
-      isLeasing: false,
+      ...SHOP_STAFF_ORDER_WHERE,
       ...(q.status ? { status: q.status } : {}),
       ...(q.batch ? { batchId: q.batch } : {}),
       ...(q.fulfilment ? { fulfilment: q.fulfilment } : {}),
@@ -185,10 +186,10 @@ adminOrdersRouter.get(
       : null;
 
     const where: Prisma.OrderWhereInput = ids
-      ? { id: { in: ids }, isLeasing: false }
+      ? { id: { in: ids }, ...SHOP_STAFF_ORDER_WHERE }
       : {
           deletedAt: q.deleted ? { not: null } : null,
-          isLeasing: false,
+          ...SHOP_STAFF_ORDER_WHERE,
           ...(q.status ? { status: q.status } : {}),
           ...(q.batch ? { batchId: q.batch } : {}),
           ...(q.fulfilment ? { fulfilment: q.fulfilment } : {}),
@@ -376,13 +377,18 @@ adminOrdersRouter.post(
       const existing = await prisma.customer.findUnique({ where: { email } });
       if (existing) {
         customerId = existing.id;
-        const patch: { phone?: string; name?: string | null; emailVerifiedAt?: Date } = {};
+        const patch: {
+          phone?: string | null;
+          phoneVerifiedAt?: Date | null;
+          name?: string | null;
+          emailVerifiedAt?: Date;
+        } = {};
         if (body.phone && existing.phone !== body.phone) {
           const phoneTaken = await prisma.customer.findFirst({
             where: { phone: body.phone, NOT: { id: existing.id } },
           });
           if (phoneTaken) throw conflict('Энэ утас өөр бүртгэлтэй холбогдсон.');
-          patch.phone = body.phone;
+          Object.assign(patch, staffPhoneFields(body.phone));
         }
         if (body.name && body.name !== existing.name) patch.name = body.name;
         if (!existing.emailVerifiedAt) patch.emailVerifiedAt = new Date();
@@ -397,7 +403,7 @@ adminOrdersRouter.post(
         const created = await prisma.customer.create({
           data: {
             email,
-            phone: body.phone ?? null,
+            ...staffPhoneFields(body.phone ?? null),
             name: body.name ?? null,
             emailVerifiedAt: new Date(),
           },
@@ -634,57 +640,5 @@ adminOrdersRouter.post(
   }),
 );
 
-type OrderDetail = Prisma.OrderGetPayload<{
-  include: {
-    customer: true;
-    items: { include: { product: true } };
-    batch: true;
-    delivery: true;
-  };
-}>;
+export { adminOrderDetail } from '../../modules/orders/adminDetail.js';
 
-export function adminOrderDetail(order: OrderDetail, payGaps?: number[] | null) {
-  // Цуцлагдсан мөр ашгийн тооцоонд ордоггүй.
-  const activeItems = order.items.filter((i) => i.cancelledAt === null);
-  const totals = computeTotals(order);
-  const state = paymentState(totals);
-
-  return {
-    id: order.id,
-    code: order.code,
-    status: order.status,
-    statusLabel: orderStatusLabel(order.status),
-    customer: {
-      id: order.customer.id,
-      name: order.customer.name,
-      phone: order.customer.phone,
-      email: order.customer.email,
-    },
-    items: order.items.map(adminOrderItem),
-    subtotal: order.subtotal,
-    deliveryFee: totals.deliveryFee,
-    storageFee: order.storageFee,
-    cargoFee: order.cargoFee,
-    cargoPayMethod: order.cargoPayMethod,
-    paidAmount: order.paidAmount,
-    refundedAmount: order.refundedAmount,
-    dueAmount: order.dueAmount,
-    shopDueAmount: shopDueAmount(order),
-    total: totals.total,
-    netPaid: totals.netPaid,
-    paymentState: state,
-    paymentStateLabel: PAYMENT_STATE_LABEL[state],
-    ...serializeLeasing(order, payGaps),
-    paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
-    qpayInvoiceId: order.qpayInvoiceId,
-    qpayInvoiceAt: order.qpayInvoiceAt?.toISOString() ?? null,
-    profit: profitOf(activeItems),
-    fulfilment: order.fulfilment,
-    note: order.note,
-    batch: batchSummary(order.batch),
-    delivery: publicDelivery(order.delivery),
-    timeline: buildTimeline(order),
-    createdAt: order.createdAt.toISOString(),
-    updatedAt: order.updatedAt.toISOString(),
-  };
-}

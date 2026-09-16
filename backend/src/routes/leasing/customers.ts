@@ -9,6 +9,7 @@ import { serializeLeasing, LEASING_STAFF_ORDER_WHERE } from '../../lib/leasing.j
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { orderStatusLabel, publicOrderItem } from '../../services/serialize.js';
 import { currentLeasingPayGaps } from '../../services/settings.js';
+import { staffPhoneFields } from '../../services/phoneOtp.js';
 
 export const leasingCustomersRouter = Router();
 
@@ -33,7 +34,7 @@ const phoneOptional = z
 
 function serializeCustomer(customer: {
   id: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   name: string | null;
   emailVerifiedAt: Date | null;
@@ -220,7 +221,7 @@ leasingCustomersRouter.patch(
       data: {
         ...(body.email !== undefined ? { email: body.email } : {}),
         ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.phone !== undefined ? { phone: body.phone } : {}),
+        ...staffPhoneFields(body.phone),
         ...(body.district !== undefined ? { district: body.district } : {}),
         ...(body.khoroo !== undefined ? { khoroo: body.khoroo } : {}),
         ...(body.addressText !== undefined ? { addressText: body.addressText } : {}),

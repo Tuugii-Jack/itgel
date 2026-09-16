@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
-import { EmailAuthForm } from "@/components/EmailAuthForm";
+import { PhoneAuthForm } from "@/components/PhoneAuthForm";
 import {
   Button,
   Empty,
@@ -34,11 +34,13 @@ export default function CartPage() {
   const [buyerName, setBuyerName] = useState("");
   const [contactPhone, setContactPhone] = useState("");
   const [note, setNote] = useState("");
-
-  useEffect(() => {
-    if (session.me?.name) setBuyerName(session.me.name);
-    if (session.me?.phone) setContactPhone(session.me.phone);
-  }, [session.me]);
+  const me = session.me;
+  const [seenMe, setSeenMe] = useState(me);
+  if (me !== seenMe) {
+    setSeenMe(me);
+    if (me?.name) setBuyerName(me.name);
+    if (me?.phone) setContactPhone(me.phone);
+  }
 
   const groups = useMemo(() => groupLines(cart.lines), [cart.lines]);
 
@@ -79,7 +81,7 @@ export default function CartPage() {
   };
 
   return (
-    <div className='screen flex flex-col pb-28 lg:pb-12'>
+    <div className={`screen flex flex-col ${session.me ? "pb-28 lg:pb-12" : "pb-12"}`}>
       {/* Laptop — гарчиг ба агуулгыг нэг багананд голлуулна */}
       <div className='px-4 pt-6 lg:mx-auto lg:w-full lg:max-w-[720px] lg:px-10 lg:pt-8'>
         <div className='text-[20px] font-medium lg:text-[24px]'>Сагс</div>
@@ -116,14 +118,14 @@ export default function CartPage() {
 
           {/* Захиалагчийн мэдээлэл */}
           <div className='flex flex-col gap-4 px-4 pt-6 lg:gap-5 lg:rounded-[12px] lg:border lg:border-line lg:px-6 lg:py-6'>
-            <div className='text-[15px] font-medium lg:text-[17px]'>
-              Захиалагчийн мэдээлэл
-            </div>
-
             {!session.me ? (
-              <EmailAuthForm variant='checkout' initialMode='register' />
+              <PhoneAuthForm />
             ) : (
               <>
+                <div className='text-[15px] font-medium lg:text-[17px]'>
+                  Захиалагчийн мэдээлэл
+                </div>
+
                 <div className='flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-4'>
                   <div className='flex flex-col gap-2'>
                     <span className='text-[13px] text-ink-2'>Нэр</span>
@@ -134,10 +136,10 @@ export default function CartPage() {
                     />
                   </div>
                   <div className='flex flex-col gap-2'>
-                    <span className='text-[13px] text-ink-2'>И-мэйл</span>
+                    <span className='text-[13px] text-ink-2'>Утас</span>
                     <div className='flex h-11 items-center justify-between gap-3 rounded-[8px] border border-line px-3'>
                       <span className='truncate text-[15px]'>
-                        {session.me.email}
+                        {session.me.phone ?? session.me.email ?? "—"}
                       </span>
                       <button
                         type='button'
@@ -182,29 +184,23 @@ export default function CartPage() {
             )}
           </div>
 
-          <div className='hidden px-4 pt-6 lg:block lg:px-0'>
-            <Button
-              full
-              size='bar'
-              onClick={goCheckout}
-              disabled={!session.me}
-            >
-              Үргэлжлүүлэх
-            </Button>
-          </div>
+          {session.me && (
+            <div className='hidden px-4 pt-6 lg:block lg:px-0'>
+              <Button full size='bar' onClick={goCheckout}>
+                Үргэлжлүүлэх
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className='fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3 lg:hidden'>
-        <Button
-          full
-          size='bar'
-          onClick={goCheckout}
-          disabled={!session.me}
-        >
-          Үргэлжлүүлэх
-        </Button>
-      </div>
+      {session.me && (
+        <div className='fixed inset-x-0 bottom-0 z-20 mx-auto max-w-[560px] border-t border-line bg-bg px-4 py-3 lg:hidden'>
+          <Button full size='bar' onClick={goCheckout}>
+            Үргэлжлүүлэх
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

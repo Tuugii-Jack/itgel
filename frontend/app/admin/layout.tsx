@@ -87,10 +87,11 @@ function NavLinks({
   const activeGroup =
     groups.find((group) => groupHasActive(pathname, group.items))?.label ?? null;
   const [open, setOpen] = useState<string | null>(activeGroup);
-
-  useEffect(() => {
+  const [prevActive, setPrevActive] = useState(activeGroup);
+  if (activeGroup !== prevActive) {
+    setPrevActive(activeGroup);
     if (activeGroup) setOpen(activeGroup);
-  }, [activeGroup]);
+  }
 
   return (
     <nav className="flex flex-col gap-0.5">

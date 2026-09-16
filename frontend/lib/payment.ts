@@ -12,6 +12,7 @@ export const PAYMENT_LABEL: Record<PaymentState, string> = {
   PAID: "Бүрэн төлсөн",
   OVERPAID: "Илүү төлсөн",
   REFUNDED: "Буцаасан",
+  WRITTEN_OFF: "Өр хаасан",
 };
 
 /** Админы хүснэгтэд багтахаар богиносгосон хувилбар. */
@@ -27,6 +28,7 @@ export const PAYMENT_TONE: Record<PaymentState, Tone> = {
   PAID: "ok",
   OVERPAID: "info",
   REFUNDED: "neutral",
+  WRITTEN_OFF: "neutral",
 };
 
 /** Хэрэглэгчид харуулах тайлбар — юу хийхийг нь хэлнэ. */
@@ -36,6 +38,7 @@ export const PAYMENT_HINT: Record<PaymentState, string> = {
   PAID: "Төлбөр бүрэн хүлээн авсан.",
   OVERPAID: "Илүү төлсөн дүнг буцаана. Бид тантай холбогдоно.",
   REFUNDED: "Төлбөрийг буцаасан.",
+  WRITTEN_OFF: "Үлдсэн өрийг хаасан. Төлсөн мөнгө буцаагдаагүй.",
 };
 
 /** Захиалга мөнгө хүлээж байгаа эсэх. */

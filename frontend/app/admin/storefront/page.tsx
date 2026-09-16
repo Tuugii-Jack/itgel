@@ -1,5 +1,6 @@
 "use client";
 
+import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHead } from "@/components/admin/shared";
@@ -70,9 +71,7 @@ export default function StorefrontPage() {
     }
   }, [query]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   /**
    * Бараануудыг тойрог болгон задална — дэлгүүрт нэг тойрог = нэг карт.

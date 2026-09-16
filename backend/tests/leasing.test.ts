@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leasingFeeOf, leasingFlagOf, leasingView, leasingFeeHold, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing, SHOP_STAFF_ORDER_WHERE, LEASING_STAFF_ORDER_WHERE, LEASING_FEE_HOLD_WHERE } from '../src/lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingView, leasingFeeHold, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing, SHOP_STAFF_ORDER_WHERE, LEASING_STAFF_ORDER_WHERE, LEASING_FEE_HOLD_WHERE, leasingDueTodayReminder, leasingOverdueReminder, leasingSmsDate, fillLeasingSmsTemplate, leasingSmsTemplatesOf, DEFAULT_LEASING_SMS_TEMPLATES } from '../src/lib/leasing.js';
 import { AppError } from '../src/lib/errors.js';
 
 describe('Лизингийн шимтгэл', () => {
@@ -77,15 +77,19 @@ describe('Лизингийн төлөлт', () => {
   });
 
   it('шимтгэл төлөгдөөгүй лизинг админд захиалга биш', () => {
-    expect(SHOP_STAFF_ORDER_WHERE).toEqual({ isLeasing: false });
+    expect(SHOP_STAFF_ORDER_WHERE).toEqual({
+      NOT: { isLeasing: true, status: 'NEW', paidAmount: 0 },
+    });
     expect(LEASING_FEE_HOLD_WHERE).toEqual({
       isLeasing: true,
       status: 'NEW',
       paidAmount: 0,
     });
     expect(LEASING_STAFF_ORDER_WHERE).toEqual({
-      isLeasing: true,
-      NOT: { status: 'NEW', paidAmount: 0 },
+      OR: [
+        { isLeasing: true, NOT: { status: 'NEW', paidAmount: 0 } },
+        { payeeKind: 'LEASING', isLeasing: false },
+      ],
     });
   });
 
@@ -196,6 +200,11 @@ describe('Лизинг захиалгын мөнгө бичих эрх', () => {
     expect(canWriteLeasingOrderMoney(false, 'ADMIN')).toBe(true);
     expect(canWriteLeasingOrderMoney(false, 'STAFF')).toBe(true);
   });
+
+  it('бэлэн борлуулалтын мөнгийг зөвхөн лизингийн админ бүртгэнэ', () => {
+    expect(canWriteLeasingOrderMoney({ isLeasing: false, payeeKind: 'LEASING' }, 'ADMIN')).toBe(false);
+    expect(canWriteLeasingOrderMoney({ isLeasing: false, payeeKind: 'LEASING' }, 'LEASING')).toBe(true);
+  });
 });
 
 describe('Лизинг бараа ирсэн эсэх', () => {
@@ -247,6 +256,20 @@ describe('Лизинг үлдэгдэлтэй бараа авах', () => {
         subtotal: 100_000,
         paidAmount: 0,
         refundedAmount: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it('өр хаасан бол бараа хориглохгүй', () => {
+    expect(
+      leasingHoldsGoods({
+        isLeasing: true,
+        leasingFee: 10_000,
+        subtotal: 100_000,
+        paidAmount: 10_000,
+        refundedAmount: 0,
+        dueAmount: 100_000,
+        debtClosedAt: new Date(),
       }),
     ).toBe(false);
   });
@@ -320,6 +343,43 @@ describe('Лизингийн хуваарь', () => {
     expect(plan?.overdue).toBe(true);
     expect(plan?.dueToday).toBe(false);
     expect(plan?.steps[1]?.status).toBe('overdue');
+    const overdue = leasingOverdueReminder(plan, now);
+    expect(overdue?.overdueDays).toBe(1);
+    expect(overdue?.amount).toBe(plan?.steps[1]?.remaining);
+  });
+
+  it('өнөөдөр төлөх сануулгын дүн, огноо', () => {
+    const plan = buildLeasingPayPlan({
+      isLeasing: true,
+      createdAt: new Date('2026-09-01T04:00:00.000Z'),
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 10_000,
+      refundedAmount: 0,
+      payGaps: [5, 8, 8],
+      now: new Date('2026-09-06T04:00:00.000Z'),
+    });
+    expect(plan?.dueToday).toBe(true);
+    const due = leasingDueTodayReminder(plan);
+    expect(due?.amount).toBe(plan?.steps[1]?.remaining);
+    expect(leasingSmsDate(due!.dueDay)).toBe('9-р сарын 6');
+  });
+
+  it('сануулгын SMS загварт нэр, дүн, огноо орно', () => {
+    const text = fillLeasingSmsTemplate(DEFAULT_LEASING_SMS_TEMPLATES.dueToday, {
+      ner: 'Бат',
+      dun: 50_000,
+      ognoo: '9-р сарын 12',
+    });
+    expect(text).toContain('Бат');
+    expect(text).toContain('50,000₮');
+    expect(text).toContain('9-р сарын 12');
+    expect(text).not.toContain('{ner}');
+  });
+
+  it('хоосон тохиргоо үндсэн SMS загвар, бичсэн бол түүнийг авна', () => {
+    expect(leasingSmsTemplatesOf({}).dueToday).toBe(DEFAULT_LEASING_SMS_TEMPLATES.dueToday);
+    expect(leasingSmsTemplatesOf({ leasingSmsDueToday: '  Сайн {ner}  ' }).dueToday).toBe('Сайн {ner}');
   });
 
   it('QPay үндсэн төлбөрийг хуваарьт дүнгээр нэхэмжилнэ', () => {

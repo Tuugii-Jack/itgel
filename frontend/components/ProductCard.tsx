@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { ShopPrice } from "@/components/ShopPrice";
-import { Badge, Button, Divider } from "@/components/ui";
+import { Button, Divider } from "@/components/ui";
 import { useCart } from "@/lib/cart";
 import { countdown } from "@/lib/format";
 import { priceLabel, productClosed, productSoldOut } from "@/lib/options";
@@ -93,6 +93,7 @@ export function ProductCard({ product }: { product: Product }) {
                   arriveFrom: product.arriveFrom,
                   arriveTo: product.arriveTo,
                   stock: product.stock,
+                  ownerKind: product.ownerKind === "LEASING" ? "LEASING" : "SHOP",
                 })
               }
             >
@@ -152,15 +153,13 @@ function CloseCountdown({ closeAt }: { closeAt: string }) {
 
 /** Секунд тутам шинэчилнэ — «1 хоног 3 цаг 12 мин 5 сек үлдсэн». */
 export function useCountdown(iso: string | null): string {
-  // Эхлэхдээ хоосон — сервер ба браузерын цаг зөрж hydration алдаа гаргахгүй.
-  const [label, setLabel] = useState("");
-
-  useEffect(() => {
-    setLabel(countdown(iso));
-    if (!iso) return;
-    const timer = setInterval(() => setLabel(countdown(iso)), 1000);
-    return () => clearInterval(timer);
-  }, [iso]);
-
-  return label;
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      if (!iso) return () => {};
+      const timer = setInterval(onStoreChange, 1000);
+      return () => clearInterval(timer);
+    },
+    () => countdown(iso),
+    () => "",
+  );
 }

@@ -7,6 +7,8 @@ import { normalizePhone, PHONE_RE } from '../../lib/code.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { toIso } from '../../lib/date.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
+import { SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
+import { staffPhoneFields } from '../../services/phoneOtp.js';
 import { orderStatusLabel, publicOrderItem } from '../../services/serialize.js';
 
 export const adminCustomersRouter = Router();
@@ -34,7 +36,7 @@ const phoneOptional = z
 
 function serializeAdminCustomer(customer: {
   id: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   name: string | null;
   emailVerifiedAt: Date | null;
@@ -117,7 +119,7 @@ adminCustomersRouter.get(
             customerId: { in: customers.map((c) => c.id) },
             deletedAt: null,
             status: { not: 'CANCELLED' },
-            isLeasing: false,
+            ...SHOP_STAFF_ORDER_WHERE,
           },
           _count: { _all: true },
           _sum: { subtotal: true },
@@ -178,7 +180,7 @@ adminCustomersRouter.post(
       data: {
         email: body.email,
         name: body.name ?? null,
-        phone: body.phone ?? null,
+        ...staffPhoneFields(body.phone ?? null),
         passwordHash: body.password ? await bcrypt.hash(body.password, BCRYPT_ROUNDS) : null,
         emailVerifiedAt: body.emailVerified === false ? null : new Date(),
         district: body.district ?? null,
@@ -199,7 +201,7 @@ adminCustomersRouter.get(
       where: { id: req.params.id },
       include: {
         orders: {
-          where: { deletedAt: null, isLeasing: false },
+          where: { deletedAt: null, ...SHOP_STAFF_ORDER_WHERE },
           orderBy: { createdAt: 'desc' },
           include: { items: true, delivery: true },
         },
@@ -224,6 +226,7 @@ adminCustomersRouter.get(
           code: order.code,
           status: order.status,
           statusLabel: orderStatusLabel(order.status),
+          isLeasing: order.isLeasing,
           subtotal: order.subtotal,
           dueAmount: order.dueAmount,
           fulfilment: order.fulfilment,
@@ -313,7 +316,7 @@ adminCustomersRouter.patch(
       data: {
         ...(body.email !== undefined ? { email: body.email } : {}),
         ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.phone !== undefined ? { phone: body.phone } : {}),
+        ...staffPhoneFields(body.phone),
         ...(body.district !== undefined ? { district: body.district } : {}),
         ...(body.khoroo !== undefined ? { khoroo: body.khoroo } : {}),
         ...(body.addressText !== undefined ? { addressText: body.addressText } : {}),
