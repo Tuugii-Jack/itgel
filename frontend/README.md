@@ -6,7 +6,7 @@
 ## Эхлүүлэх
 
 ```bash
-cp .env.example .env.local
+# .env.local git-д байхгүй. Локал API URL-ээ өөрөө тавина.
 npm install
 npm run dev            # http://localhost:3000
 ```

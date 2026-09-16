@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 .env.local
+.env.example
+.env*
 *.log
 coverage/
 # Өгөгдлийн нөөц — хэрэглэгчийн утас, хаяг агуулдаг тул git-д хэзээ ч орохгүй.

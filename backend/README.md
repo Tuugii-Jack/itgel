@@ -24,7 +24,7 @@ Vercel дээр frontend `NEXT_PUBLIC_API_URL=https://api.itgelshop.mn/api` ба
 ## Эхлүүлэх
 
 ```bash
-cp .env.example .env          # DATABASE_URL / DIRECT_URL-ээ тавина
+# .env git-д байхгүй. Локал/production утгыг өөрөө тавина.
 npm install
 npx prisma migrate deploy     # хүснэгтүүд үүсгэнэ
 npm run seed                  # жишиг өгөгдөл
