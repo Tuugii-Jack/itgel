@@ -10,13 +10,16 @@ import { useToast } from "@/lib/toast";
 export function LoginPhoneCard({
   adminId,
   title = "Нэвтрэх утас",
+  phones: initialPhones = [],
 }: {
   adminId?: string;
   title?: string;
+  phones?: string[];
 }) {
   const toast = useToast();
   const errorId = useId();
   const lock = useRef(false);
+  const [phones, setPhones] = useState<string[]>(initialPhones);
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [step, setStep] = useState<"phone" | "code">("phone");
@@ -60,10 +63,13 @@ export function LoginPhoneCard({
     setBusy(true);
     setError(null);
     try {
-      await adminApi.verifyLoginPhone(phone, code, adminId);
-      toast.success("Нэвтрэх дугаар холбогдлоо.");
+      const result = await adminApi.verifyLoginPhone(phone, code, adminId);
+      toast.success("Нэвтрэх дугаар нэмэгдлээ.");
       setStep("phone");
       setCode("");
+      setPhone("");
+      if (result.loginPhones?.length) setPhones(result.loginPhones);
+      else setPhones((prev) => (prev.includes(phone) ? prev : [...prev, phone]));
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Код шалгаж чадсангүй.");
     } finally {
@@ -76,8 +82,17 @@ export function LoginPhoneCard({
     <div className="flex flex-col gap-3">
       <div className="text-[15px] font-medium">{title}</div>
       <p className="m-0 text-[13px] text-ink-2">
-        Энэ дугаараар Profile-оос OTP-оор нэвтэрнэ. Хэрэглэгчийн утас солих нь энэ эрхийг шилжүүлэхгүй.
+        Шинэ дугаар OTP-оор баталгаажиж нэмэгдэнэ. Хуучин дугаарыг солихгүй.
       </p>
+      {phones.length > 0 ? (
+        <ul className="m-0 list-none p-0 text-[13px] text-ink-2">
+          {phones.map((row) => (
+            <li key={row} className="tnum">
+              {formatMnPhone(row) || row}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {step === "phone" ? (
         <>
           <Input

@@ -21,9 +21,11 @@ import { AIMAGS } from "@/lib/locations";
 import { useToast } from "@/lib/toast";
 import type { AuditLog, AdminStaffUser, Settings } from "@/lib/types";
 import { LoginPhoneCard } from "@/features/auth/components/LoginPhoneCard";
+import { useAdminSession } from "@/lib/admin-session";
 
 export default function SettingsPage() {
   const toast = useToast();
+  const { user } = useAdminSession();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [districts, setDistricts] = useState<string[]>([]);
   const [operators, setOperators] = useState<{ id: string; name: string; email: string; isActive: boolean }[]>([]);
@@ -111,7 +113,7 @@ export default function SettingsPage() {
 
       <div className="flex flex-col gap-4">
         <Card className="p-4">
-          <LoginPhoneCard title="Миний нэвтрэх утас" />
+          <LoginPhoneCard title="Миний нэвтрэх утас" phones={user?.loginPhones} />
         </Card>
 
         <StaffAccountsCard />

@@ -1,6 +1,7 @@
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
+import { canManageOtherAdminPhones } from '../lib/adminRoles.js';
 import { issuePhoneOtp, normalizeLoginPhone, PHONE_OTP_ADMIN_PHONE } from './phoneOtp.js';
 import { consumeOtpWithStore, prismaOtpWhere, throwOtpClaim, type OtpClaimStore } from '../lib/otpClaim.js';
 
@@ -31,9 +32,27 @@ function adminPhoneStore(phone: string, adminUserId: string): OtpClaimStore {
 }
 
 function assertCanSetPhone(actorRole: string, actorAdminId: string, targetId: string) {
-  if (actorRole !== 'ADMIN' && actorAdminId !== targetId) {
-    throw forbidden('Энэ дугаарыг солих эрхгүй.');
+  if (!canManageOtherAdminPhones(actorRole) && actorAdminId !== targetId) {
+    throw forbidden('Энэ дугаарыг нэмэх эрхгүй.');
   }
+}
+
+async function assertPhoneAvailable(phone: string, targetId: string) {
+  const takenLogin = await prisma.adminLoginPhone.findUnique({
+    where: { phone },
+    select: { adminUserId: true },
+  });
+  if (takenLogin?.adminUserId === targetId) {
+    throw conflict('Энэ дугаар аль хэдийн холбогдсон.');
+  }
+  if (takenLogin) {
+    throw conflict('Энэ дугаар өөр админы бүртгэлд холбогдсон.');
+  }
+  const takenLegacy = await prisma.adminUser.findFirst({
+    where: { phone, id: { not: targetId } },
+    select: { id: true },
+  });
+  if (takenLegacy) throw conflict('Энэ дугаар өөр админы бүртгэлд холбогдсон.');
 }
 
 export async function issueAdminLoginPhoneOtp(input: {
@@ -47,11 +66,7 @@ export async function issueAdminLoginPhoneOtp(input: {
   if (!target) throw notFound('Админ олдсонгүй.');
   assertCanSetPhone(input.actorRole, input.actorAdminId, target.id);
   const phone = normalizeLoginPhone(input.phone);
-  const taken = await prisma.adminUser.findFirst({
-    where: { phone, id: { not: target.id } },
-    select: { id: true },
-  });
-  if (taken) throw conflict('Энэ дугаар өөр админы бүртгэлд холбогдсон.');
+  await assertPhoneAvailable(phone, target.id);
 
   return issuePhoneOtp({
     phone,
@@ -69,7 +84,10 @@ export async function verifyAdminLoginPhone(input: {
   actorAdminId: string;
   actorRole: string;
 }) {
-  const target = await prisma.adminUser.findUnique({ where: { id: input.targetAdminId } });
+  const target = await prisma.adminUser.findUnique({
+    where: { id: input.targetAdminId },
+    include: { loginPhones: { select: { phone: true } } },
+  });
   if (!target) throw notFound('Админ олдсонгүй.');
   assertCanSetPhone(input.actorRole, input.actorAdminId, target.id);
   if (!/^\d{6}$/.test(input.code)) throw badRequest('Код 6 оронтой байна.');
@@ -77,29 +95,41 @@ export async function verifyAdminLoginPhone(input: {
   const now = new Date();
   const store = adminPhoneStore(phone, target.id);
   throwOtpClaim(await consumeOtpWithStore(store, phone, input.code, now));
+  await assertPhoneAvailable(phone, target.id);
 
-  const taken = await prisma.adminUser.findFirst({
-    where: { phone, id: { not: target.id } },
-    select: { id: true },
+  await prisma.adminLoginPhone.create({
+    data: {
+      adminUserId: target.id,
+      phone,
+      verifiedAt: now,
+    },
   });
-  if (taken) throw conflict('Энэ дугаар өөр админы бүртгэлд холбогдсон.');
 
   const updated = await prisma.adminUser.update({
     where: { id: target.id },
-    data: {
-      phone,
-      phoneVerifiedAt: now,
-      tokenVersion: { increment: 1 },
+    data: target.phone
+      ? {}
+      : {
+          phone,
+          phoneVerifiedAt: now,
+        },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      isActive: true,
+      phone: true,
+      loginPhones: { select: { phone: true }, orderBy: { createdAt: 'asc' } },
     },
-    select: { id: true, email: true, name: true, role: true, isActive: true, phone: true },
   });
 
   await audit({
     actor: `admin:${input.actorAdminId}`,
-    action: 'AUTH_ADMIN_PHONE_SET',
+    action: 'AUTH_ADMIN_PHONE_ADD',
     entity: 'AdminUser',
     entityId: updated.id,
-    after: { hasLoginPhone: true },
+    after: { phoneCount: updated.loginPhones.length },
   });
 
   return updated;

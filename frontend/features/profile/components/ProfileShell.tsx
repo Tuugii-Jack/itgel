@@ -9,6 +9,8 @@ import { PaymentsTab } from "@/features/profile/components/PaymentsTab";
 import { OrdersSkeleton } from "@/features/profile/components/ProfileSkeletons";
 import { useProfile } from "@/features/profile/hooks/useProfile";
 import { phoneLabel } from "@/lib/format";
+import { WorkspaceChooser } from "@/features/auth/components/WorkspaceChooser";
+import { isOwner } from "@/lib/admin-role";
 import { workspaceHome } from "@/lib/safeNext";
 import { useSession } from "@/lib/session";
 
@@ -57,12 +59,21 @@ export function ProfileShell() {
         </div>
 
         {session.workspace ? (
-          <Link
-            href={workspaceHome(session.workspace.role)}
-            className='mx-4 mt-3 flex h-11 items-center justify-center rounded-[8px] border border-line bg-bg px-3.5 text-[14px] text-ink no-underline lg:mx-0 lg:mt-0'
-          >
-            Удирдлага
-          </Link>
+          isOwner(session.workspace.role) ? (
+            <div className='mx-4 mt-3 flex flex-col gap-2 lg:mx-0 lg:mt-0'>
+              <WorkspaceChooser
+                role={session.workspace.role}
+                destinations={session.workspace.destinations}
+              />
+            </div>
+          ) : (
+            <Link
+              href={workspaceHome(session.workspace.role)}
+              className='mx-4 mt-3 flex h-11 items-center justify-center rounded-[8px] border border-line bg-bg px-3.5 text-[14px] text-ink no-underline lg:mx-0 lg:mt-0'
+            >
+              Удирдлага
+            </Link>
+          )
         ) : null}
 
         {/* Мобайл — хэвтээ таб; laptop — босоо цэс */}

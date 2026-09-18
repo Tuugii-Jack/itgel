@@ -1,6 +1,13 @@
 import type { NextFunction, Request, Response } from 'express';
 import { forbidden, unauthorized } from '../lib/errors.js';
-import { isAdminRole, verifyToken, type AdminToken, type TokenPayload } from '../lib/jwt.js';
+import {
+  canAccessLeasing,
+  canAccessShopAdmin,
+  canAccessStaff,
+  canWriteShop,
+  isAdminRole,
+} from '../lib/adminRoles.js';
+import { verifyToken, type AdminToken, type TokenPayload } from '../lib/jwt.js';
 import { prisma } from '../prisma.js';
 import { resolveSupabaseToken, supabaseAuthConfigured } from '../lib/supabaseAuth.js';
 import {
@@ -46,9 +53,11 @@ async function liveAdmin(payload: AdminToken): Promise<AdminToken | null> {
       isActive: true,
       tokenVersion: true,
       phoneVerifiedAt: true,
+      loginPhones: { select: { id: true }, take: 1 },
     },
   });
-  if (!user?.isActive || !user.phoneVerifiedAt) return null;
+  if (!user?.isActive) return null;
+  if (user.loginPhones.length === 0 && !user.phoneVerifiedAt) return null;
   if (payload.tv !== user.tokenVersion) return null;
   return { sub: user.id, email: user.email, role: user.role, tv: user.tokenVersion };
 }
@@ -137,40 +146,37 @@ export const requireCustomer = guard(
 
 /** Админ эрх шаардана. */
 export const requireAdmin = guard(
-  (payload) => (payload.role === 'ADMIN' ? null : forbidden('Зөвхөн админ хандах боломжтой.')),
+  (payload) =>
+    canAccessShopAdmin(payload.role) ? null : forbidden('Зөвхөн админ хандах боломжтой.'),
   'admin',
 );
 
 /** Админ эсвэл ажилтан. */
 export const requireStaff = guard(
-  (payload) =>
-    payload.role === 'ADMIN' || payload.role === 'STAFF' ? null : forbidden('Хандах эрхгүй.'),
+  (payload) => (canAccessStaff(payload.role) ? null : forbidden('Хандах эрхгүй.')),
   'admin',
 );
 
-/** Админ, туслах, эсвэл лизингийн админ — нэвтрэлт / нууц үг. */
+/** Админ, туслах, лизинг, эсвэл эзэмшигч — нэвтрэлт / нууц үг. */
 export const requireAdminUser = guard(
-  (payload) =>
-    payload.role === 'ADMIN' || payload.role === 'STAFF' || payload.role === 'LEASING'
-      ? null
-      : forbidden('Хандах эрхгүй.'),
+  (payload) => (isAdminRole(payload.role) ? null : forbidden('Хандах эрхгүй.')),
   'admin',
 );
 
-/** Зөвхөн лизингийн админ. */
+/** Лизингийн админ эсвэл эзэмшигч. */
 export const requireLeasing = guard(
   (payload) =>
-    payload.role === 'LEASING' ? null : forbidden('Зөвхөн лизингийн админ хандах боломжтой.'),
+    canAccessLeasing(payload.role) ? null : forbidden('Зөвхөн лизингийн админ хандах боломжтой.'),
   'admin',
 );
 
-/** GET-ийг туслах админд зөвшөөрнө. Бичих үйлдэл зөвхөн админ. */
+/** GET-ийг туслах админд зөвшөөрнө. Бичих үйлдэл зөвхөн админ/эзэмшигч. */
 export function requireAdminWrites(req: Request, _res: Response, next: NextFunction): void {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
     next();
     return;
   }
-  if (req.auth?.role === 'ADMIN') {
+  if (canWriteShop(req.auth?.role)) {
     next();
     return;
   }

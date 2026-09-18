@@ -4,6 +4,7 @@ import { prisma } from '../../prisma.js';
 import { unauthorized } from '../../lib/errors.js';
 import { requireAdminUser } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
+import { workspaceDestinations } from '../../lib/adminRoles.js';
 import { setSessionCookies } from '../../lib/sessionCookies.js';
 import { revokeWorkspaceSessions } from '../../services/workspaceAuth.js';
 import { issueAdminLoginPhoneOtp, verifyAdminLoginPhone } from '../../services/adminLoginPhone.js';
@@ -21,15 +22,21 @@ adminAuthRouter.get(
   '/me',
   requireAdminUser,
   asyncHandler(async (req, res) => {
-    const user = await prisma.adminUser.findUnique({ where: { id: req.auth!.sub } });
+    const user = await prisma.adminUser.findUnique({
+      where: { id: req.auth!.sub },
+      include: { loginPhones: { select: { phone: true }, orderBy: { createdAt: 'asc' } } },
+    });
     if (!user?.isActive) throw unauthorized();
+    const loginPhones = user.loginPhones.map((row) => row.phone);
     res.json({
       data: {
         id: user.id,
         email: user.email,
         name: user.name,
         role: user.role,
-        hasLoginPhone: Boolean(user.phone && user.phoneVerifiedAt),
+        hasLoginPhone: loginPhones.length > 0 || Boolean(user.phone && user.phoneVerifiedAt),
+        loginPhones,
+        destinations: workspaceDestinations(user.role),
       },
     });
   }),
@@ -94,7 +101,8 @@ adminAuthRouter.post(
         email: user.email,
         name: user.name,
         role: user.role,
-        hasLoginPhone: Boolean(user.phone),
+        hasLoginPhone: Boolean(user.phone) || (user.loginPhones?.length ?? 0) > 0,
+        loginPhones: user.loginPhones?.map((row) => row.phone),
       },
     });
   }),

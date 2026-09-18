@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
-import { badRequest, conflict, notFound } from '../../lib/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
 
@@ -22,12 +22,13 @@ function publicAdmin(user: {
   id: string;
   email: string;
   name: string;
-  role: 'ADMIN' | 'STAFF' | 'LEASING';
+  role: 'ADMIN' | 'STAFF' | 'LEASING' | 'OWNER';
   isActive: boolean;
   createdAt: Date;
   lastLoginAt: Date | null;
   phone?: string | null;
   phoneVerifiedAt?: Date | null;
+  _count?: { loginPhones: number };
 }) {
   return {
     id: user.id,
@@ -37,7 +38,8 @@ function publicAdmin(user: {
     isActive: user.isActive,
     createdAt: user.createdAt.toISOString(),
     lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
-    hasLoginPhone: Boolean(user.phone && user.phoneVerifiedAt),
+    hasLoginPhone:
+      (user._count?.loginPhones ?? 0) > 0 || Boolean(user.phone && user.phoneVerifiedAt),
   };
 }
 
@@ -47,6 +49,7 @@ adminStaffRouter.get(
   asyncHandler(async (_req, res) => {
     const users = await prisma.adminUser.findMany({
       orderBy: [{ role: 'asc' }, { createdAt: 'asc' }],
+      include: { _count: { select: { loginPhones: true } } },
     });
     res.json({ data: users.map(publicAdmin) });
   }),
@@ -112,6 +115,10 @@ adminStaffRouter.patch(
     const user = await prisma.adminUser.findUnique({ where: { id } });
     if (!user) throw notFound('Админ олдсонгүй.');
 
+    if (user.role === 'OWNER' && req.auth!.role !== 'OWNER') {
+      throw forbidden('Эзэмшигчийн бүртгэлийг өөрчлөх эрхгүй.');
+    }
+
     if (body.isActive === false) {
       if (user.id === req.auth!.sub) {
         throw badRequest('Өөрийн бүртгэлийг идэвхгүй болгож болохгүй.');
@@ -122,6 +129,14 @@ adminStaffRouter.patch(
         });
         if (otherAdmins === 0) {
           throw badRequest('Сүүлийн админыг идэвхгүй болгож болохгүй.');
+        }
+      }
+      if (user.role === 'OWNER') {
+        const otherOwners = await prisma.adminUser.count({
+          where: { role: 'OWNER', isActive: true, id: { not: user.id } },
+        });
+        if (otherOwners === 0) {
+          throw badRequest('Сүүлийн эзэмшигчийг идэвхгүй болгож болохгүй.');
         }
       }
     }
@@ -138,6 +153,7 @@ adminStaffRouter.patch(
           ? { tokenVersion: { increment: 1 } }
           : {}),
       },
+      include: { _count: { select: { loginPhones: true } } },
     });
 
     await audit({

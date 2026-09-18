@@ -1,5 +1,9 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../env.js';
+import { isAdminRole, type AdminRoleName } from './adminRoles.js';
+
+export { isAdminRole };
+export type { AdminRoleName };
 
 export interface CustomerToken {
   sub: string;
@@ -11,7 +15,7 @@ export interface CustomerToken {
 export interface AdminToken {
   sub: string;
   email: string;
-  role: 'ADMIN' | 'STAFF' | 'LEASING';
+  role: AdminRoleName;
   tv: number;
 }
 
@@ -39,6 +43,3 @@ export function verifyToken(token: string): TokenPayload | null {
   }
 }
 
-export function isAdminRole(role: string | undefined): role is AdminToken['role'] {
-  return role === 'ADMIN' || role === 'STAFF' || role === 'LEASING';
-}

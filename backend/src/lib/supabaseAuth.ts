@@ -37,7 +37,7 @@ export async function resolveSupabaseToken(token: string): Promise<TokenPayload 
   if (!claims) return null;
 
   const role = claims.app_metadata?.role?.toUpperCase();
-  if (role === 'ADMIN' || role === 'STAFF' || role === 'LEASING') {
+  if (role === 'ADMIN' || role === 'STAFF' || role === 'LEASING' || role === 'OWNER') {
     return null;
   }
 

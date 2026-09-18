@@ -7,6 +7,8 @@ export type WorkspaceGrant = {
     email: string;
     name: string;
     role: string;
+    destinations?: string[];
+    loginPhones?: string[];
   };
 };
 
@@ -18,6 +20,8 @@ export const adminAuthApi = {
       name: string;
       role: string;
       hasLoginPhone?: boolean;
+      loginPhones?: string[];
+      destinations?: string[];
     }>("/admin/auth/me", adminAuth).then((r) => r.data),
 
   logout: () =>
@@ -45,6 +49,7 @@ export const adminAuthApi = {
       name: string;
       role: string;
       hasLoginPhone: boolean;
+      loginPhones?: string[];
     }>("/admin/auth/login-phone/verify", {
       ...adminAuth,
       method: "POST",

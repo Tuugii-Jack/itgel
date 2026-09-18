@@ -15,6 +15,7 @@ import { clearRequestCache } from "./api/client";
 import { deferEffect } from "./deferEffect";
 import { clearCheckoutDraft } from "./checkoutDraft";
 import { clearCheckoutIdempotencyKey } from "./checkoutIdempotency";
+import { canAccessLeasingPortal, canAccessShopPortal, isAdminRole } from "./admin-role";
 import { profileLoginPath, workspaceHome } from "./safeNext";
 
 export interface WorkspaceUser {
@@ -23,6 +24,8 @@ export interface WorkspaceUser {
   name: string;
   role: string;
   hasLoginPhone?: boolean;
+  loginPhones?: string[];
+  destinations?: string[];
 }
 
 interface AdminSession {
@@ -47,9 +50,9 @@ export function AdminSessionProvider({
 
   const allowed = useCallback(
     (role: string) => {
-      if (portal === "hub") return role === "ADMIN" || role === "STAFF" || role === "LEASING";
-      if (portal === "leasing") return role === "LEASING";
-      return role === "ADMIN" || role === "STAFF";
+      if (portal === "hub") return isAdminRole(role);
+      if (portal === "leasing") return canAccessLeasingPortal(role);
+      return canAccessShopPortal(role);
     },
     [portal],
   );

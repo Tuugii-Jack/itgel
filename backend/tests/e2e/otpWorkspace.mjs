@@ -17,6 +17,12 @@ export function createOtpWorkspace({ req, sql, data }) {
     sql(
       `UPDATE "AdminUser" SET phone='${lit(phone)}', "phoneVerifiedAt"=NOW() WHERE email='${lit(email)}'`,
     );
+    sql(
+      `INSERT INTO "AdminLoginPhone" ("id", "adminUserId", phone, "verifiedAt")
+       SELECT concat('clp', replace(gen_random_uuid()::text, '-', '')), id, '${lit(phone)}', NOW()
+       FROM "AdminUser" WHERE email='${lit(email)}'
+       AND NOT EXISTS (SELECT 1 FROM "AdminLoginPhone" p WHERE p.phone = '${lit(phone)}')`,
+    );
   }
 
   async function otpVerify(phone, name = 'OTP User') {

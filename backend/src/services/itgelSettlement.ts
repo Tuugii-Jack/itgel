@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, notFound, forbidden } from '../lib/errors.js';
+import { canViewAllSettlements } from '../lib/adminRoles.js';
 import { endOfUbDay, startOfUbDay, ubDateString } from '../lib/date.js';
 import { leasingView } from '../lib/leasing.js';
 import { lockOrder, lockOrders } from '../lib/orderLock.js';
@@ -72,7 +73,7 @@ async function recordOwnerMissing(
 }
 
 function assertOwner(ownerAdminId: string, actorAdminId: string | null, role: string | null) {
-  if (role === 'ADMIN') return;
+  if (canViewAllSettlements(role ?? undefined)) return;
   if (role === 'LEASING' && actorAdminId === ownerAdminId) return;
   throw forbidden('Энэ тооцоонд хандах эрхгүй.');
 }

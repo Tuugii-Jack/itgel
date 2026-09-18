@@ -52,6 +52,7 @@ curl -s $API/admin/orders | j "d['error']"
 
 echo "=== 12. админ нэвтрэх (утас + OTP) ==="
 docker exec itgel-db psql -U itgel -d itgel -c "UPDATE \"AdminUser\" SET phone='99000001', \"phoneVerifiedAt\"=NOW() WHERE email='admin@itgel.mn'" >/dev/null
+docker exec itgel-db psql -U itgel -d itgel -c "INSERT INTO \"AdminLoginPhone\" (\"id\", \"adminUserId\", phone, \"verifiedAt\") SELECT concat('clp', replace(gen_random_uuid()::text, '-', '')), id, '99000001', NOW() FROM \"AdminUser\" WHERE email='admin@itgel.mn' AND NOT EXISTS (SELECT 1 FROM \"AdminLoginPhone\" p WHERE p.phone='99000001')" >/dev/null
 curl -s -X POST $API/auth/otp -H 'content-type: application/json' -d '{"phone":"99000001"}' >/dev/null
 CODE=$(docker exec itgel-db psql -U itgel -d itgel -At -c "SELECT code FROM \"PhoneOtp\" WHERE phone='99000001' AND purpose='LOGIN' AND \"usedAt\" IS NULL ORDER BY \"createdAt\" DESC LIMIT 1")
 TOKEN=$(curl -s -X POST $API/auth/verify -H 'content-type: application/json' -d "{\"phone\":\"99000001\",\"code\":\"$CODE\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['workspace']['token'])")

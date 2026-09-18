@@ -56,6 +56,7 @@ enum AdminRole {
   ADMIN
   STAFF
   LEASING
+  OWNER
 }
 
 /// Бараа/төлбөрийн эзэн — дэлгүүр эсвэл лизингийн админ.
@@ -406,13 +407,28 @@ model AdminUser {
   passwordHash String
   role         AdminRole @default(ADMIN)
   isActive     Boolean   @default(true)
-  /// Нэвтрэх утас — зөвхөн phoneVerifiedAt-тай идэвхтэй бүртгэл privileged session авна.
+  /// Хуучин үндсэн дугаар (харуулах). Нэвтрэлт `AdminLoginPhone`-оор.
   phone           String?   @unique
   phoneVerifiedAt DateTime?
-  /// JWT tv — нэвтрэлт/эрхийн өөрчлөлт хуучин privileged токеныг хүчингүй болгоно.
+  /// JWT tv — гарах / идэвхгүй / нууц үг. Нэвтрэлт болон дугаар нэмэхэд өсгөхгүй.
   tokenVersion    Int       @default(0)
   createdAt    DateTime  @default(now())
   lastLoginAt  DateTime?
+
+  loginPhones AdminLoginPhone[]
+}
+
+/// Нэг админд олон баталгаажсан нэвтрэх дугаар. Дугаар солихгүй, нэмнэ.
+model AdminLoginPhone {
+  id          String    @id @default(cuid())
+  adminUserId String
+  phone       String    @unique
+  verifiedAt  DateTime
+  createdAt   DateTime  @default(now())
+
+  admin AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
 }
 
 model Order {

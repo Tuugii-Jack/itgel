@@ -23,7 +23,7 @@ export const shopAuthApi = {
       };
       workspace: {
         token: string;
-        user: { id: string; email: string; name: string; role: string };
+        user: { id: string; email: string; name: string; role: string; destinations?: string[] };
       } | null;
     }>("/auth/verify", {
       method: "POST",

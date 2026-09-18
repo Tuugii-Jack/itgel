@@ -5,8 +5,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Spinner } from "@/components/ui";
-import { helperAdminCanAccess, isFullAdmin, ROLE_LABEL } from "@/lib/admin-role";
+import { helperAdminCanAccess, isFullAdmin, isOwner, ROLE_LABEL } from "@/lib/admin-role";
 import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
+import { WorkspaceSectionLinks } from "@/features/auth/components/WorkspaceChooser";
 
 /**
  * Цэс — ажлын урсгалын дагуу бүлэглэсэн:
@@ -153,7 +154,15 @@ function NavLinks({
   );
 }
 
-function Brand({ compact = false, helper = false }: { compact?: boolean; helper?: boolean }) {
+function Brand({
+  compact = false,
+  helper = false,
+  owner = false,
+}: {
+  compact?: boolean;
+  helper?: boolean;
+  owner?: boolean;
+}) {
   return (
     <Link
       href="/workspace/shop"
@@ -174,7 +183,7 @@ function Brand({ compact = false, helper = false }: { compact?: boolean; helper?
           итгэл
         </span>
         <span className="mt-0.5 text-[11px] font-medium tracking-[0.08em] text-muted uppercase">
-          {helper ? "туслах админ" : "админ"}
+          {helper ? "туслах админ" : owner ? "эзэмшигч" : "админ"}
         </span>
       </span>
     </Link>
@@ -238,7 +247,7 @@ function Shell({ children }: { children: ReactNode }) {
               <span className="block h-[2px] w-4 rounded bg-ink" />
             </span>
           </button>
-          <Brand compact helper={helper} />
+          <Brand compact helper={helper} owner={isOwner(user.role)} />
           <div className="ml-auto flex items-center gap-3">
             <button
               type="button"
@@ -256,6 +265,12 @@ function Shell({ children }: { children: ReactNode }) {
               groups={navGroups}
               onNavigate={() => setMenuOpen(false)}
             />
+            <WorkspaceSectionLinks
+              role={user.role}
+              destinations={user.destinations}
+              current="shop"
+            />
+            {isOwner(user.role) ? null : (
             <Link
               href="/"
               onClick={() => setMenuOpen(false)}
@@ -263,6 +278,7 @@ function Shell({ children }: { children: ReactNode }) {
             >
               Дэлгүүр
             </Link>
+            )}
             <Link
               href="/profile"
               onClick={() => setMenuOpen(false)}
@@ -285,7 +301,7 @@ function Shell({ children }: { children: ReactNode }) {
         {/* Компьютерын хажуугийн цэс. */}
         <aside className="sticky top-0 hidden h-dvh w-[220px] shrink-0 flex-col border-r border-line bg-bg lg:flex">
           <div className="px-4 py-5">
-            <Brand helper={helper} />
+            <Brand helper={helper} owner={isOwner(user.role)} />
           </div>
           <div className="no-scrollbar flex-1 overflow-y-auto px-2 pb-4">
             <NavLinks pathname={pathname} groups={navGroups} />
@@ -293,12 +309,19 @@ function Shell({ children }: { children: ReactNode }) {
           <div className="border-t border-line px-4 py-3">
             <div className="mb-0.5 truncate text-[13px] text-ink-2">{user.name}</div>
             <div className="mb-2 text-[11px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
+            <WorkspaceSectionLinks
+              role={user.role}
+              destinations={user.destinations}
+              current="shop"
+            />
+            {isOwner(user.role) ? null : (
             <Link
               href="/"
               className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
             >
               Дэлгүүр
             </Link>
+            )}
             <Link
               href="/profile"
               className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"

@@ -5,8 +5,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { Spinner } from "@/components/ui";
-import { ROLE_LABEL } from "@/lib/admin-role";
+import { isLeasingAdmin, isOwner, ROLE_LABEL } from "@/lib/admin-role";
 import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
+import { WorkspaceSectionLinks } from "@/features/auth/components/WorkspaceChooser";
 
 const NAV = [
   { href: "/workspace/leasing", label: "Захиалга" },
@@ -37,7 +38,7 @@ function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    if (!user || user.role === "LEASING") return;
+    if (!user || isLeasingAdmin(user.role)) return;
     router.replace("/workspace/shop");
   }, [user, router]);
 
@@ -57,7 +58,7 @@ function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  if (user.role !== "LEASING") {
+  if (!isLeasingAdmin(user.role)) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
         <Spinner className="text-muted" />
@@ -111,6 +112,12 @@ function Shell({ children }: { children: ReactNode }) {
                 </Link>
               ))}
             </nav>
+            <WorkspaceSectionLinks
+              role={user.role}
+              destinations={user.destinations}
+              current="leasing"
+            />
+            {isOwner(user.role) ? null : (
             <Link
               href="/"
               onClick={() => setMenuOpen(false)}
@@ -118,6 +125,7 @@ function Shell({ children }: { children: ReactNode }) {
             >
               Дэлгүүр
             </Link>
+            )}
             <Link
               href="/profile"
               onClick={() => setMenuOpen(false)}
@@ -159,12 +167,19 @@ function Shell({ children }: { children: ReactNode }) {
           <div className="border-t border-line px-4 py-3">
             <div className="mb-0.5 truncate text-[13px] text-ink-2">{user.name}</div>
             <div className="mb-2 text-[11px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
+            <WorkspaceSectionLinks
+              role={user.role}
+              destinations={user.destinations}
+              current="leasing"
+            />
+            {isOwner(user.role) ? null : (
             <Link
               href="/"
               className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
             >
               Дэлгүүр
             </Link>
+            )}
             <Link
               href="/profile"
               className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"

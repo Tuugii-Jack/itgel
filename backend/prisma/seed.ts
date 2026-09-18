@@ -4,6 +4,7 @@
  */
 import { PrismaClient, type OrderStatus, type Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'node:crypto';
 import 'dotenv/config';
 import { generateOrderCode } from '../src/lib/code.js';
 import { addDays, addUbMonths, startOfUbDay, startOfUbMonth } from '../src/lib/date.js';
@@ -49,6 +50,7 @@ async function reset() {
   await prisma.ad.deleteMany();
   await prisma.emailOtp.deleteMany();
   await prisma.customer.deleteMany();
+  await prisma.adminLoginPhone.deleteMany();
   await prisma.adminUser.deleteMany();
   await prisma.payment.deleteMany();
   await prisma.setting.deleteMany();
@@ -102,6 +104,19 @@ const CUSTOMERS = [
   { phone: '85990011', name: 'Г. Сарантуяа', email: 'sarantuya@example.com' },
 ];
 
+async function attachLoginPhone(adminUserId: string, phone: string, verifiedAt: Date) {
+  await prisma.adminLoginPhone.create({
+    data: { adminUserId, phone, verifiedAt },
+  });
+}
+
+function ownerPhoneFromEnv(): string | null {
+  const raw = process.env.OWNER_LOGIN_PHONE?.replace(/\D/g, '') ?? '';
+  const phone = raw.startsWith('976') && raw.length === 11 ? raw.slice(3) : raw;
+  if (!/^\d{8}$/.test(phone)) return null;
+  return phone;
+}
+
 async function main() {
   assertSafeToWipe();
   console.info('Seed эхэлж байна…');
@@ -129,7 +144,7 @@ async function main() {
   });
 
   const now = new Date();
-  await prisma.adminUser.create({
+  const admin = await prisma.adminUser.create({
     data: {
       email: (process.env.ADMIN_EMAIL ?? 'admin@itgel.mn').toLowerCase(),
       name: 'Админ',
@@ -139,8 +154,9 @@ async function main() {
       phoneVerifiedAt: now,
     },
   });
+  await attachLoginPhone(admin.id, '99000001', now);
 
-  await prisma.adminUser.create({
+  const leasing = await prisma.adminUser.create({
     data: {
       email: 'leasing@itgel.mn',
       name: 'Лизингийн админ',
@@ -150,6 +166,19 @@ async function main() {
       phoneVerifiedAt: now,
     },
   });
+  await attachLoginPhone(leasing.id, '99000002', now);
+
+  const ownerPhone = ownerPhoneFromEnv();
+  const owner = await prisma.adminUser.create({
+    data: {
+      email: 'owner@itgel.mn',
+      name: 'Эзэмшигч',
+      passwordHash: await bcrypt.hash(crypto.randomBytes(24).toString('hex'), 10),
+      role: 'OWNER',
+      ...(ownerPhone ? { phone: ownerPhone, phoneVerifiedAt: now } : {}),
+    },
+  });
+  if (ownerPhone) await attachLoginPhone(owner.id, ownerPhone, now);
 
   await prisma.ad.createMany({
     data: [

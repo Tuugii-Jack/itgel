@@ -48,6 +48,7 @@ async function reset() {
   await prisma.ad.deleteMany();
   await prisma.emailOtp.deleteMany();
   await prisma.customer.deleteMany();
+  await prisma.adminLoginPhone.deleteMany();
   await prisma.adminUser.deleteMany();
   await prisma.setting.deleteMany();
 }
@@ -258,15 +259,19 @@ async function main() {
 
   const adminEmail = (process.env.ADMIN_EMAIL ?? 'admin@itgel.mn').toLowerCase();
   const adminPassword = process.env.ADMIN_PASSWORD ?? 'admin123';
-  await prisma.adminUser.create({
+  const adminNow = new Date();
+  const admin = await prisma.adminUser.create({
     data: {
       email: adminEmail,
       name: 'Болдбаатар Админ',
       passwordHash: await bcrypt.hash(adminPassword, 10),
       role: 'ADMIN',
       phone: '99000001',
-      phoneVerifiedAt: new Date(),
+      phoneVerifiedAt: adminNow,
     },
+  });
+  await prisma.adminLoginPhone.create({
+    data: { adminUserId: admin.id, phone: '99000001', verifiedAt: adminNow },
   });
 
   await prisma.ad.create({

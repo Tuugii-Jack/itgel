@@ -62,7 +62,7 @@ export interface AdminStaffUser {
   id: string;
   email: string;
   name: string;
-  role: "ADMIN" | "STAFF" | "LEASING";
+  role: "ADMIN" | "STAFF" | "LEASING" | "OWNER";
   isActive: boolean;
   createdAt: string;
   lastLoginAt: string | null;
