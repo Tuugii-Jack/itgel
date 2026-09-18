@@ -16,44 +16,44 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] 
   {
     label: "Захиалга",
     items: [
-      { href: "/admin", label: "Захиалга" },
-      { href: "/admin/orders/new", label: "Захиалга оруулах" },
-      { href: "/admin/orders/by-product", label: "Бараагаар" },
-      { href: "/admin/handover", label: "Хүлээлгэн өгөх" },
-      { href: "/admin/deliveries", label: "Хүргэлт" },
-      { href: "/admin/returns", label: "Буцаалт" },
+      { href: "/workspace/shop", label: "Захиалга" },
+      { href: "/workspace/shop/orders/new", label: "Захиалга оруулах" },
+      { href: "/workspace/shop/orders/by-product", label: "Бараагаар" },
+      { href: "/workspace/shop/handover", label: "Хүлээлгэн өгөх" },
+      { href: "/workspace/shop/deliveries", label: "Хүргэлт" },
+      { href: "/workspace/shop/returns", label: "Буцаалт" },
     ],
   },
   {
     label: "Багц",
-    items: [{ href: "/admin/batches", label: "Ачааны багц" }],
+    items: [{ href: "/workspace/shop/batches", label: "Ачааны багц" }],
   },
   {
     label: "Каталог",
     items: [
-      { href: "/admin/products", label: "Бараа" },
-      { href: "/admin/preorders", label: "Урьдчилсан захиалга" },
-      { href: "/admin/ready", label: "Бэлэн бараа" },
-      { href: "/admin/storefront", label: "Дэлгүүр" },
-      { href: "/admin/categories", label: "Ангилал" },
-      { href: "/admin/ads", label: "Зар" },
+      { href: "/workspace/shop/products", label: "Бараа" },
+      { href: "/workspace/shop/preorders", label: "Урьдчилсан захиалга" },
+      { href: "/workspace/shop/ready", label: "Бэлэн бараа" },
+      { href: "/workspace/shop/storefront", label: "Дэлгүүр" },
+      { href: "/workspace/shop/categories", label: "Ангилал" },
+      { href: "/workspace/shop/ads", label: "Зар" },
     ],
   },
   {
     label: "Харилцагч",
-    items: [{ href: "/admin/customers", label: "Хэрэглэгчид" }],
+    items: [{ href: "/workspace/shop/customers", label: "Хэрэглэгчид" }],
   },
   {
     label: "Тайлан",
     items: [
-      { href: "/admin/reports", label: "Тайлан" },
-      { href: "/admin/leasing-settlements", label: "Лизингийн тооцоо" },
-      { href: "/admin/archive", label: "Архив" },
+      { href: "/workspace/shop/reports", label: "Тайлан" },
+      { href: "/workspace/shop/leasing-settlements", label: "Лизингийн тооцоо" },
+      { href: "/workspace/shop/archive", label: "Архив" },
     ],
   },
   {
     label: "Тохиргоо",
-    items: [{ href: "/admin/settings", label: "Тохиргоо" }],
+    items: [{ href: "/workspace/shop/settings", label: "Тохиргоо" }],
   },
 ];
 
@@ -66,7 +66,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 }
 
 function isActive(pathname: string, href: string): boolean {
-  return href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+  return href === "/workspace/shop" ? pathname === "/workspace/shop" : pathname.startsWith(href);
 }
 
 function groupHasActive(
@@ -156,7 +156,7 @@ function NavLinks({
 function Brand({ compact = false, helper = false }: { compact?: boolean; helper?: boolean }) {
   return (
     <Link
-      href="/admin"
+      href="/workspace/shop"
       className={`flex items-center no-underline ${compact ? "gap-2" : "gap-2.5"}`}
     >
       <Image
@@ -186,7 +186,6 @@ function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const onLoginPage = pathname === "/admin/login";
   const helper = Boolean(user && !isFullAdmin(user.role));
   const navGroups = helper
     ? NAV_GROUPS.filter((g) => g.label === "Захиалга" || g.label === "Харилцагч")
@@ -194,7 +193,7 @@ function Shell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user || isFullAdmin(user.role)) return;
-    if (!helperAdminCanAccess(pathname)) router.replace("/admin");
+    if (!helperAdminCanAccess(pathname)) router.replace("/workspace/shop");
   }, [user, pathname, router]);
 
   if (loading) {
@@ -205,20 +204,7 @@ function Shell({ children }: { children: ReactNode }) {
     );
   }
 
-  // Нэвтрээгүй: зөвхөн нэвтрэх хуудсыг харуулна — бусад admin хуудас render хийхгүй.
   if (!user) {
-    if (!onLoginPage) {
-      return (
-        <div className="flex min-h-dvh items-center justify-center">
-          <Spinner className="text-muted" />
-        </div>
-      );
-    }
-    return <div className="min-h-dvh bg-surface">{children}</div>;
-  }
-
-  // Нэвтэрсэн хүн login дээр бол redirect хүртэл хоосон.
-  if (onLoginPage) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
         <Spinner className="text-muted" />
@@ -271,11 +257,25 @@ function Shell({ children }: { children: ReactNode }) {
               onNavigate={() => setMenuOpen(false)}
             />
             <Link
-              href="/admin/account"
+              href="/"
               onClick={() => setMenuOpen(false)}
               className="mt-3 block px-3 py-2 text-[13px] text-ink-2 no-underline"
             >
-              Нууц үг солих
+              Дэлгүүр
+            </Link>
+            <Link
+              href="/profile"
+              onClick={() => setMenuOpen(false)}
+              className="block px-3 py-2 text-[13px] text-ink-2 no-underline"
+            >
+              Миний захиалга
+            </Link>
+            <Link
+              href="/workspace/shop/account"
+              onClick={() => setMenuOpen(false)}
+              className="block px-3 py-2 text-[13px] text-ink-2 no-underline"
+            >
+              Нэвтрэх утас
             </Link>
           </div>
         )}
@@ -294,10 +294,22 @@ function Shell({ children }: { children: ReactNode }) {
             <div className="mb-0.5 truncate text-[13px] text-ink-2">{user.name}</div>
             <div className="mb-2 text-[11px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
             <Link
-              href="/admin/account"
+              href="/"
               className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
             >
-              Нууц үг солих
+              Дэлгүүр
+            </Link>
+            <Link
+              href="/profile"
+              className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
+            >
+              Миний захиалга
+            </Link>
+            <Link
+              href="/workspace/shop/account"
+              className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
+            >
+              Нэвтрэх утас
             </Link>
             <button
               type="button"

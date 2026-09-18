@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createOtpWorkspace } from './otpWorkspace.mjs';
 
 const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const LOCAL_DB = 'postgresql://itgel:itgel@127.0.0.1:5432/itgel';
@@ -322,6 +323,8 @@ function data(res) {
   }
   return res.json.data;
 }
+
+const workspaceOtp = createOtpWorkspace({ req, sql, data });
 
 async function loginCustomer(phone, name) {
   const otp = await req('/api/auth/otp', { method: 'POST', body: { phone, name } });
@@ -840,18 +843,10 @@ try {
     return last;
   }
 
-  const adminLogin = await req('/api/admin/auth/login', {
-    method: 'POST',
-    body: { email: 'admin@itgel.mn', password: 'admin123' },
-  });
-  assert.equal(adminLogin.status, 200, adminLogin.text);
-  const adminToken = data(adminLogin).token;
-  const leasingLogin = await req('/api/admin/auth/login', {
-    method: 'POST',
-    body: { email: 'leasing@itgel.mn', password: 'leasing123' },
-  });
-  assert.equal(leasingLogin.status, 200, leasingLogin.text);
-  const leasingToken = data(leasingLogin).token;
+  const adminSession = await workspaceOtp.workspaceLogin('admin@itgel.mn', '99000001');
+  const adminToken = adminSession.token;
+  const leasingSession = await workspaceOtp.workspaceLogin('leasing@itgel.mn', '99000002');
+  const leasingToken = leasingSession.token;
   const leasingAdminId = sql(`SELECT id FROM "AdminUser" WHERE email='leasing@itgel.mn'`);
   const ownerPatch = await req('/api/admin/settings', {
     method: 'PATCH',
@@ -1388,11 +1383,9 @@ try {
     body: { email: leaseBEmail, name: 'Leasing Two', password: 'leasing123', role: 'LEASING' },
   });
   assert.ok([200, 201].includes(leaseBCreate.status), leaseBCreate.text);
-  const leaseBLogin = await req('/api/admin/auth/login', {
-    method: 'POST',
-    body: { email: leaseBEmail, password: 'leasing123' },
-  });
-  const leaseBToken = data(leaseBLogin).token;
+  const leaseBPhone = `76${phoneA.slice(-6)}`;
+  const leaseBSession = await workspaceOtp.workspaceLogin(leaseBEmail, leaseBPhone);
+  const leaseBToken = leaseBSession.token;
   const leaseBProduct = await req('/api/leasing/products', {
     method: 'POST',
     token: leaseBToken,

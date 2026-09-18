@@ -206,19 +206,19 @@ export default function StorefrontPage() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/admin/preorders"
+              href="/workspace/shop/preorders"
               className="inline-flex h-11 items-center rounded-[8px] border border-line bg-bg px-4 text-[14px] no-underline"
             >
               Урьдчилсан захиалга
             </Link>
             <Link
-              href="/admin/products"
+              href="/workspace/shop/products"
               className="inline-flex h-11 items-center rounded-[8px] border border-line bg-bg px-4 text-[14px] no-underline"
             >
               Каталог
             </Link>
             <Link
-              href="/admin/batches"
+              href="/workspace/shop/batches"
               className="inline-flex h-11 items-center rounded-[8px] bg-ink px-4 text-[14px] text-white no-underline"
             >
               Багцад бараа нэмэх

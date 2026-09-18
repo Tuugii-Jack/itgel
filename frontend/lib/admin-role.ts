@@ -9,18 +9,18 @@ export function isLeasingAdmin(role?: string | null): boolean {
 /** Туслах админ хандаж болох хуудсууд. */
 export function helperAdminCanAccess(pathname: string): boolean {
   if (
-    pathname === "/admin" ||
-    pathname === "/admin/login" ||
-    pathname === "/admin/account"
+    pathname === "/workspace" ||
+    pathname === "/workspace/shop" ||
+    pathname === "/workspace/shop/account"
   ) {
     return true;
   }
   return (
-    pathname.startsWith("/admin/orders") ||
-    pathname.startsWith("/admin/handover") ||
-    pathname.startsWith("/admin/deliveries") ||
-    pathname.startsWith("/admin/returns") ||
-    pathname.startsWith("/admin/customers")
+    pathname.startsWith("/workspace/shop/orders") ||
+    pathname.startsWith("/workspace/shop/handover") ||
+    pathname.startsWith("/workspace/shop/deliveries") ||
+    pathname.startsWith("/workspace/shop/returns") ||
+    pathname.startsWith("/workspace/shop/customers")
   );
 }
 

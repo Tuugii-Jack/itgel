@@ -142,7 +142,7 @@ export function StorefrontCard({
         <div className="mt-auto flex flex-col gap-1.5 pt-2">
           {expired ? (
             <Link
-              href="/admin/batches"
+              href="/workspace/shop/batches"
               className="inline-flex h-11 w-full items-center justify-center rounded-[8px] bg-ink text-[14px] text-white no-underline"
             >
               Багцад дахин гаргах

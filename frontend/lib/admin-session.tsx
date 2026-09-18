@@ -10,46 +10,47 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { adminApi, readToken, writeToken } from "./api";
+import { adminApi, api, readToken, writeToken } from "./api";
+import { clearRequestCache } from "./api/client";
 import { deferEffect } from "./deferEffect";
+import { clearCheckoutDraft } from "./checkoutDraft";
+import { clearCheckoutIdempotencyKey } from "./checkoutIdempotency";
+import { profileLoginPath, workspaceHome } from "./safeNext";
 
-interface AdminUser {
+export interface WorkspaceUser {
   id: string;
   email: string;
   name: string;
   role: string;
+  hasLoginPhone?: boolean;
 }
 
 interface AdminSession {
-  user: AdminUser | null;
+  user: WorkspaceUser | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => void;
 }
 
 const Ctx = createContext<AdminSession | null>(null);
 
-const LOGIN_PATH = "/admin/login";
-const LEASING_LOGIN = "/leasing/login";
-
 export function AdminSessionProvider({
   children,
-  portal = "admin",
+  portal = "shop",
 }: {
   children: ReactNode;
-  portal?: "admin" | "leasing";
+  portal?: "shop" | "leasing" | "hub";
 }) {
-  const [user, setUser] = useState<AdminUser | null>(null);
+  const [user, setUser] = useState<WorkspaceUser | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
-  const loginPath = portal === "leasing" ? LEASING_LOGIN : LOGIN_PATH;
-  const onLoginPage = pathname === loginPath;
 
-  const homeFor = (role: string) => (role === "LEASING" ? "/leasing" : "/admin");
   const allowed = useCallback(
-    (role: string) =>
-      portal === "leasing" ? role === "LEASING" : role === "ADMIN" || role === "STAFF",
+    (role: string) => {
+      if (portal === "hub") return role === "ADMIN" || role === "STAFF" || role === "LEASING";
+      if (portal === "leasing") return role === "LEASING";
+      return role === "ADMIN" || role === "STAFF";
+    },
     [portal],
   );
 
@@ -57,7 +58,7 @@ export function AdminSessionProvider({
     () =>
       deferEffect(() => {
         if (!readToken("admin")) {
-          writeToken("admin", null); // cookie-г цэвэрлэнэ
+          writeToken("admin", null);
           setUser(null);
           setLoading(false);
           return;
@@ -66,7 +67,6 @@ export function AdminSessionProvider({
           .me()
           .then((me) => {
             setUser(me);
-            // Хуучин session-д cookie байхгүй байж болно — нөхнө.
             writeToken("admin", readToken("admin"));
           })
           .catch(() => {
@@ -78,40 +78,32 @@ export function AdminSessionProvider({
     [],
   );
 
-  // Нэвтрээгүй → зөвхөн login; нэвтэрсэн → зөв портал руу.
   useEffect(() => {
     if (loading) return;
-    if (!user && !onLoginPage) router.replace(loginPath);
-    if (user && onLoginPage) router.replace(homeFor(user.role));
-    if (user && !onLoginPage && !allowed(user.role)) router.replace(homeFor(user.role));
-  }, [user, loading, onLoginPage, router, loginPath, allowed]);
-
-  // Login дээр JWT байхгүй бол cookie-г цэвэрлэ — stale cookie-оос сэргийлнэ.
-  useEffect(() => {
-    if (onLoginPage && !readToken("admin")) {
-      writeToken("admin", null);
+    if (!user) {
+      router.replace(profileLoginPath(pathname));
+      return;
     }
-  }, [onLoginPage]);
-
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      const result = await adminApi.login(email.trim().toLowerCase(), password);
-      writeToken("admin", result.token);
-      setUser(result.user);
-      router.replace(homeFor(result.user.role));
-    },
-    [router],
-  );
+    if (!allowed(user.role)) {
+      router.replace(workspaceHome(user.role));
+    }
+  }, [user, loading, router, pathname, allowed]);
 
   const signOut = useCallback(() => {
+    void adminApi.logout().catch(() => undefined);
+    void api.logout().catch(() => undefined);
     writeToken("admin", null);
+    writeToken("customer", null);
+    clearRequestCache();
+    clearCheckoutDraft();
+    clearCheckoutIdempotencyKey();
     setUser(null);
-    router.replace(loginPath);
-  }, [router, loginPath]);
+    router.replace("/profile");
+  }, [router]);
 
   const value = useMemo<AdminSession>(
-    () => ({ user, loading, signIn, signOut }),
-    [user, loading, signIn, signOut],
+    () => ({ user, loading, signOut }),
+    [user, loading, signOut],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

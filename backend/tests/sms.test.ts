@@ -213,7 +213,7 @@ describe('SMS суваг', () => {
 
   it('console test/dev дээр queued, мессеж логлохгүй', async () => {
     const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
-    const provider = new ConsoleSmsProvider('shop');
+    const provider = new ConsoleSmsProvider('shop', false);
     const result = await provider.send({ phone: '99112233', text: 'OTP 123456 нууц' });
     expect(result).toMatchObject({ accepted: true, status: 'queued' });
     expect(JSON.stringify(spy.mock.calls)).not.toMatch(/123456|OTP|SHOP_SMS_API_KEY/);

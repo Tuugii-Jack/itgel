@@ -26,6 +26,8 @@ function publicAdmin(user: {
   isActive: boolean;
   createdAt: Date;
   lastLoginAt: Date | null;
+  phone?: string | null;
+  phoneVerifiedAt?: Date | null;
 }) {
   return {
     id: user.id,
@@ -35,6 +37,7 @@ function publicAdmin(user: {
     isActive: user.isActive,
     createdAt: user.createdAt.toISOString(),
     lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+    hasLoginPhone: Boolean(user.phone && user.phoneVerifiedAt),
   };
 }
 
@@ -130,6 +133,9 @@ adminStaffRouter.patch(
         ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
         ...(body.password
           ? { passwordHash: await bcrypt.hash(body.password, BCRYPT_ROUNDS) }
+          : {}),
+        ...(body.isActive === false || body.password
+          ? { tokenVersion: { increment: 1 } }
           : {}),
       },
     });

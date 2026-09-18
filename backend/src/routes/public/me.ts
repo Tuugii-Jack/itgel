@@ -29,6 +29,7 @@ import { currentLeasingPayGaps, getSettingsCached } from "../../services/setting
 import { issueEmailChange } from "../../services/emailChange.js";
 import { issuePhoneChange, resendPhoneChange, verifyPhoneChange } from "../../services/phoneChange.js";
 import { signCustomerToken } from "../../lib/jwt.js";
+import { peekWorkspace } from "../../services/workspaceAuth.js";
 
 export const publicMeRouter = Router();
 
@@ -74,7 +75,8 @@ publicMeRouter.get(
       where: { id: req.auth!.sub },
     });
     if (!customer) throw notFound("Хэрэглэгч олдсонгүй.");
-    res.json({ data: serializeCustomer(customer) });
+    const workspace = await peekWorkspace(customer.phone);
+    res.json({ data: { ...serializeCustomer(customer), workspace } });
   }),
 );
 

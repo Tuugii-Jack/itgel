@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     create: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
+    count: vi.fn(),
   };
   const $executeRaw = vi.fn();
   const tx = { customer, phoneOtp, $executeRaw };
@@ -58,6 +59,7 @@ describe('phone OTP', () => {
     mocks.phoneOtp.findFirst.mockResolvedValue(null);
     mocks.phoneOtp.findUnique.mockResolvedValue({ attempts: 1 });
     mocks.phoneOtp.updateMany.mockResolvedValue({ count: 1 });
+    mocks.phoneOtp.count.mockResolvedValue(0);
     mocks.phoneOtp.create.mockImplementation(async ({ data }) => ({
       id: 'otp-1',
       createdAt: new Date(),
@@ -325,6 +327,19 @@ describe('phone OTP', () => {
       data: { usedAt: expect.any(Date) },
     });
     expect(mocks.phoneOtp.create.mock.calls[0]![0].data.code).toBe('123456');
+  });
+
+  it('цагийн хязгаарыг DB count-оор шалгана', async () => {
+    mocks.phoneOtp.count.mockResolvedValue(5);
+    await expect(issuePhoneOtp({ phone: '99112233' })).rejects.toMatchObject({ status: 429 });
+    expect(mocks.phoneOtp.create).not.toHaveBeenCalled();
+  });
+
+  it('IP хязгаарыг DB count-оор шалгана', async () => {
+    mocks.phoneOtp.count.mockResolvedValueOnce(0).mockResolvedValueOnce(60);
+    await expect(issuePhoneOtp({ phone: '99112233', ip: '1.1.1.1' })).rejects.toMatchObject({
+      status: 429,
+    });
   });
 });
 

@@ -2,34 +2,23 @@ import compression from 'compression';
 import cors, { type CorsOptions } from 'cors';
 import express from 'express';
 import helmet from 'helmet';
-import { env, isProd } from './env.js';
-import { corsMiddlewareOptions, setPrivateApiCache } from './lib/cors.js';
+import { env } from './env.js';
+import { API_HELMET_OPTIONS, corsMiddlewareOptions, setPrivateApiCache } from './lib/cors.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { apiRouter } from './routes/index.js';
+import { allowedWebOrigins } from './lib/sessionCookies.js';
 
-/** Next `3000` завгүй бол `3001` руу шилждэг — локал origin-уудыг нэмж зөвшөөрнө. */
+/** Next олон порт ашигладаг — локал origin-уудыг нэмж зөвшөөрнө. */
 function corsOrigin(): CorsOptions['origin'] {
   if (env.CORS_ORIGIN === '*') return true;
-  const allowed = new Set(
-    env.CORS_ORIGIN.split(',')
-      .map((o) => o.trim())
-      .filter(Boolean),
-  );
-  if (!isProd) {
-    for (const host of ['localhost', '127.0.0.1']) {
-      for (const port of [3000, 3001, 3002, 4000, 4001]) {
-        allowed.add(`http://${host}:${port}`);
-      }
-    }
-  }
-  return [...allowed];
+  return allowedWebOrigins();
 }
 
 export function createApp() {
   const app = express();
 
   app.set('trust proxy', 1);
-  app.use(helmet());
+  app.use(helmet(API_HELMET_OPTIONS));
   // JSON хариуг шахаж илгээнэ — том жагсаалтын хариу олон дахин жижгэрнэ.
   app.use(compression());
   // Хувийн API-г CDN/shared cache-д бүү хий. Нийтийн каталог өөрөө Cache-Control тавина.

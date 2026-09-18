@@ -308,12 +308,15 @@ model PhoneOtp {
   id        String    @id @default(cuid())
   phone     String
   code      String
-  /// LOGIN | CHANGE_PHONE
+  /// LOGIN | CHANGE_PHONE | ADMIN_PHONE
   purpose   String    @default("LOGIN")
   /// Хуучин клиент нэр илгээсэн бол verify дээр Customer-д бичнэ.
   name      String?
   customerId    String?
+  adminUserId   String?
   previousPhone String?
+  /// Rate limit — олон instance дээр IP-г DB-ээр тоолно.
+  ip            String?
   expiresAt DateTime
   usedAt    DateTime?
   attempts  Int       @default(0)
@@ -324,6 +327,8 @@ model PhoneOtp {
   @@index([phone, createdAt])
   @@index([phone, purpose, createdAt])
   @@index([customerId, purpose, createdAt])
+  @@index([adminUserId, purpose, createdAt])
+  @@index([ip, createdAt])
 }
 
 /// SMS илгээлтийн оролдлого — хүлээн авсан (queued) болон хүргэгдсэн (delivered) тусдаа.
@@ -401,6 +406,11 @@ model AdminUser {
   passwordHash String
   role         AdminRole @default(ADMIN)
   isActive     Boolean   @default(true)
+  /// Нэвтрэх утас — зөвхөн phoneVerifiedAt-тай идэвхтэй бүртгэл privileged session авна.
+  phone           String?   @unique
+  phoneVerifiedAt DateTime?
+  /// JWT tv — нэвтрэлт/эрхийн өөрчлөлт хуучин privileged токеныг хүчингүй болгоно.
+  tokenVersion    Int       @default(0)
   createdAt    DateTime  @default(now())
   lastLoginAt  DateTime?
 }

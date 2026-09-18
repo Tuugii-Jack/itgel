@@ -200,7 +200,7 @@ export default function AdminCreateOrderPage() {
         })),
       });
       toast.success(`${order.code} үүслээ.`);
-      router.push("/admin");
+      router.push("/workspace/shop");
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Үүсгэж чадсангүй.";
       setError(message);
@@ -225,7 +225,7 @@ export default function AdminCreateOrderPage() {
           title="Захиалга оруулах"
           hint="Туслах админ захиалга үүсгэх эрхгүй."
           actions={
-            <Link href="/admin" className="text-[13px] text-ink-2 underline">
+            <Link href="/workspace/shop" className="text-[13px] text-ink-2 underline">
               Буцах
             </Link>
           }
@@ -243,7 +243,7 @@ export default function AdminCreateOrderPage() {
         title="Захиалга оруулах"
         hint="Утсаар / дэлгүүрт авсан захиалгыг гараар бүртгэнэ."
         actions={
-          <Link href="/admin" className="text-[13px] text-ink-2 underline">
+          <Link href="/workspace/shop" className="text-[13px] text-ink-2 underline">
             Буцах
           </Link>
         }

@@ -273,20 +273,20 @@ export default function AdminOrdersPage() {
               {selected.size > 0 ? `Excel (${selected.size})` : "Excel"}
             </Button>
             <Link
-              href="/admin/orders/by-product"
+              href="/workspace/shop/orders/by-product"
               className="inline-flex h-9 items-center rounded-[8px] border border-line bg-bg px-3 text-[13px] text-ink"
             >
               Бараагаар
             </Link>
             <Link
-              href="/admin/returns"
+              href="/workspace/shop/returns"
               className="inline-flex h-9 items-center rounded-[8px] border border-line bg-bg px-3 text-[13px] text-ink"
             >
               Буцаалт
             </Link>
             {canWrite && !showDeleted && (
               <Link
-                href="/admin/orders/new"
+                href="/workspace/shop/orders/new"
                 className="inline-flex h-9 items-center rounded-[8px] border border-primary bg-primary px-3 text-[13px] text-white"
               >
                 Захиалга оруулах

@@ -20,6 +20,7 @@ import { dayTimeLabel } from "@/lib/format";
 import { AIMAGS } from "@/lib/locations";
 import { useToast } from "@/lib/toast";
 import type { AuditLog, AdminStaffUser, Settings } from "@/lib/types";
+import { LoginPhoneCard } from "@/features/auth/components/LoginPhoneCard";
 
 export default function SettingsPage() {
   const toast = useToast();
@@ -109,7 +110,9 @@ export default function SettingsPage() {
       <PageHead title="Тохиргоо" hint="Дэлгүүрийн мэдээлэл, төлбөр, хүргэлт" />
 
       <div className="flex flex-col gap-4">
-        <AdminPasswordCard />
+        <Card className="p-4">
+          <LoginPhoneCard title="Миний нэвтрэх утас" />
+        </Card>
 
         <StaffAccountsCard />
 
@@ -338,11 +341,9 @@ function StaffAccountsCard() {
   const [creating, setCreating] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [password, setPassword] = useState("");
   const [role, setRole] = useState<"STAFF" | "LEASING">("STAFF");
   const [busy, setBusy] = useState(false);
   const [resetId, setResetId] = useState<string | null>(null);
-  const [resetPassword, setResetPassword] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -364,12 +365,11 @@ function StaffAccountsCard() {
       await adminApi.createStaffUser({
         email: email.trim(),
         name: name.trim(),
-        password,
+        password: `${crypto.randomUUID()}Aa1`,
         role,
       });
       setEmail("");
       setName("");
-      setPassword("");
       setRole("STAFF");
       setCreating(false);
       toast.success(role === "LEASING" ? "Лизингийн админ үүслээ." : "Туслах админ үүслээ.");
@@ -391,21 +391,6 @@ function StaffAccountsCard() {
     }
   };
 
-  const saveReset = async (id: string) => {
-    if (resetPassword.length < 6) {
-      toast.error("Нууц үг дор хаяж 6 тэмдэгт.");
-      return;
-    }
-    try {
-      await adminApi.updateStaffUser(id, { password: resetPassword });
-      setResetId(null);
-      setResetPassword("");
-      toast.success("Нууц үг солигдлоо.");
-    } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "Солиж чадсангүй.");
-    }
-  };
-
   return (
     <Card className="flex flex-col gap-3 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -413,6 +398,7 @@ function StaffAccountsCard() {
           <div className="text-[15px] font-medium">Админ хэрэглэгчид</div>
           <p className="mt-1 mb-0 text-[13px] text-ink-2">
             Туслах админ захиалга харна. Лизингийн админ зөвхөн лизинг захиалгыг удирдана.
+            Нэвтрэлт утас + OTP. Үүсгэсний дараа нэвтрэх дугаар холбоно.
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={() => setCreating((v) => !v)}>
@@ -427,9 +413,6 @@ function StaffAccountsCard() {
           </Field>
           <Field label="И-мэйл">
             <Input value={email} onChange={setEmail} type="email" placeholder="help@itgel.mn" />
-          </Field>
-          <Field label="Нууц үг">
-            <Input value={password} onChange={setPassword} type="password" placeholder="••••••" />
           </Field>
           <Field label="Эрх">
             <Select
@@ -446,7 +429,7 @@ function StaffAccountsCard() {
             <Button
               size="sm"
               loading={busy}
-              disabled={!name.trim() || !email.trim() || password.length < 6}
+              disabled={!name.trim() || !email.trim()}
               onClick={() => void create()}
             >
               Үүсгэх
@@ -473,6 +456,7 @@ function StaffAccountsCard() {
                   </div>
                   <div className="text-[13px] text-ink-2">
                     {row.email} · {ROLE_LABEL[row.role] ?? row.role}
+                    {row.hasLoginPhone ? " · утас холбосон" : " · утасгүй"}
                   </div>
                   {row.lastLoginAt && (
                     <div className="tnum mt-0.5 text-[12px] text-muted">
@@ -488,10 +472,9 @@ function StaffAccountsCard() {
                         variant="outline"
                         onClick={() => {
                           setResetId(resetId === row.id ? null : row.id);
-                          setResetPassword("");
                         }}
                       >
-                        Нууц үг
+                        Нэвтрэх утас
                       </Button>
                       <Button
                         size="sm"
@@ -505,100 +488,14 @@ function StaffAccountsCard() {
                 </div>
               </div>
               {resetId === row.id && (
-                <div className="mt-3 flex flex-wrap items-end gap-2">
-                  <div className="min-w-[180px] flex-1">
-                    <Field label="Шинэ нууц үг">
-                      <Input
-                        value={resetPassword}
-                        onChange={setResetPassword}
-                        type="password"
-                        placeholder="••••••"
-                      />
-                    </Field>
-                  </div>
-                  <Button size="sm" onClick={() => void saveReset(row.id)}>
-                    Хадгалах
-                  </Button>
+                <div className="mt-3 rounded-[8px] border border-line p-3">
+                  <LoginPhoneCard adminId={row.id} title="Админы нэвтрэх утас" />
                 </div>
               )}
             </div>
           ))}
         </div>
       )}
-    </Card>
-  );
-}
-
-function AdminPasswordCard() {
-  const toast = useToast();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const save = async () => {
-    if (newPassword.length < 6) {
-      setError("Шинэ нууц үг хамгийн багадаа 6 тэмдэгт.");
-      return;
-    }
-    if (newPassword !== confirm) {
-      setError("Шинэ нууц үг таарахгүй байна.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await adminApi.changePassword(currentPassword, newPassword);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirm("");
-      toast.success("Нууц үг солигдлоо.");
-    } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Солиж чадсангүй.";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Card className="flex flex-col gap-3 p-4">
-      <div className="text-[15px] font-medium">Админ нууц үг</div>
-      <p className="m-0 text-[13px] text-ink-2">
-        Нууц үгээ эндээс солино. Солисны дараа гараад шинэ нууц үгээрээ нэвтэрнэ үү.
-      </p>
-      <Field label="Одоогийн нууц үг">
-        <Input
-          value={currentPassword}
-          onChange={setCurrentPassword}
-          type="password"
-          placeholder="••••••"
-        />
-      </Field>
-      <Field label="Шинэ нууц үг">
-        <Input
-          value={newPassword}
-          onChange={setNewPassword}
-          type="password"
-          placeholder="••••••"
-        />
-      </Field>
-      <Field label="Шинэ нууц үг (давтах)">
-        <Input value={confirm} onChange={setConfirm} type="password" placeholder="••••••" />
-      </Field>
-      {error && <ErrorNote>{error}</ErrorNote>}
-      <div>
-        <Button
-          size="sm"
-          loading={busy}
-          disabled={!currentPassword || newPassword.length < 6 || !confirm}
-          onClick={save}
-        >
-          Нууц үг солих
-        </Button>
-      </div>
     </Card>
   );
 }
@@ -615,7 +512,7 @@ const ENTITY_LABEL: Record<string, string> = {
   AdminUser: "Админ хэрэглэгч",
 };
 
-/** Хэн юу өөрчилснийг хардаг хэсэг — GET /admin/settings/audit. */
+/** Хэн юу өөрчилснийг хардаг хэсэг — GET /workspace/shop/settings/audit. */
 function AuditTrail() {
   const [logs, setLogs] = useState<AuditLog[] | null>(null);
   const [open, setOpen] = useState(false);

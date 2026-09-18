@@ -4,6 +4,14 @@ import type { CorsOptions } from 'cors';
 export const CORS_PREFLIGHT_MAX_AGE_SEC = 600;
 
 /**
+ * JSON API-г дэлгүүрийн origin-оос fetch хийнэ.
+ * Helmet-ийн default CORP `same-origin` нь split frontend/API-г блоклоно.
+ */
+export const API_HELMET_OPTIONS = {
+  crossOriginResourcePolicy: { policy: 'cross-origin' as const },
+};
+
+/**
  * Хувийн API-г shared cache-д бүү хий.
  * OPTIONS дээр no-store тавибал Chrome Access-Control-Max-Age-ийг үл тооно.
  */

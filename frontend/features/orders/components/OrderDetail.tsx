@@ -101,7 +101,7 @@ export function OrderDetail({
         hint={
           <span>
             <Link
-              href={`/admin/customers?id=${order.customer.id}`}
+              href={`/workspace/shop/customers?id=${order.customer.id}`}
               className="text-ink no-underline hover:underline"
               onClick={(e) => {
                 // Customers page opens detail via local state — deep-link via sessionStorage.
@@ -111,7 +111,7 @@ export function OrderDetail({
                 } catch {
                   /* ignore */
                 }
-                router.push("/admin/customers");
+                router.push("/workspace/shop/customers");
               }}
             >
               {customerNameLabel(order.customer.name)}
@@ -168,7 +168,7 @@ export function OrderDetail({
         {order.batch &&
           (canWriteStatus ? (
           <Link
-            href="/admin/batches"
+            href="/workspace/shop/batches"
             className="no-underline"
             onClick={(e) => {
               e.preventDefault();
@@ -177,7 +177,7 @@ export function OrderDetail({
               } catch {
                 /* ignore */
               }
-              router.push("/admin/batches");
+              router.push("/workspace/shop/batches");
             }}
           >
             <Badge tone="info">{order.batch.name}</Badge>
@@ -305,7 +305,7 @@ export function OrderDetail({
               </div>
               {order.status === "ARRIVED" && (
                 <Link
-                  href="/admin/handover"
+                  href="/workspace/shop/handover"
                   className="inline-flex h-9 items-center justify-center rounded-[8px] bg-ink px-3 text-[13px] text-white no-underline"
                 >
                   Хүлээлгэн өгөх

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     findUnique: vi.fn(),
     create: vi.fn(),
     updateMany: vi.fn(),
+    count: vi.fn(),
   },
   $executeRaw: vi.fn(),
   $transaction: vi.fn(),
@@ -56,6 +57,7 @@ describe('нэвтрэх утас солих', () => {
     mocks.$transaction.mockImplementation(async (fn: (tx: typeof mocks) => unknown) => fn(mocks));
     mocks.phoneOtp.findFirst.mockResolvedValue(null);
     mocks.phoneOtp.updateMany.mockResolvedValue({ count: 1 });
+    mocks.phoneOtp.count.mockResolvedValue(0);
     mocks.phoneOtp.create.mockImplementation(async ({ data }) => ({
       id: 'otp-change',
       createdAt: new Date(),

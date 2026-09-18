@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { createPoller, POLL_MAX_DURATION_MS } from '../../../frontend/lib/poller.ts';
 import { shouldPollPayment, shouldPollSuccess } from '../../../frontend/lib/orderPolling.ts';
 import { CORS_PREFLIGHT_MAX_AGE_SEC } from '../../src/lib/cors.ts';
+import { createOtpWorkspace } from './otpWorkspace.mjs';
 
 const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const LOCAL_DB = 'postgresql://itgel:itgel@127.0.0.1:5432/itgel';
@@ -571,6 +572,8 @@ function data(res) {
   return res.json.data;
 }
 
+const workspaceOtp = createOtpWorkspace({ req, sql, data });
+
 function lineOf(product, qty = 1) {
   const sku = (product.skuStocks ?? []).find((s) => s.stock > 0);
   if (sku?.selections) {
@@ -787,16 +790,8 @@ async function runLive() {
     assert.equal(ownedCreate.status, 201, ownedCreate.text);
     const ownedId = sql(`SELECT id FROM "Order" WHERE code='${data(ownedCreate).code}'`);
 
-    const adminLogin = await req('/api/admin/auth/login', {
-      method: 'POST',
-      body: { email: 'admin@itgel.mn', password: 'admin123' },
-    });
-    const adminToken = data(adminLogin).token;
-    const leasingLogin = await req('/api/admin/auth/login', {
-      method: 'POST',
-      body: { email: 'leasing@itgel.mn', password: 'leasing123' },
-    });
-    const leasingToken = data(leasingLogin).token;
+    const adminToken = (await workspaceOtp.workspaceLogin('admin@itgel.mn', '99000001')).token;
+    const leasingToken = (await workspaceOtp.workspaceLogin('leasing@itgel.mn', '99000002')).token;
 
     const shopId = sql(`SELECT id FROM "Order" WHERE code='${part.code}'`);
     await req(`/api/admin/orders/${shopId}`, { token: adminToken });

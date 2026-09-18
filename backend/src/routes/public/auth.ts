@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { randomInt } from 'node:crypto';
 import { z } from 'zod';
+import { audit } from '../../lib/audit.js';
 import { prisma } from '../../prisma.js';
 import { normalizePhone, PHONE_RE } from '../../lib/code.js';
 import { badRequest, conflict, tooManyRequests, unauthorized } from '../../lib/errors.js';
@@ -11,6 +12,9 @@ import { asyncHandler, validate } from '../../middleware/validate.js';
 import { mailTemplates, sendMail } from '../../services/mail.js';
 import { findPendingEmailChange, resendEmailChange, verifyEmailChange } from '../../services/emailChange.js';
 import { consumePhoneOtp, isPhoneLoginVerified, issuePhoneOtp } from '../../services/phoneOtp.js';
+import { openWorkspaceSession, revokeWorkspaceSessions } from '../../services/workspaceAuth.js';
+import { setSessionCookies } from '../../lib/sessionCookies.js';
+import { resolveAuth } from '../../middleware/auth.js';
 import {
   consumeOtpWithStore,
   prismaOtpWhere,
@@ -437,15 +441,54 @@ publicAuthRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as { phone: string; code: string; name?: string };
     const customer = await consumePhoneOtp(body.phone, body.code, body.name);
+    const token = signCustomerToken({
+      sub: customer.id,
+      email: customer.email,
+      phone: customer.phone,
+    });
+    const workspace = customer.phone ? await openWorkspaceSession(customer.phone) : null;
+    setSessionCookies(req, res, { customer: token, admin: workspace?.token ?? null });
+    await audit({
+      actor: `customer:${customer.id}`,
+      action: 'AUTH_PHONE_LOGIN',
+      entity: 'Customer',
+      entityId: customer.id,
+      after: { workspace: Boolean(workspace) },
+    });
     res.json({
       data: {
-        token: signCustomerToken({
-          sub: customer.id,
-          email: customer.email,
-          phone: customer.phone,
-        }),
+        token,
         customer: publicCustomer(customer),
+        workspace,
       },
     });
+  }),
+);
+
+publicAuthRouter.post(
+  '/logout',
+  asyncHandler(async (req, res) => {
+    const customer = await resolveAuth(req, 'customer');
+    const admin = await resolveAuth(req, 'admin');
+    if (admin) {
+      await revokeWorkspaceSessions(admin.sub, `admin:${admin.sub}`);
+    }
+    setSessionCookies(req, res, { customer: null, admin: null });
+    if (customer) {
+      await audit({
+        actor: `customer:${customer.sub}`,
+        action: 'AUTH_LOGOUT',
+        entity: 'Customer',
+        entityId: customer.sub,
+      });
+    } else if (admin) {
+      await audit({
+        actor: `admin:${admin.sub}`,
+        action: 'AUTH_LOGOUT',
+        entity: 'AdminUser',
+        entityId: admin.sub,
+      });
+    }
+    res.json({ data: { ok: true } });
   }),
 );

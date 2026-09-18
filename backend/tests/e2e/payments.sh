@@ -4,8 +4,10 @@ API=http://localhost:4000/api
 PHONE=9$(printf "%07d" $((RANDOM*RANDOM%10000000)))
 j() { python3 -c "import sys,json;d=json.load(sys.stdin);print(json.dumps(eval(sys.argv[1]),ensure_ascii=False))" "$1"; }
 
-TOKEN=$(curl -s -X POST $API/admin/auth/login -H 'content-type: application/json' \
-  -d '{"email":"admin@itgel.mn","password":"admin123"}' | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['token'])")
+docker exec itgel-db psql -U itgel -d itgel -c "UPDATE \"AdminUser\" SET phone='99000001', \"phoneVerifiedAt\"=NOW() WHERE email='admin@itgel.mn'" >/dev/null
+curl -s -X POST $API/auth/otp -H 'content-type: application/json' -d '{"phone":"99000001"}' >/dev/null
+CODE=$(docker exec itgel-db psql -U itgel -d itgel -At -c "SELECT code FROM \"PhoneOtp\" WHERE phone='99000001' AND purpose='LOGIN' AND \"usedAt\" IS NULL ORDER BY \"createdAt\" DESC LIMIT 1")
+TOKEN=$(curl -s -X POST $API/auth/verify -H 'content-type: application/json' -d "{\"phone\":\"99000001\",\"code\":\"$CODE\"}" | python3 -c "import sys,json;print(json.load(sys.stdin)['data']['workspace']['token'])")
 AUTH="Authorization: Bearer $TOKEN"
 
 # Хэмжээтэй, идэвхтэй захиалгын бараа

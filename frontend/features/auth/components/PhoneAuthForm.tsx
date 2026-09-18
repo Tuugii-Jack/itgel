@@ -7,6 +7,9 @@ import { formatMnPhone, MN_PHONE_RE, parseMnPhone } from "@/lib/phone";
 import { smsStatusLabel } from "@/lib/smsStatus";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
+import type { WorkspaceUser } from "@/lib/admin-session";
+
+type WorkspaceGrant = { token: string; user: WorkspaceUser };
 
 type Step = "phone" | "code" | "name";
 
@@ -17,7 +20,7 @@ type Step = "phone" | "code" | "name";
 export function PhoneAuthForm({
   onDone,
 }: {
-  onDone?: () => void;
+  onDone?: (workspace?: WorkspaceGrant | null) => void;
   /** Хуучин props — ижил урсгал. */
   variant?: "default" | "checkout";
   initialMode?: "login" | "register";
@@ -32,6 +35,7 @@ export function PhoneAuthForm({
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [pendingWorkspace, setPendingWorkspace] = useState<WorkspaceGrant | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
@@ -50,10 +54,10 @@ export function PhoneAuthForm({
     inputRef.current?.focus();
   }, [step]);
 
-  const finish = useCallback(async (token: string) => {
-    await signIn(token);
+  const finish = useCallback(async (token: string, workspace?: WorkspaceGrant | null) => {
+    await signIn(token, workspace ?? null);
     toast.success("Амжилттай нэвтэрлээ.");
-    onDone?.();
+    onDone?.(workspace ?? null);
   }, [onDone, signIn, toast]);
 
   const send = async () => {
@@ -89,10 +93,11 @@ export function PhoneAuthForm({
       const result = await api.verifyOtp(phone, code);
       const existingName = result.customer.name?.trim() ?? "";
       if (existingName) {
-        await finish(result.token);
+        await finish(result.token, result.workspace);
         return;
       }
       setPendingToken(result.token);
+      setPendingWorkspace(result.workspace);
       setStep("name");
     } catch (e) {
       setError(verifyErrorMessage(e));
@@ -130,7 +135,7 @@ export function PhoneAuthForm({
     setError(null);
     try {
       await api.updateMe({ name: trimmed }, pendingToken);
-      await finish(pendingToken);
+      await finish(pendingToken, pendingWorkspace);
     } catch (e) {
       setError(networkOrApiMessage(e, "Нэр хадгалж чадсангүй."));
     } finally {

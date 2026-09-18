@@ -12,6 +12,7 @@ export interface AdminToken {
   sub: string;
   email: string;
   role: 'ADMIN' | 'STAFF' | 'LEASING';
+  tv: number;
 }
 
 export type TokenPayload = CustomerToken | AdminToken;
@@ -22,7 +23,9 @@ export function signCustomerToken(payload: Omit<CustomerToken, 'role'>): string 
   });
 }
 
-export function signAdminToken(payload: Omit<AdminToken, 'role'> & { role: AdminToken['role'] }): string {
+export function signAdminToken(
+  payload: Omit<AdminToken, 'role'> & { role: AdminToken['role']; tv: number },
+): string {
   return jwt.sign(payload satisfies AdminToken, env.JWT_SECRET, {
     expiresIn: env.JWT_ADMIN_TTL as jwt.SignOptions['expiresIn'],
   });
@@ -34,4 +37,8 @@ export function verifyToken(token: string): TokenPayload | null {
   } catch {
     return null;
   }
+}
+
+export function isAdminRole(role: string | undefined): role is AdminToken['role'] {
+  return role === 'ADMIN' || role === 'STAFF' || role === 'LEASING';
 }

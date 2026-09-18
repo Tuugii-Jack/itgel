@@ -9,20 +9,17 @@ import {
   throwOtpClaim,
   type OtpClaimStore,
 } from '../lib/otpClaim.js';
-import { ipLimiters, RateLimiter } from '../lib/rateLimit.js';
 import { smsPhoneOf, smsTemplates } from './sms.js';
 import { dispatchSms } from './smsDispatch.js';
 
 export const PHONE_OTP_LOGIN = 'LOGIN';
 export const PHONE_OTP_CHANGE = 'CHANGE_PHONE';
+export const PHONE_OTP_ADMIN_PHONE = 'ADMIN_PHONE';
 
 const OTP_TTL_MS = 5 * 60 * 1000;
 const RESEND_COOLDOWN_MS = 60 * 1000;
-
-const phoneLimiter = new RateLimiter(5, 60 * 60 * 1000);
-/** Дугаар бүрийн 5/цаг дээр нэмж, нэг IP-ээс олон хүн зэрэг нэвтрэхийг зөвшөөрнө. */
-const ipLimiter = new RateLimiter(60, 60 * 60 * 1000);
-ipLimiters.push(phoneLimiter, ipLimiter);
+const OTP_PHONE_HOUR_LIMIT = 5;
+const OTP_IP_HOUR_LIMIT = 60;
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -107,7 +104,9 @@ async function persistPhoneOtp(
     purpose: string;
     name?: string | null;
     customerId?: string | null;
+    adminUserId?: string | null;
     previousPhone?: string | null;
+    ip?: string | null;
     expiresAt: Date;
     usedAtStamp: Date;
   },
@@ -119,7 +118,9 @@ async function persistPhoneOtp(
         usedAt: null,
         ...(data.purpose === PHONE_OTP_CHANGE && data.customerId
           ? { customerId: data.customerId, purpose: data.purpose }
-          : { phone: data.phone, purpose: data.purpose }),
+          : data.purpose === PHONE_OTP_ADMIN_PHONE && data.adminUserId
+            ? { adminUserId: data.adminUserId, purpose: data.purpose }
+            : { phone: data.phone, purpose: data.purpose }),
       },
       data: { usedAt: data.usedAtStamp },
     });
@@ -130,7 +131,9 @@ async function persistPhoneOtp(
         purpose: data.purpose,
         name: data.name ?? null,
         customerId: data.customerId ?? null,
+        adminUserId: data.adminUserId ?? null,
         previousPhone: data.previousPhone ?? null,
+        ip: data.ip ?? null,
         expiresAt: data.expiresAt,
       },
     });
@@ -148,12 +151,14 @@ export async function issuePhoneOtp(input: {
   ip?: string;
   purpose?: string;
   customerId?: string;
+  adminUserId?: string;
   previousPhone?: string | null;
 }) {
   const phone = normalizeLoginPhone(input.phone);
   const purpose = input.purpose ?? PHONE_OTP_LOGIN;
   const now = new Date();
   const name = input.name?.trim() || undefined;
+  const ip = input.ip?.trim() || null;
 
   const last = await prisma.phoneOtp.findFirst({
     where: {
@@ -162,6 +167,7 @@ export async function issuePhoneOtp(input: {
       usedAt: null,
       expiresAt: { gt: now },
       ...(input.customerId ? { customerId: input.customerId } : {}),
+      ...(input.adminUserId ? { adminUserId: input.adminUserId } : {}),
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -174,20 +180,24 @@ export async function issuePhoneOtp(input: {
     return publicPhoneOtp(phone, last, remainingCooldown);
   }
 
-  const hourly = phoneLimiter.hit(`${purpose}:${phone}`, now.getTime());
-  if (!hourly.allowed) {
+  const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+  const phoneHour = await prisma.phoneOtp.count({
+    where: { phone, purpose, createdAt: { gte: hourAgo } },
+  });
+  if (phoneHour >= OTP_PHONE_HOUR_LIMIT) {
     if (last) return publicPhoneOtp(phone, last, RESEND_COOLDOWN_MS / 1000);
     throw tooManyRequests('Хэт олон код хүслээ. 1 цагийн дараа оролдоно уу.', {
-      retryAfterSec: hourly.retryAfterSec,
+      retryAfterSec: 3600,
     });
   }
 
-  const ipKey = input.ip?.trim();
-  if (ipKey) {
-    const ipHit = ipLimiter.hit(ipKey, now.getTime());
-    if (!ipHit.allowed) {
+  if (ip) {
+    const ipHour = await prisma.phoneOtp.count({
+      where: { ip, purpose, createdAt: { gte: hourAgo } },
+    });
+    if (ipHour >= OTP_IP_HOUR_LIMIT) {
       throw tooManyRequests('Хэт олон код хүслээ. Дараа дахин оролдоно уу.', {
-        retryAfterSec: ipHit.retryAfterSec,
+        retryAfterSec: 3600,
       });
     }
   }
@@ -199,7 +209,9 @@ export async function issuePhoneOtp(input: {
     purpose,
     name: name ?? last?.name ?? null,
     customerId: input.customerId ?? null,
+    adminUserId: input.adminUserId ?? null,
     previousPhone: input.previousPhone ?? null,
+    ip,
     expiresAt: new Date(now.getTime() + OTP_TTL_MS),
     usedAtStamp: now,
   });
@@ -276,7 +288,6 @@ export async function consumePhoneOtp(phoneRaw: string, code: string, name?: str
   });
   const result = await consumeOtpWithStore(store, phone, code, now);
   throwOtpClaim(result);
-  phoneLimiter.reset(`${PHONE_OTP_LOGIN}:${phone}`);
 
   const displayName = name?.trim() || pending?.name || null;
 
@@ -295,7 +306,6 @@ export async function consumePhoneChangeOtp(phoneRaw: string, code: string, cust
   if (!pending) throw badRequest('Код олдсонгүй. Дахин илгээнэ үү.');
   const result = await consumeOtpWithStore(store, phone, code, now);
   throwOtpClaim(result);
-  phoneLimiter.reset(`${PHONE_OTP_CHANGE}:${phone}`);
   return pending;
 }
 

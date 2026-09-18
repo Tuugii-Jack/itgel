@@ -21,10 +21,19 @@ export const shopAuthApi = {
         name: string | null;
         email: string | null;
       };
+      workspace: {
+        token: string;
+        user: { id: string; email: string; name: string; role: string };
+      } | null;
     }>("/auth/verify", {
       method: "POST",
       body: { phone, code },
     }).then((r) => r.data),
+
+  logout: () =>
+    request<{ ok: boolean }>("/auth/logout", { method: "POST", auth: "customer" }).then(
+      (r) => r.data,
+    ),
 
   register: (body: {
     email: string;

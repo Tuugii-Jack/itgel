@@ -20,6 +20,7 @@ export {
   ApiError,
   TOKEN_KEYS,
   adminAuth,
+  clearRequestCache,
   isAuthError,
   readToken,
   request,

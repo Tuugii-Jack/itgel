@@ -1,8 +1,14 @@
 import http from 'node:http';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CORS_PREFLIGHT_MAX_AGE_SEC, corsMiddlewareOptions, setPrivateApiCache } from '../src/lib/cors.js';
+import {
+  API_HELMET_OPTIONS,
+  CORS_PREFLIGHT_MAX_AGE_SEC,
+  corsMiddlewareOptions,
+  setPrivateApiCache,
+} from '../src/lib/cors.js';
 
 function listen(app: express.Express): Promise<{ url: string; close: () => Promise<void> }> {
   const server = http.createServer(app);
@@ -26,6 +32,7 @@ function listen(app: express.Express): Promise<{ url: string; close: () => Promi
 
 function createTestApp() {
   const app = express();
+  app.use(helmet(API_HELMET_OPTIONS));
   app.use(setPrivateApiCache);
   app.use(cors(corsMiddlewareOptions(['http://localhost:3000'])));
   app.get('/api/orders/TEST', (_req, res) => {
@@ -75,6 +82,7 @@ describe('CORS preflight and private cache', () => {
     expect(headers).toContain('cache-control');
     expect(headers).toContain('pragma');
     expect(res.headers.get('cache-control') ?? '').not.toMatch(/no-store/i);
+    expect(res.headers.get('cross-origin-resource-policy')).toBe('cross-origin');
   });
 
   it('rejects a disallowed origin', async () => {
@@ -94,6 +102,8 @@ describe('CORS preflight and private cache', () => {
     });
     expect(order.headers.get('cache-control')).toMatch(/private/i);
     expect(order.headers.get('cache-control')).toMatch(/no-store/i);
+    expect(order.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(order.headers.get('cross-origin-resource-policy')).toBe('cross-origin');
 
     const store = await fetch(`${server.url}/api/store`, { headers: { Origin: origin } });
     expect(store.headers.get('cache-control')).toMatch(/public/i);

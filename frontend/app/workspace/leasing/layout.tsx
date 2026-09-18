@@ -9,13 +9,13 @@ import { ROLE_LABEL } from "@/lib/admin-role";
 import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 
 const NAV = [
-  { href: "/leasing", label: "Захиалга" },
-  { href: "/leasing/ready", label: "Бэлэн бараа" },
-  { href: "/leasing/sales", label: "Борлуулалт" },
-  { href: "/leasing/itgel", label: "Итгэлд төлөх" },
-  { href: "/leasing/customers", label: "Хэрэглэгчид" },
-  { href: "/leasing/sms", label: "SMS" },
-  { href: "/leasing/settings", label: "Тохиргоо" },
+  { href: "/workspace/leasing", label: "Захиалга" },
+  { href: "/workspace/leasing/ready", label: "Бэлэн бараа" },
+  { href: "/workspace/leasing/sales", label: "Борлуулалт" },
+  { href: "/workspace/leasing/itgel", label: "Итгэлд төлөх" },
+  { href: "/workspace/leasing/customers", label: "Хэрэглэгчид" },
+  { href: "/workspace/leasing/sms", label: "SMS" },
+  { href: "/workspace/leasing/settings", label: "Тохиргоо" },
 ];
 
 export default function LeasingLayout({ children }: { children: ReactNode }) {
@@ -27,7 +27,7 @@ export default function LeasingLayout({ children }: { children: ReactNode }) {
 }
 
 function isActive(pathname: string, href: string): boolean {
-  return href === "/leasing" ? pathname === "/leasing" : pathname.startsWith(href);
+  return href === "/workspace/leasing" ? pathname === "/workspace/leasing" : pathname.startsWith(href);
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -35,11 +35,10 @@ function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  const onLoginPage = pathname === "/leasing/login";
 
   useEffect(() => {
     if (!user || user.role === "LEASING") return;
-    router.replace("/admin");
+    router.replace("/workspace/shop");
   }, [user, router]);
 
   if (loading) {
@@ -51,17 +50,14 @@ function Shell({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    if (!onLoginPage) {
-      return (
-        <div className="flex min-h-dvh items-center justify-center">
-          <Spinner className="text-muted" />
-        </div>
-      );
-    }
-    return <div className="min-h-dvh bg-surface">{children}</div>;
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <Spinner className="text-muted" />
+      </div>
+    );
   }
 
-  if (onLoginPage) {
+  if (user.role !== "LEASING") {
     return (
       <div className="flex min-h-dvh items-center justify-center">
         <Spinner className="text-muted" />
@@ -116,11 +112,25 @@ function Shell({ children }: { children: ReactNode }) {
               ))}
             </nav>
             <Link
-              href="/leasing/account"
+              href="/"
               onClick={() => setMenuOpen(false)}
               className="mt-3 block px-3 py-2 text-[13px] text-ink-2 no-underline"
             >
-              Нууц үг солих
+              Дэлгүүр
+            </Link>
+            <Link
+              href="/profile"
+              onClick={() => setMenuOpen(false)}
+              className="block px-3 py-2 text-[13px] text-ink-2 no-underline"
+            >
+              Миний захиалга
+            </Link>
+            <Link
+              href="/workspace/leasing/account"
+              onClick={() => setMenuOpen(false)}
+              className="block px-3 py-2 text-[13px] text-ink-2 no-underline"
+            >
+              Нэвтрэх утас
             </Link>
           </div>
         )}
@@ -150,10 +160,22 @@ function Shell({ children }: { children: ReactNode }) {
             <div className="mb-0.5 truncate text-[13px] text-ink-2">{user.name}</div>
             <div className="mb-2 text-[11px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
             <Link
-              href="/leasing/account"
+              href="/"
               className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
             >
-              Нууц үг солих
+              Дэлгүүр
+            </Link>
+            <Link
+              href="/profile"
+              className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
+            >
+              Миний захиалга
+            </Link>
+            <Link
+              href="/workspace/leasing/account"
+              className="mb-2 block text-[13px] text-ink-2 no-underline hover:text-ink hover:underline"
+            >
+              Нэвтрэх утас
             </Link>
             <button
               type="button"
@@ -173,7 +195,7 @@ function Shell({ children }: { children: ReactNode }) {
 function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <Link
-      href="/leasing"
+      href="/workspace/leasing"
       className={`flex items-center no-underline ${compact ? "gap-2" : "gap-2.5"}`}
     >
       <Image

@@ -264,6 +264,8 @@ async function main() {
       name: 'Болдбаатар Админ',
       passwordHash: await bcrypt.hash(adminPassword, 10),
       role: 'ADMIN',
+      phone: '99000001',
+      phoneVerifiedAt: new Date(),
     },
   });
 

@@ -10,16 +10,21 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { api, isAuthError, readToken, writeToken } from "./api";
+import { adminApi, api, isAuthError, readToken, writeToken } from "./api";
+import { clearRequestCache } from "./api/client";
 import { clearCheckoutDraft } from "./checkoutDraft";
 import { clearCheckoutIdempotencyKey } from "./checkoutIdempotency";
 import type { Me } from "./types";
+import type { WorkspaceUser } from "./admin-session";
 
-/** Хэрэглэгчийн нэвтрэлт — утас + OTP. */
 interface Session {
   me: Me | null;
+  workspace: WorkspaceUser | null;
   loading: boolean;
-  signIn: (token: string) => Promise<void>;
+  signIn: (
+    token: string,
+    workspace?: { token: string; user: WorkspaceUser } | null,
+  ) => Promise<void>;
   signOut: () => void;
   refresh: () => Promise<void>;
 }
@@ -28,6 +33,7 @@ const Ctx = createContext<Session | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceUser | null>(null);
   const [loading, setLoading] = useState(true);
   const refreshVersion = useRef(0);
 
@@ -38,12 +44,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       version === refreshVersion.current && token === readToken("customer");
     try {
       const next = await (token ? api.me() : null);
-      if (isCurrent()) setMe(next);
+      if (!isCurrent()) return;
+      setMe(next);
+      if (readToken("admin")) {
+        try {
+          const admin = await adminApi.me();
+          if (isCurrent()) setWorkspace(admin);
+        } catch {
+          if (!isCurrent()) return;
+          writeToken("admin", null);
+          setWorkspace(null);
+        }
+      } else {
+        setWorkspace(null);
+      }
     } catch (error) {
       if (!isCurrent()) return;
-      // Хугацаа нь дууссан токеныг цэвэрлэнэ.
       if (isAuthError(error)) writeToken("customer", null);
+      writeToken("admin", null);
       setMe(null);
+      setWorkspace(null);
     } finally {
       if (version === refreshVersion.current) setLoading(false);
     }
@@ -61,10 +81,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const signIn = useCallback(
-    async (token: string) => {
+    async (token: string, grant?: { token: string; user: WorkspaceUser } | null) => {
       writeToken("customer", token);
+      if (grant !== undefined) {
+        writeToken("admin", grant?.token ?? null);
+        setWorkspace(grant?.user ?? null);
+      }
       clearCheckoutDraft();
       clearCheckoutIdempotencyKey();
+      clearRequestCache();
       setMe(null);
       setLoading(true);
       await refresh();
@@ -74,16 +99,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(() => {
     refreshVersion.current += 1;
+    void adminApi.logout().catch(() => undefined);
+    void api.logout().catch(() => undefined);
     writeToken("customer", null);
+    writeToken("admin", null);
     clearCheckoutDraft();
     clearCheckoutIdempotencyKey();
+    clearRequestCache();
     setMe(null);
+    setWorkspace(null);
     setLoading(false);
   }, []);
 
   const value = useMemo<Session>(
-    () => ({ me, loading, signIn, signOut, refresh }),
-    [me, loading, signIn, signOut, refresh],
+    () => ({ me, workspace, loading, signIn, signOut, refresh }),
+    [me, workspace, loading, signIn, signOut, refresh],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

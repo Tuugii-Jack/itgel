@@ -125,6 +125,11 @@ function getTtlMs(path: string, options: RequestOptions): number {
 const inflightGets = new Map<string, Promise<Envelope<unknown>>>();
 const memoGets = new Map<string, { at: number; value: Envelope<unknown> }>();
 
+export function clearRequestCache(): void {
+  inflightGets.clear();
+  memoGets.clear();
+}
+
 async function fetchEnvelope<T>(
   path: string,
   options: RequestOptions = {},
@@ -143,6 +148,7 @@ async function fetchEnvelope<T>(
       body:
         options.body === undefined ? undefined : JSON.stringify(options.body),
       cache: options.cache ?? "no-store",
+      credentials: "include",
     });
   } catch {
     throw new ApiError(
@@ -197,6 +203,7 @@ export async function uploadBinary<T>(path: string, file: Blob): Promise<Envelop
       headers,
       body: file,
       cache: "no-store",
+      credentials: "include",
     });
   } catch {
     throw new ApiError(

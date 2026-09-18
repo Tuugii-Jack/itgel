@@ -128,12 +128,15 @@ async function main() {
     },
   });
 
+  const now = new Date();
   await prisma.adminUser.create({
     data: {
       email: (process.env.ADMIN_EMAIL ?? 'admin@itgel.mn').toLowerCase(),
       name: 'Админ',
       passwordHash: await bcrypt.hash(process.env.ADMIN_PASSWORD ?? 'admin123', 10),
       role: 'ADMIN',
+      phone: '99000001',
+      phoneVerifiedAt: now,
     },
   });
 
@@ -143,6 +146,8 @@ async function main() {
       name: 'Лизингийн админ',
       passwordHash: await bcrypt.hash(process.env.LEASING_ADMIN_PASSWORD ?? 'leasing123', 10),
       role: 'LEASING',
+      phone: '99000002',
+      phoneVerifiedAt: now,
     },
   });
 
@@ -378,7 +383,7 @@ async function main() {
     `Бэлэн: ${categories.length} ангилал, ${products.length} бараа, ${customers.length} хэрэглэгч, ` +
       `${batches.length} багц, ${plan.length} идэвхтэй захиалга, ${historical} түүхэн захиалга.`,
   );
-  console.info(`Админ: ${process.env.ADMIN_EMAIL ?? 'admin@itgel.mn'} / ${process.env.ADMIN_PASSWORD ?? 'admin123'}`);
+  console.info('Админ нэвтрэлт: Profile → утас + OTP. Локал seed дугаарыг кодоос харна.');
 }
 
 interface SeedOrder {

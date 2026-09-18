@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Button, ErrorNote } from "@/components/ui";
 import { InfoTab } from "@/features/profile/components/InfoTab";
 import { OrdersTab } from "@/features/profile/components/OrdersTab";
@@ -8,6 +9,7 @@ import { PaymentsTab } from "@/features/profile/components/PaymentsTab";
 import { OrdersSkeleton } from "@/features/profile/components/ProfileSkeletons";
 import { useProfile } from "@/features/profile/hooks/useProfile";
 import { phoneLabel } from "@/lib/format";
+import { workspaceHome } from "@/lib/safeNext";
 import { useSession } from "@/lib/session";
 
 type Tab = "orders" | "payments" | "info";
@@ -53,6 +55,15 @@ export function ProfileShell() {
             </Button>
           </div>
         </div>
+
+        {session.workspace ? (
+          <Link
+            href={workspaceHome(session.workspace.role)}
+            className='mx-4 mt-3 flex h-11 items-center justify-center rounded-[8px] border border-line bg-bg px-3.5 text-[14px] text-ink no-underline lg:mx-0 lg:mt-0'
+          >
+            Удирдлага
+          </Link>
+        ) : null}
 
         {/* Мобайл — хэвтээ таб; laptop — босоо цэс */}
         <div className='flex gap-2 px-4 pt-4 lg:flex-col lg:gap-1.5 lg:px-0 lg:pt-0'>

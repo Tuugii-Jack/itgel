@@ -364,7 +364,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
                       <Td className="text-[13px]">
                         {round.batch ? (
                           <Link
-                            href="/admin/batches"
+                            href="/workspace/shop/batches"
                             className="text-ink-2 no-underline hover:underline"
                           >
                             {round.batch.name}

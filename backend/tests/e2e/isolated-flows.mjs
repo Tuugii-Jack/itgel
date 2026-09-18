@@ -10,6 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { createOtpWorkspace } from './otpWorkspace.mjs';
 
 const API = (process.env.ISOLATED_API ?? '').replace(/\/$/, '');
 const DB = process.env.DATABASE_URL ?? '';
@@ -61,6 +62,8 @@ function sql(query) {
   ).trim();
 }
 
+const workspaceOtp = createOtpWorkspace({ req, sql, data });
+
 const phone = `8${String(Date.now()).slice(-7)}`;
 const results = [];
 
@@ -95,21 +98,22 @@ assert.equal(callback2.status, 503);
 assert.equal(callback2.text, 'RETRY');
 pass('QPay callback short-circuit when disabled (double POST)');
 
-const adminLogin = await req('/api/admin/auth/login', {
+const closedLogin = await req('/api/admin/auth/login', {
   method: 'POST',
-  body: { email: 'admin@itgel.mn', password: 'admin123' },
+  body: { email: 'admin@itgel.mn', password: 'admin123', role: 'ADMIN' },
 });
-const adminToken = data(adminLogin).token;
-assert.ok(adminToken);
-pass('ADMIN login');
+assert.equal(closedLogin.status, 401, closedLogin.text);
+pass('old admin password login closed');
 
-const leasingLogin = await req('/api/admin/auth/login', {
-  method: 'POST',
-  body: { email: 'leasing@itgel.mn', password: 'leasing123' },
-});
-const leasingToken = data(leasingLogin).token;
-assert.ok(leasingToken);
-pass('LEASING login');
+const adminSession = await workspaceOtp.workspaceLogin('admin@itgel.mn', '99000001');
+const adminToken = adminSession.token;
+assert.equal(adminSession.user.role, 'ADMIN');
+pass('ADMIN phone OTP login');
+
+const leasingSession = await workspaceOtp.workspaceLogin('leasing@itgel.mn', '99000002');
+const leasingToken = leasingSession.token;
+assert.equal(leasingSession.user.role, 'LEASING');
+pass('LEASING phone OTP login');
 
 const staffEmail = `staffiso${phone}@itgel.mn`;
 const staffCreate = await req('/api/admin/staff', {
@@ -120,12 +124,47 @@ const staffCreate = await req('/api/admin/staff', {
 if (staffCreate.status !== 201 && staffCreate.status !== 200) {
   throw new Error(`staff create ${staffCreate.status}: ${staffCreate.text}`);
 }
-const staffLogin = await req('/api/admin/auth/login', {
+const staffPhone = `77${phone.slice(-6)}`;
+const staffSession = await workspaceOtp.workspaceLogin(staffEmail, staffPhone);
+const staffToken = staffSession.token;
+assert.equal(staffSession.user.role, 'STAFF');
+pass('STAFF create+OTP login');
+
+const inactiveEmail = `inact${phone}@itgel.mn`;
+const inactivePhone = `76${phone.slice(-6)}`;
+const inactiveCreate = await req('/api/admin/staff', {
   method: 'POST',
-  body: { email: staffEmail, password: 'staff123' },
+  token: adminToken,
+  body: { email: inactiveEmail, name: 'Inactive Staff', password: 'staff123', role: 'STAFF' },
 });
-const staffToken = data(staffLogin).token;
-pass('STAFF create+login');
+assert.ok([200, 201].includes(inactiveCreate.status), inactiveCreate.text);
+const inactiveId = data(inactiveCreate).id;
+const inactiveSession = await workspaceOtp.workspaceLogin(inactiveEmail, inactivePhone);
+assert.ok(inactiveSession.token);
+const deactivated = await req(`/api/admin/staff/${inactiveId}`, {
+  method: 'PATCH',
+  token: adminToken,
+  body: { isActive: false },
+});
+assert.equal(deactivated.status, 200, deactivated.text);
+const stale = await req('/api/admin/orders?pageSize=1', { token: inactiveSession.token });
+assert.equal(stale.status, 401);
+const inactiveAgain = await workspaceOtp.otpVerify(inactivePhone, 'Inactive');
+assert.equal(inactiveAgain.workspace, null);
+pass('inactive admin has no privileged session');
+
+const expiredPhone = `75${phone.slice(-6)}`;
+const expiredOtp = await req('/api/auth/otp', { method: 'POST', body: { phone: expiredPhone, name: 'Expired' } });
+assert.equal(expiredOtp.status, 200, expiredOtp.text);
+sql(
+  `UPDATE "PhoneOtp" SET "expiresAt"=NOW() - interval '1 minute' WHERE phone='${expiredPhone}' AND purpose='LOGIN' AND "usedAt" IS NULL`,
+);
+const expiredVerify = await req('/api/auth/verify', {
+  method: 'POST',
+  body: { phone: expiredPhone, code: workspaceOtp.latestLoginOtp(expiredPhone) },
+});
+assert.ok(expiredVerify.status === 400 || expiredVerify.status === 401, expiredVerify.text);
+pass('expired OTP rejected');
 
 const staffProducts = await req('/api/admin/products', { token: staffToken });
 assert.equal(staffProducts.status, 403, 'STAFF бараа бичих/харах портал');
@@ -156,9 +195,17 @@ const dispatchCount2 = Number(
   sql(`SELECT count(*) FROM "SmsDispatch" WHERE phone='${phone}' AND purpose='otp_login'`),
 );
 assert.equal(dispatchCount2, 1, 'cooldown OTP must not send a second SMS');
-const verify = await req('/api/auth/verify', { method: 'POST', body: { phone, code } });
+const verify = await req('/api/auth/verify', {
+  method: 'POST',
+  body: { phone, code, role: 'ADMIN', adminId: 'adm-1', redirect: '/workspace' },
+});
 const customerToken = data(verify).token;
 assert.ok(customerToken);
+assert.equal(data(verify).workspace, null);
+const spoofAdmin = await req('/api/admin/orders?pageSize=1', { token: customerToken });
+assert.equal(spoofAdmin.status, 401);
+const reused = await req('/api/auth/verify', { method: 'POST', body: { phone, code } });
+assert.ok(reused.status === 400 || reused.status === 401, reused.text);
 pass('customer phone OTP (local PhoneOtp, console SMS, no double-send)');
 
 const products = data(await req('/api/products?type=ready&pageSize=50'));

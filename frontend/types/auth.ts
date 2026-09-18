@@ -66,4 +66,5 @@ export interface AdminStaffUser {
   isActive: boolean;
   createdAt: string;
   lastLoginAt: string | null;
+  hasLoginPhone?: boolean;
 }

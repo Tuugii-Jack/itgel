@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { env } from '../env.js';
 import { prisma } from '../prisma.js';
-import type { AdminToken, CustomerToken, TokenPayload } from './jwt.js';
+import type { CustomerToken, TokenPayload } from './jwt.js';
 
 /**
  * Supabase Auth-ийн олгосон access token-ыг JWKS-ээр шалгана.
@@ -37,12 +37,8 @@ export async function resolveSupabaseToken(token: string): Promise<TokenPayload 
   if (!claims) return null;
 
   const role = claims.app_metadata?.role?.toUpperCase();
-  if ((role === 'ADMIN' || role === 'STAFF' || role === 'LEASING') && claims.email) {
-    const admin = await prisma.adminUser.findFirst({
-      where: { email: claims.email.toLowerCase(), isActive: true },
-    });
-    if (!admin) return null;
-    return { sub: admin.id, email: admin.email, role: admin.role } satisfies AdminToken;
+  if (role === 'ADMIN' || role === 'STAFF' || role === 'LEASING') {
+    return null;
   }
 
   const email = (claims.email ?? claims.user_metadata?.email)?.toLowerCase();

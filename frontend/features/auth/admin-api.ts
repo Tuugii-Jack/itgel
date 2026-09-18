@@ -1,24 +1,53 @@
 import { adminAuth, request } from "@/lib/api/client";
 
+export type WorkspaceGrant = {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+  };
+};
+
 export const adminAuthApi = {
-  login: (email: string, password: string) =>
-    request<{
-      token: string;
-      user: { id: string; email: string; name: string; role: string };
-    }>("/admin/auth/login", { method: "POST", body: { email, password } }).then(
-      (r) => r.data,
-    ),
-
   me: () =>
-    request<{ id: string; email: string; name: string; role: string }>(
-      "/admin/auth/me",
-      adminAuth,
-    ).then((r) => r.data),
+    request<{
+      id: string;
+      email: string;
+      name: string;
+      role: string;
+      hasLoginPhone?: boolean;
+    }>("/admin/auth/me", adminAuth).then((r) => r.data),
 
-  changePassword: (currentPassword: string, newPassword: string) =>
-    request<{ ok: boolean }>("/admin/auth/password", {
+  logout: () =>
+    request<{ ok: boolean }>("/admin/auth/logout", {
       ...adminAuth,
       method: "POST",
-      body: { currentPassword, newPassword },
+    }).then((r) => r.data),
+
+  issueLoginPhoneOtp: (phone: string, adminId?: string) =>
+    request<{
+      phone: string;
+      expiresInSec: number;
+      resendAfterSec: number;
+      smsStatus?: string;
+    }>("/admin/auth/login-phone/otp", {
+      ...adminAuth,
+      method: "POST",
+      body: { phone, ...(adminId ? { adminId } : {}) },
+    }).then((r) => r.data),
+
+  verifyLoginPhone: (phone: string, code: string, adminId?: string) =>
+    request<{
+      id: string;
+      email: string;
+      name: string;
+      role: string;
+      hasLoginPhone: boolean;
+    }>("/admin/auth/login-phone/verify", {
+      ...adminAuth,
+      method: "POST",
+      body: { phone, code, ...(adminId ? { adminId } : {}) },
     }).then((r) => r.data),
 };
