@@ -22,11 +22,14 @@ export function PaymentPanel({
   order,
   store,
   onClaimed,
+  onPayAttempt,
   feeHold,
 }: {
   order: PublicOrder;
   store: Store;
   onClaimed?: () => void;
+  /** Банк/QR/шалгах — автомат invoice биш. */
+  onPayAttempt?: () => void;
   /** Лизингийн шимтгэл төлөгдөх хүртэл захиалга үүсээгүй. */
   feeHold?: boolean;
 }) {
@@ -176,6 +179,7 @@ export function PaymentPanel({
           ready={qpay.ready}
           hideAmounts={unpaid}
           onPaid={onClaimed}
+          onPayAttempt={onPayAttempt}
         />
       )}
     </Card>

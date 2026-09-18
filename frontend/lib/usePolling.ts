@@ -1,36 +1,61 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import {
+  POLL_MAX_DURATION_MS,
+  createPoller,
+  type PollStopReason,
+} from "./poller";
 
 /**
- * Тодорхой давтамжтайгаар callback дуудна — төлбөр баталгаажсан эсэхийг
- * хэрэглэгч refresh дарахгүйгээр харуулахад ашиглана.
- *
- * Таб нуугдсан үед дуудахгүй; буцаж идэвхжмэгц шууд нэг удаа дуудна.
+ * Төлбөр баталгаажсан эсэхийг refreshгүйгээр харуулна.
+ * Таб нуугдсан үед дуудахгүй; буцаж идэвхжмэгц нэг удаа дуудна.
+ * Идэвхтэй шалгалт maxDuration-оос хэтэрвэл зогсоно — гараар дахин оролдож болно.
  */
 export function usePolling(
-  callback: () => void,
+  callback: () => void | Promise<void>,
   intervalMs: number,
   enabled: boolean,
+  options?: {
+    restartKey?: string | number;
+    maxDurationMs?: number;
+    onStopped?: (reason: PollStopReason) => void;
+  },
 ): void {
   const saved = useRef(callback);
+  const onStopped = useRef(options?.onStopped);
 
   useEffect(() => {
     saved.current = callback;
   }, [callback]);
 
   useEffect(() => {
+    onStopped.current = options?.onStopped;
+  }, [options?.onStopped]);
+
+  const restartKey = options?.restartKey ?? "";
+  const maxDurationMs = options?.maxDurationMs ?? POLL_MAX_DURATION_MS;
+
+  useEffect(() => {
     if (!enabled) return;
 
-    const tick = () => {
-      if (document.visibilityState === "visible") saved.current();
-    };
+    const poller = createPoller({
+      intervalMs,
+      maxDurationMs,
+      run: () => saved.current(),
+      isVisible: () => document.visibilityState === "visible",
+      onStopped: (reason) => {
+        if (reason === "disabled") return;
+        onStopped.current?.(reason);
+      },
+    });
+    poller.start();
 
-    const id = setInterval(tick, intervalMs);
-    document.addEventListener("visibilitychange", tick);
+    const onVis = () => poller.notifyVisibility();
+    document.addEventListener("visibilitychange", onVis);
     return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", tick);
+      document.removeEventListener("visibilitychange", onVis);
+      poller.stop("disabled");
     };
-  }, [intervalMs, enabled]);
+  }, [intervalMs, enabled, restartKey, maxDurationMs]);
 }

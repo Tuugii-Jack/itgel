@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -16,8 +17,8 @@ import { api } from "@/lib/api";
 import { dayLabel, money } from "@/lib/format";
 import { leasingFeeHold } from "@/lib/leasing";
 import { useSession } from "@/lib/session";
-import { createTrackedOrderCache } from "@/lib/trackedOrders";
-import type { Me, MyOrder, OrderStatus, Store } from "@/lib/types";
+import { createTrackedOrderCache, patchMyOrderList } from "@/lib/trackedOrders";
+import type { Me, MyOrder, OrderStatus, PublicOrder, Store } from "@/lib/types";
 
 export const STATUS_TONE: Record<OrderStatus, Tone> = {
   NEW: "neutral",
@@ -33,6 +34,7 @@ type TrackShell = {
   store: Store | null;
   myOrders: MyOrder[];
   trackedOrders: ReturnType<typeof createTrackedOrderCache>;
+  syncOrder: (order: PublicOrder) => void;
   chromeHidden: boolean;
   setChromeHidden: (hidden: boolean) => void;
 };
@@ -68,6 +70,11 @@ function CustomerTrackShell({
   const [trackedOrders] = useState(() => createTrackedOrderCache(api.order));
   const [chromeHidden, setChromeHidden] = useState(false);
 
+  const syncOrder = useCallback((order: PublicOrder) => {
+    trackedOrders.remember(order);
+    setMyOrders((rows) => patchMyOrderList(rows, order));
+  }, [trackedOrders]);
+
   useEffect(() => {
     let alive = true;
     api
@@ -84,16 +91,24 @@ function CustomerTrackShell({
     let alive = true;
     api
       .myOrders()
-      .then((result) => alive && setMyOrders(result.data))
+      .then((result) => {
+        if (!alive) return;
+        setMyOrders(
+          result.data.map((row) => {
+            const fresh = trackedOrders.peek(row.code);
+            return fresh ? patchMyOrderList([row], fresh)[0] : row;
+          }),
+        );
+      })
       .catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [customer]);
+  }, [customer, trackedOrders]);
 
   const value = useMemo<TrackShell>(
-    () => ({ store, myOrders, trackedOrders, chromeHidden, setChromeHidden }),
-    [store, myOrders, trackedOrders, chromeHidden],
+    () => ({ store, myOrders, trackedOrders, syncOrder, chromeHidden, setChromeHidden }),
+    [store, myOrders, trackedOrders, syncOrder, chromeHidden],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -207,7 +222,9 @@ function OrderList({ orders, current }: { orders: MyOrder[]; current: string }) 
             </span>
             <span className="flex w-full items-center justify-between gap-3 text-[13px] text-muted">
               <span className="tnum">{dayLabel(order.createdAt)}</span>
-              <span className="tnum">{money(order.subtotal)}</span>
+              <span className="tnum">
+                {money(order.dueAmount > 0 ? order.dueAmount : order.subtotal)}
+              </span>
             </span>
           </Link>
         );

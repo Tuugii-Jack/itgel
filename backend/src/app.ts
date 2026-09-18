@@ -3,6 +3,7 @@ import cors, { type CorsOptions } from 'cors';
 import express from 'express';
 import helmet from 'helmet';
 import { env, isProd } from './env.js';
+import { corsMiddlewareOptions, setPrivateApiCache } from './lib/cors.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { apiRouter } from './routes/index.js';
 
@@ -31,12 +32,10 @@ export function createApp() {
   app.use(helmet());
   // JSON хариуг шахаж илгээнэ — том жагсаалтын хариу олон дахин жижгэрнэ.
   app.use(compression());
-  app.use(
-    cors({
-      origin: corsOrigin(),
-      credentials: true,
-    }),
-  );
+  // Хувийн API-г CDN/shared cache-д бүү хий. Нийтийн каталог өөрөө Cache-Control тавина.
+  // OPTIONS-ийг no-store-оор бүү дар — preflight cache (maxAge) ажиллах ёстой.
+  app.use(setPrivateApiCache);
+  app.use(cors(corsMiddlewareOptions(corsOrigin())));
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/health', (_req, res) => {

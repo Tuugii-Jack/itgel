@@ -13,6 +13,7 @@ import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton, Toggle } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import type { AdminAd, AdminCategory, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
 /** Хэрэглэгчид үнэхээр харагддаг төлвүүд — backend-ийн VISIBLE_STATUSES. */
@@ -70,6 +71,8 @@ export default function StorefrontPage() {
       setRefreshing(false);
     }
   }, [query]);
+
+  const markChanged = useDeferredReload(load, !openOrderId);
 
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
@@ -149,7 +152,7 @@ export default function StorefrontPage() {
         orderId={openOrderId}
         workspace="shop"
         onClose={() => setOpenOrderId(null)}
-        onChanged={() => void load()}
+        onChanged={markChanged}
       />
     );
   }

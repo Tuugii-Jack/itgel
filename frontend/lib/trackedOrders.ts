@@ -1,4 +1,4 @@
-import type { PublicOrder } from "./types";
+import type { MyOrder, PublicOrder } from "./types";
 
 /** One cache per mounted customer scope; never share it between accounts. */
 export function createTrackedOrderCache(loadOrder: (code: string) => Promise<PublicOrder>) {
@@ -31,7 +31,54 @@ export function createTrackedOrderCache(loadOrder: (code: string) => Promise<Pub
     void fetch(code).catch(() => undefined);
   };
 
-  return { peek, fetch, prefetch };
+  const remember = (order: PublicOrder): void => {
+    orders.set(normalize(order.code), order);
+  };
+
+  return { peek, fetch, prefetch, remember };
+}
+
+/**
+ * Төлбөр баталгаажсан захиалгын дүнг зөвхөн энэ жагсаалтын тохирох мөрөнд бичнэ.
+ * Өөр хэрэглэгчийн жагсаалт эсвэл өөр код руу нэмэхгүй.
+ */
+export function patchMyOrderList(orders: MyOrder[], next: PublicOrder): MyOrder[] {
+  const code = next.code.trim().toUpperCase();
+  let changed = false;
+  const patched = orders.map((row) => {
+    if (row.code.toUpperCase() !== code) return row;
+    changed = true;
+    return {
+      ...row,
+      status: next.status,
+      statusLabel: next.statusLabel,
+      subtotal: next.subtotal,
+      deliveryFee: next.deliveryFee,
+      storageFee: next.storageFee,
+      cargoFee: next.cargoFee,
+      cargoPayMethod: next.cargoPayMethod,
+      paidAmount: next.paidAmount,
+      refundedAmount: next.refundedAmount,
+      dueAmount: next.dueAmount,
+      paymentState: next.paymentState,
+      isLeasing: next.isLeasing,
+      leasingFee: next.leasingFee,
+      leasingFeePaid: next.leasingFeePaid,
+      leasingPrincipalDue: next.leasingPrincipalDue,
+      nextPayAmount: next.nextPayAmount,
+      nextPayKind: next.nextPayKind,
+      payPlan: next.payPlan,
+      fulfilment: next.fulfilment,
+      canChooseFulfilment: next.canChooseFulfilment,
+      items: next.items,
+      refundPayoutOn: next.refundPayoutOn,
+      refundPaid: next.refundPaid,
+      delivery: next.delivery,
+      timeline: next.timeline,
+      createdAt: next.createdAt,
+    };
+  });
+  return changed ? patched : orders;
 }
 
 /** Temporary network failures may keep the current view, denied access may not. */

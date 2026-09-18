@@ -27,6 +27,7 @@ import {
 import { adminApi, ApiError } from "@/lib/api";
 import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { UB_DISTRICTS } from "@/lib/locations";
 import { useToast } from "@/lib/toast";
@@ -93,6 +94,8 @@ export default function CustomersPage() {
     }
   }, [query, toast]);
 
+  const markChanged = useDeferredReload(load, !openId && !openOrderId);
+
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   useEffect(
@@ -117,7 +120,7 @@ export default function CustomersPage() {
         orderId={openOrderId}
         workspace="shop"
         onClose={() => setOpenOrderId(null)}
-        onChanged={() => void load()}
+        onChanged={markChanged}
       />
     );
   }

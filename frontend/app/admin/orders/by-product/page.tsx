@@ -22,6 +22,7 @@ import {
   type ProductPrintOptions,
 } from "@/lib/roundPrint";
 import type { OrdersByProductDate, OrdersByProductRow } from "@/lib/types";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 
 type ClosedFilter = "all" | "open" | "closed";
 
@@ -117,6 +118,8 @@ export default function OrdersByProductPage() {
     }
   }, [fetchPage]);
 
+  const markChanged = useDeferredReload(load, !openOrderId);
+
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const loadMore = async () => {
@@ -204,7 +207,7 @@ export default function OrdersByProductPage() {
         orderId={openOrderId}
         workspace="shop"
         onClose={() => setOpenOrderId(null)}
-        onChanged={() => void load()}
+        onChanged={markChanged}
       />
     );
   }

@@ -1,10 +1,12 @@
 "use client";
 
+import { useCallback } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { Metric, PageHead } from "@/components/admin/shared";
 import { Button, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { money } from "@/lib/format";
 import { useToast } from "@/lib/toast";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import { useBatches } from "../hooks/useBatches";
 import { BatchDetail } from "./BatchDetail";
 import { BatchList } from "./BatchList";
@@ -26,6 +28,8 @@ export function BatchesPage() {
     load,
     active,
   } = useBatches();
+  const reloadList = useCallback(() => load(true), [load]);
+  const markChanged = useDeferredReload(reloadList, !openOrderId && !openBatchId);
 
   if (openOrderId) {
     return (
@@ -33,7 +37,7 @@ export function BatchesPage() {
         orderId={openOrderId}
         workspace="shop"
         onClose={() => setOpenOrderId(null)}
-        onChanged={() => void load(true)}
+        onChanged={markChanged}
       />
     );
   }

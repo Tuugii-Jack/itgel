@@ -1,7 +1,7 @@
 // Run with Node 22.18+ (native TypeScript support): node --test tests/trackedOrders.test.mjs
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createTrackedOrderCache, trackedOrderAfterError } from "../lib/trackedOrders.ts";
+import { createTrackedOrderCache, trackedOrderAfterError, patchMyOrderList } from "../lib/trackedOrders.ts";
 
 const order = { code: "PH-ABC123", customer: { name: "Customer A" } };
 
@@ -105,4 +105,68 @@ test("a temporary network or server failure preserves the current authorized vie
     assert.equal(trackedOrderAfterError(order, error), order);
     assert.equal(trackedOrderAfterError(null, error), null);
   }
+});
+
+function publicOrder(over = {}) {
+  return {
+    code: "PH-ABC123",
+    status: "NEW",
+    statusLabel: "Шинэ",
+    subtotal: 25000,
+    deliveryFee: 0,
+    storageFee: 0,
+    cargoFee: 0,
+    cargoPayMethod: null,
+    paidAmount: 0,
+    refundedAmount: 0,
+    dueAmount: 25000,
+    paymentState: "UNPAID",
+    fulfilment: null,
+    canChooseFulfilment: false,
+    createdAt: "2026-09-18T00:00:00.000Z",
+    customer: { name: "A", phone: null },
+    items: [],
+    batch: null,
+    delivery: null,
+    timeline: [],
+    paymentClaimedAt: null,
+    ...over,
+  };
+}
+
+function listRow(over = {}) {
+  return {
+    ...publicOrder(),
+    itemCount: 1,
+    handedOverAt: null,
+    ...over,
+  };
+}
+
+test("payment confirmation patches only the matching order in this customer's list", () => {
+  const own = listRow({ code: "PH-OWN1", dueAmount: 25000, paidAmount: 0 });
+  const other = listRow({ code: "PH-OTH2", dueAmount: 40000, paidAmount: 0 });
+  const next = publicOrder({
+    code: "PH-OWN1",
+    dueAmount: 16667,
+    paidAmount: 10833,
+    paymentState: "PARTIAL",
+  });
+  const patched = patchMyOrderList([own, other], next);
+  assert.equal(patched[0].dueAmount, 16667);
+  assert.equal(patched[0].paidAmount, 10833);
+  assert.equal(patched[0].paymentState, "PARTIAL");
+  assert.equal(patched[1].dueAmount, 40000);
+  assert.deepEqual(patchMyOrderList([other], next), [other]);
+});
+
+test("remembered payment stays in this customer cache and not another account", () => {
+  const paid = publicOrder({ dueAmount: 16667, paidAmount: 10833 });
+  const customerA = createTrackedOrderCache(async () => paid);
+  const customerB = createTrackedOrderCache(async () => {
+    throw { status: 404 };
+  });
+  customerA.remember(paid);
+  assert.equal(customerA.peek(paid.code).dueAmount, 16667);
+  assert.equal(customerB.peek(paid.code), null);
 });

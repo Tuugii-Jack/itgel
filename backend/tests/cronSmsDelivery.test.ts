@@ -2,10 +2,12 @@ import type { Request, Response, Router } from 'express';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '../src/lib/errors.js';
 
+type PollSmsResult = { checked: number; delivered: number };
+
 const state = vi.hoisted(() => ({
   secret: 'test-cron-secret' as string | undefined,
   prod: true,
-  poll: vi.fn(async () => ({ checked: 2, delivered: 1 })),
+  poll: vi.fn(async (_now?: Date): Promise<PollSmsResult> => ({ checked: 2, delivered: 1 })),
 }));
 
 vi.mock('../src/env.js', () => ({
@@ -18,17 +20,28 @@ vi.mock('../src/env.js', () => ({
 }));
 
 vi.mock('../src/services/smsDeliveryJob.js', () => ({
-  pollSmsDeliveries: (...args: unknown[]) => state.poll(...args),
+  pollSmsDeliveries: (now?: Date) => state.poll(now),
 }));
 
 import { cronRouter } from '../src/routes/cron.js';
 
+type RouteHandle = (req: Request, res: Response, next: (err?: unknown) => void) => void;
+type RouterLayer = {
+  route?: {
+    path: string;
+    methods: Record<string, boolean>;
+    stack: Array<{ handle: RouteHandle }>;
+  };
+};
+
 function invoke(router: Router, method: 'get' | 'post', path: string, authorization?: string) {
-  const layer = (router as unknown as { stack: Array<{ route?: { path: string; methods: Record<string, boolean>; stack: Array<{ handle: Function }> } }> }).stack.find(
+  const layer = (router as unknown as { stack: RouterLayer[] }).stack.find(
     (item) => item.route?.path === path && item.route.methods[method],
   );
   if (!layer?.route) throw new Error(`route ${method} ${path} missing`);
-  const handle = layer.route.stack.at(-1)!.handle;
+  const last = layer.route.stack.at(-1);
+  if (!last) throw new Error(`route ${method} ${path} has no handler`);
+  const handle = last.handle;
   return new Promise<{ status: number; body: unknown }>((resolve, reject) => {
     let status = 200;
     const res = {

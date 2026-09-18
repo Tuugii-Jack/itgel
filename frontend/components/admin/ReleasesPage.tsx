@@ -21,6 +21,7 @@ import { adminApi, ApiError } from "@/lib/api";
 import { countdown, dayTimeLabel } from "@/lib/format";
 import { priceLabel, productClosed } from "@/lib/options";
 import { useToast } from "@/lib/toast";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import type { AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 
 type Tab = "open" | "closed" | "archived";
@@ -110,6 +111,8 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
     }
   }, [query, kind]);
 
+  const markChanged = useDeferredReload(load, !openOrderId);
+
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const allRows = useMemo<ReleaseRow[]>(() => {
@@ -179,7 +182,7 @@ export function ReleasesPage({ kind }: { kind: ReleaseKind }) {
         orderId={openOrderId}
         workspace="shop"
         onClose={() => setOpenOrderId(null)}
-        onChanged={() => void load()}
+        onChanged={markChanged}
       />
     );
   }

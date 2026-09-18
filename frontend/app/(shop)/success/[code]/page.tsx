@@ -2,7 +2,7 @@
 
 import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
-import { use, useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { PhoneAuthForm } from "@/components/PhoneAuthForm";
 import { PaymentPanel } from "@/components/PaymentPanel";
@@ -13,7 +13,9 @@ import { money, phoneLabel, rangeLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import { awaitingPayment } from "@/lib/payment";
 import { orderAccruesStorage } from "@/lib/fulfilment";
+import { PollRetryNote } from "@/components/PollRetryNote";
 import { useSession } from "@/lib/session";
+import { shouldPollSuccess } from "@/lib/orderPolling";
 import { usePolling } from "@/lib/usePolling";
 import {
   leasingFeeCaption,
@@ -23,6 +25,7 @@ import {
 } from "@/lib/leasing";
 import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import type { PublicOrder, Store } from "@/lib/types";
+import type { PollStopReason } from "@/lib/poller";
 
 /**
  * 04 Захиалга амжилттай — дизайны хоёр төлөв.
@@ -38,6 +41,9 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
   const [alsoOrder, setAlsoOrder] = useState<PublicOrder | null>(null);
   const [store, setStore] = useState<Store | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pollStopped, setPollStopped] = useState<PollStopReason | null>(null);
+  const [pollRestart, setPollRestart] = useState(0);
+  const hasOrder = useRef(false);
   const origin = useSyncExternalStore(
     () => () => {},
     () => window.location.origin,
@@ -45,24 +51,34 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
   );
   const trackUrl = origin ? `${origin}/t/${code}` : "";
 
+  const loadStore = useCallback(async () => {
+    try {
+      setStore(await api.store());
+    } catch {
+      setStore(null);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     if (!session.me) return;
     try {
-      const [o, s, extra] = await Promise.all([
+      const [o, extra] = await Promise.all([
         api.order(code),
-        api.store(),
         also ? api.order(also).catch(() => null) : Promise.resolve(null),
       ]);
+      hasOrder.current = true;
       setOrder(o);
       setAlsoOrder(extra);
-      setStore(s);
       setError(null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+      const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
+      if (!hasOrder.current) setError(message);
+      throw e;
     }
   }, [code, also, session.me]);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => deferEffect(() => { void loadStore(); }), [loadStore]);
+  useEffect(() => deferEffect(() => { void load().catch(() => {}); }), [load]);
 
   const feeHold = Boolean(order && leasingFeeHold(order));
   const extraHold = Boolean(alsoOrder && leasingFeeHold(alsoOrder));
@@ -81,10 +97,20 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
         awaitingPayment(order.paymentState) &&
         order.dueAmount > 0) ||
       extraPending);
+  const polling = shouldPollSuccess(order, alsoOrder);
 
   // Админ төлбөрийг бүртгэмэгц хуудас өөрөө «Баталгаажлаа» болно —
   // хэрэглэгч refresh дарах шаардлагагүй.
-  usePolling(load, 10_000, pending);
+  usePolling(load, 10_000, polling, {
+    restartKey: pollRestart,
+    onStopped: setPollStopped,
+  });
+
+  function retryPoll() {
+    setPollStopped(null);
+    setPollRestart((n) => n + 1);
+    void load().catch(() => {});
+  }
 
   if (session.loading) {
     return (
@@ -130,12 +156,17 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
 
   return (
     <div className="screen pb-8">
+      {pollStopped === "max_duration" && pending ? (
+        <div className="px-4 pt-4 lg:mx-auto lg:max-w-[1000px] lg:px-10">
+          <PollRetryNote onCheck={retryPoll} />
+        </div>
+      ) : null}
       {pending ? (
         <Pending
           order={order}
           extraOrder={alsoOrder}
           store={store}
-          onClaimed={load}
+          onClaimed={() => { void load().catch(() => {}); }}
           feeHold={feeHold}
         />
       ) : (

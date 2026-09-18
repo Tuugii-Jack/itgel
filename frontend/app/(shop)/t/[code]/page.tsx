@@ -9,7 +9,6 @@ import { Badge, Button, ErrorNote, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
-import { awaitingPayment } from "@/lib/payment";
 import { leasingDueHeadline, leasingFeeCaption, leasingFeeHold, leasingHoldsGoods } from "@/lib/leasing";
 import { buildOrderStages } from "@/lib/orderStages";
 import {
@@ -18,9 +17,12 @@ import {
   ITEM_FULFILMENT_LABEL,
   itemNeedsFulfilment,
 } from "@/lib/fulfilment";
+import { PollRetryNote } from "@/components/PollRetryNote";
 import { usePolling } from "@/lib/usePolling";
+import { isTrackPaymentOpen, shouldPollPayment } from "@/lib/orderPolling";
 import { trackedOrderAfterError } from "@/lib/trackedOrders";
 import type { PublicOrder } from "@/lib/types";
+import type { PollStopReason } from "@/lib/poller";
 import {
   STATUS_TONE,
   TrackDetailSkeleton,
@@ -39,12 +41,16 @@ export default function TrackPage() {
 }
 
 function TrackDetail({ code }: { code: string }) {
-  const { store, setChromeHidden, trackedOrders } = useTrackShell();
+  const { store, setChromeHidden, trackedOrders, syncOrder } = useTrackShell();
   const [order, setOrder] = useState<PublicOrder | null>(() => trackedOrders.peek(code));
   const mounted = useRef(false);
   /** Дизайны 06 дэлгэц — «Ирсэн барааг авах» дарсны дараа нээгдэнэ. */
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pollStopped, setPollStopped] = useState<PollStopReason | null>(null);
+  const [pollRestart, setPollRestart] = useState(0);
+  /** Upcoming leftover — зөвхөн хэрэглэгчийн оролдлогын paidAmount snapshot. */
+  const [prepayAttemptAtPaid, setPrepayAttemptAtPaid] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!code || !mounted.current) return;
@@ -52,17 +58,19 @@ function TrackDetail({ code }: { code: string }) {
       const next = await trackedOrders.fetch(code);
       if (!mounted.current) return;
       setOrder(next);
+      syncOrder(next);
       setError(null);
     } catch (e) {
       if (!mounted.current) return;
       setOrder((current) => trackedOrderAfterError(current, e));
       setError(e instanceof ApiError ? e.message : "Захиалга ачаалж чадсангүй.");
+      throw e;
     }
-  }, [code, trackedOrders]);
+  }, [code, trackedOrders, syncOrder]);
 
   useEffect(() => {
     mounted.current = true;
-    void load();
+    void load().catch(() => {});
     return () => {
       mounted.current = false;
     };
@@ -74,28 +82,33 @@ function TrackDetail({ code }: { code: string }) {
     return () => setChromeHidden(false);
   }, [collecting, store, setChromeHidden]);
 
-  const unpaid = Boolean(
-    order &&
-      store &&
-      order.status !== "CANCELLED" &&
-      awaitingPayment(order.paymentState) &&
-      order.dueAmount > 0 &&
-      order.cargoPayMethod !== "CASH" &&
-      (order.isLeasing
-        ? true
-        : order.fulfilment !== "PICKUP" &&
-          !(
-            order.paidAmount - order.refundedAmount >= order.subtotal &&
-            (order.status === "IN_BATCH" ||
-              order.status === "IN_TRANSIT" ||
-              (order.status === "ARRIVED" && order.fulfilment === null))
-          )),
-  );
+  useEffect(() => {
+    setPrepayAttemptAtPaid(null);
+    setPollStopped(null);
+  }, [code]);
+
+  const paidSnapshot = order?.paidAmount ?? 0;
+  const markPayAttempt = useCallback(() => {
+    setPrepayAttemptAtPaid(paidSnapshot);
+  }, [paidSnapshot]);
+  const unpaid = Boolean(order && store && isTrackPaymentOpen(order));
   const feeHold = Boolean(order && leasingFeeHold(order));
+  const polling = Boolean(
+    order && store && shouldPollPayment(order, { prepayAttemptAtPaid }),
+  );
 
   // Төлбөр хүлээгдэж байхад төлөвийг автоматаар шинэчилнэ —
   // админ бүртгэмэгц «Төлөгдсөн» гэж харагдана.
-  usePolling(load, 15_000, unpaid);
+  usePolling(load, 15_000, polling, {
+    restartKey: pollRestart,
+    onStopped: setPollStopped,
+  });
+
+  function retryPoll() {
+    setPollStopped(null);
+    setPollRestart((n) => n + 1);
+    void load().catch(() => {});
+  }
 
   if (error && !order) {
     return (
@@ -134,7 +147,7 @@ function TrackDetail({ code }: { code: string }) {
         store={store}
         onDone={(more) => {
           if (!more) setCollecting(false);
-          void load();
+          void load().catch(() => {});
         }}
       />
     );
@@ -265,12 +278,23 @@ function TrackDetail({ code }: { code: string }) {
       {/* Мөнгө хүлээж байгаа бол QPay — лизинг үлдэгдэлтэй бол бараанаас өмнө */}
       {(unpaid || leasingHold) && store && (
         <div className="px-4 pt-6 lg:px-0 lg:pt-0">
+          {pollStopped === "max_duration" && polling ? (
+            <div className="mb-3">
+              <PollRetryNote onCheck={retryPoll} />
+            </div>
+          ) : null}
           {feeHold && (
             <p className="mb-3 mt-0 text-[14px] leading-[1.5] text-ink-2">
               Лизингийн шимтгэлийг төлнө үү. Төлсний дараа захиалга үүснэ.
             </p>
           )}
-          <PaymentPanel order={order} store={store} onClaimed={load} feeHold={feeHold} />
+          <PaymentPanel
+            order={order}
+            store={store}
+            onClaimed={() => { void load().catch(() => {}); }}
+            onPayAttempt={markPayAttempt}
+            feeHold={feeHold}
+          />
         </div>
       )}
 

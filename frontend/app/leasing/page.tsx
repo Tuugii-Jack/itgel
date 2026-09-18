@@ -19,6 +19,7 @@ import { LeasingScheduleSms } from "@/components/admin/LeasingScheduleSms";
 import { leasingApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { leasingArrivalUnpaid } from "@/lib/leasing";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import type { AdminOrderRow } from "@/lib/types";
 
 const PAGE_SIZE = 100;
@@ -123,6 +124,8 @@ export default function LeasingOrdersPage() {
     }
   }, [fetchOrders]);
 
+  const markChanged = useDeferredReload(load, !openId);
+
   useOnKeyChange(`${goods}|${query}`, () => {
     setOrders([]);
     setPageMeta({ page: 1, pages: 1, total: 0 });
@@ -165,7 +168,7 @@ export default function LeasingOrdersPage() {
         canWrite
         workspace="leasing"
         onClose={() => setOpenId(null)}
-        onChanged={() => void load()}
+        onChanged={markChanged}
       />
     );
   }

@@ -8,6 +8,7 @@ import { Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { leasingApi, ApiError } from "@/lib/api";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { leasingArrivalUnpaid } from "@/lib/leasing";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import type { AdminCustomer, AdminOrderRow } from "@/lib/types";
 
 type CustomerRow = AdminCustomer & {
@@ -54,6 +55,8 @@ export default function LeasingCustomersPage() {
     }
   }, [query]);
 
+  const markChanged = useDeferredReload(load, !openId && !openOrderId);
+
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   useEffect(() => {
@@ -62,13 +65,14 @@ export default function LeasingCustomersPage() {
         setDetail(null);
       });
     }
+    if (openOrderId) return;
     return deferEffect(() => {
       void leasingApi
         .customer(openId)
         .then(setDetail)
         .catch((e) => setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."));
     });
-  }, [openId]);
+  }, [openId, openOrderId]);
 
   if (openOrderId) {
     return (
@@ -78,9 +82,7 @@ export default function LeasingCustomersPage() {
         canWrite
         workspace="leasing"
         onClose={() => setOpenOrderId(null)}
-        onChanged={() => {
-          if (openId) void leasingApi.customer(openId).then(setDetail);
-        }}
+        onChanged={markChanged}
       />
     );
   }

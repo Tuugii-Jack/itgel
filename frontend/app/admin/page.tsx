@@ -21,6 +21,7 @@ import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
 import { adminApi, ApiError } from "@/lib/api";
 import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
+import { useDeferredReload } from "@/lib/useDeferredReload";
 import { useToast } from "@/lib/toast";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import {
@@ -111,6 +112,8 @@ export default function AdminOrdersPage() {
       setRefreshing(false);
     }
   }, [fetchOrders]);
+
+  const markChanged = useDeferredReload(load, !openId);
 
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
@@ -233,7 +236,7 @@ export default function AdminOrdersPage() {
         orderId={openId}
         workspace="shop"
         onClose={() => setOpenId(null)}
-        onChanged={load}
+        onChanged={markChanged}
       />
     );
   }

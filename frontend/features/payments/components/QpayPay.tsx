@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { deferEffect } from "@/lib/deferEffect";
 import { useOnKeyChange } from "@/lib/syncKey";
 import { Qr } from "@/components/Qr";
@@ -8,6 +8,7 @@ import { Button, Input } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { money } from "@/lib/format";
 import { leasingFeePercentOf, formatLeasingPercent, leasingNowPayAmount, isLeasingSplitPay } from "@/lib/leasing";
+import { autoInvoiceDedupeKey, shouldIssueAutoInvoice } from "@/lib/qpayAutoInvoice";
 import { useToast } from "@/lib/toast";
 import type { PublicOrder, QpayInvoice, Store } from "@/lib/types";
 import { PaymentRow as Row } from "./PaymentRow";
@@ -18,14 +19,21 @@ export function QpayPay({
   ready,
   hideAmounts,
   onPaid,
+  onPayAttempt,
 }: {
   order: PublicOrder;
   store: Store;
   ready: boolean;
   hideAmounts?: boolean;
   onPaid?: () => void;
+  onPayAttempt?: () => void;
 }) {
   const toast = useToast();
+  const onPayAttemptRef = useRef(onPayAttempt);
+  useEffect(() => {
+    onPayAttemptRef.current = onPayAttempt;
+  }, [onPayAttempt]);
+  const lastAutoInvoiceKey = useRef<string | null>(null);
   const [invoice, setInvoice] = useState<QpayInvoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -55,7 +63,8 @@ export function QpayPay({
       : "Төлөх дүн";
   const presets = splitPresets(maxSplit, suggestedSplit);
 
-  const loadInvoice = useCallback(async (amount?: number) => {
+  const loadInvoice = useCallback(async (amount?: number, source: "auto" | "user" = "auto") => {
+    if (source === "user") onPayAttemptRef.current?.();
     setBusy(true);
     setError(null);
     try {
@@ -85,6 +94,7 @@ export function QpayPay({
     String(suggestedSplit),
   ].join("|");
   useOnKeyChange(invoiceKey, () => {
+    lastAutoInvoiceKey.current = null;
     if (ready) setInvoice(null);
   });
   useOnKeyChange(`${order.code}|${String(splitPay)}|${suggestedSplit}`, () => {
@@ -100,14 +110,21 @@ export function QpayPay({
 
   useEffect(() => {
     if (!ready) return;
+    const key = autoInvoiceDedupeKey({
+      code: order.code,
+      kind: requestedKind,
+      amount: requestedAmount,
+    });
     return deferEffect(() => {
+      if (!shouldIssueAutoInvoice(lastAutoInvoiceKey.current, key)) return;
+      lastAutoInvoiceKey.current = key;
       if (requestedKind === "split") {
         if (requestedAmount > 0) void loadInvoice(requestedAmount);
         return;
       }
       void loadInvoice(requestedKind === "fee" ? requestedAmount : undefined);
     });
-  }, [ready, requestedKind, requestedAmount, loadInvoice]);
+  }, [ready, requestedKind, requestedAmount, order.code, loadInvoice]);
 
   const verifyPaid = useCallback(async () => {
     setChecking(true);
@@ -211,7 +228,7 @@ export function QpayPay({
           <Row label={payLabel} value={money(payAmount)} big />
           {payAmount > 0 && !invoice && (
             <Button
-              onClick={() => void loadInvoice(payAmount)}
+              onClick={() => void loadInvoice(payAmount, "user")}
               loading={busy}
               disabled={payAmount < 1 || payAmount > maxSplit}
             >
@@ -268,6 +285,7 @@ export function QpayPay({
                     target="_blank"
                     rel="noopener noreferrer"
                     title={u.description || u.name}
+                    onClick={() => onPayAttempt?.()}
                     className="flex flex-col items-center gap-1 rounded-[8px] border border-line bg-bg px-1.5 py-2 no-underline transition-colors hover:border-primary hover:bg-primary-soft"
                   >
                     <BankLogo name={u.name} logo={u.logo} />
@@ -286,6 +304,7 @@ export function QpayPay({
               target="_blank"
               rel="noopener noreferrer"
               className="text-[13px] text-ink-2"
+              onClick={() => onPayAttempt?.()}
             >
               QPay холбоос нээх
             </a>
@@ -304,7 +323,15 @@ export function QpayPay({
               </>
             )}
           </p>
-          <Button variant="outline" size="sm" onClick={() => void verifyPaid()} loading={checking}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              onPayAttempt?.();
+              void verifyPaid();
+            }}
+            loading={checking}
+          >
             Төлбөр шалгах
           </Button>
         </>
@@ -317,7 +344,7 @@ export function QpayPay({
             variant="outline"
             size="sm"
             onClick={() =>
-              void loadInvoice(splitPay || feeFirst ? payAmount : undefined)
+              void loadInvoice(splitPay || feeFirst ? payAmount : undefined, "user")
             }
             loading={busy}
             disabled={splitPay && payAmount < 1}
