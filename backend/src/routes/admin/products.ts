@@ -313,6 +313,8 @@ adminProductsRouter.post(
           costPrice,
           sellPrice,
           stock: skuStockSum(skuRows) ?? body.stock ?? 0,
+          reserved: 0,
+          available: skuStockSum(skuRows) ?? body.stock ?? 0,
           closeAt: body.closeAt === undefined ? null : body.closeAt,
           status: body.status ?? 'DRAFT',
           note: body.note ?? null,

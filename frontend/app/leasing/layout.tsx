@@ -11,6 +11,8 @@ import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 const NAV = [
   { href: "/leasing", label: "Захиалга" },
   { href: "/leasing/ready", label: "Бэлэн бараа" },
+  { href: "/leasing/sales", label: "Борлуулалт" },
+  { href: "/leasing/itgel", label: "Итгэлд төлөх" },
   { href: "/leasing/customers", label: "Хэрэглэгчид" },
   { href: "/leasing/sms", label: "SMS" },
   { href: "/leasing/settings", label: "Тохиргоо" },
@@ -76,7 +78,7 @@ function Shell({ children }: { children: ReactNode }) {
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="Цэс"
             aria-expanded={menuOpen}
-            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-[8px] border border-line bg-bg"
+            className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-[8px] border border-line bg-bg"
           >
             <span className="flex flex-col gap-[3px]">
               <span className="block h-[2px] w-4 rounded bg-ink" />

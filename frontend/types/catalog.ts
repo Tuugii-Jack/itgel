@@ -62,6 +62,8 @@ export interface Product {
   /** Бэлэн барааны хослол бүрийн үлдэгдэл. */
   skuStocks?: SkuStock[];
   stock: number;
+  reserved?: number;
+  available?: number;
   type: "order" | "ready";
   status: ProductStatus;
   closeAt: string | null;
@@ -252,6 +254,11 @@ export interface Store {
     termsTitle: string;
     termsBody: string;
   };
+  leasingContact?: {
+    name: string | null;
+    phone: string | null;
+    chatUrl: string | null;
+  } | null;
 }
 
 export interface Ad {

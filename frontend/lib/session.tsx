@@ -11,6 +11,8 @@ import {
   type ReactNode,
 } from "react";
 import { api, isAuthError, readToken, writeToken } from "./api";
+import { clearCheckoutDraft } from "./checkoutDraft";
+import { clearCheckoutIdempotencyKey } from "./checkoutIdempotency";
 import type { Me } from "./types";
 
 /** Хэрэглэгчийн нэвтрэлт — утас + OTP. */
@@ -61,6 +63,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(
     async (token: string) => {
       writeToken("customer", token);
+      clearCheckoutDraft();
+      clearCheckoutIdempotencyKey();
       setMe(null);
       setLoading(true);
       await refresh();
@@ -71,6 +75,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     refreshVersion.current += 1;
     writeToken("customer", null);
+    clearCheckoutDraft();
+    clearCheckoutIdempotencyKey();
     setMe(null);
     setLoading(false);
   }, []);

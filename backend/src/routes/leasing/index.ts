@@ -5,6 +5,7 @@ import { leasingOrdersRouter } from './orders.js';
 import { leasingProductsRouter } from './products.js';
 import { leasingSettingsRouter } from './settings.js';
 import { leasingSmsRouter } from './sms.js';
+import { leasingFinanceRouter } from './finance.js';
 
 export const leasingRouter = Router();
 
@@ -14,3 +15,4 @@ leasingRouter.use('/orders', leasingOrdersRouter);
 leasingRouter.use('/customers', leasingCustomersRouter);
 leasingRouter.use('/sms', leasingSmsRouter);
 leasingRouter.use('/settings', leasingSettingsRouter);
+leasingRouter.use('/finance', leasingFinanceRouter);

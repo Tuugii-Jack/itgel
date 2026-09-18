@@ -16,7 +16,7 @@ import {
 import { finalizeRoundClose } from '../../services/orders.js';
 import { adminRound } from '../../services/serialize.js';
 import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
-import { replaceRoundSkuStocks, skuStockSum } from '../../lib/skuStock.js';
+import { replaceRoundSkuStocks, skuStockSum, syncRoundAvailable } from '../../lib/skuStock.js';
 import { selectionsOf, sizeColorFromSelections, tallyVariants } from '../../lib/options.js';
 import { diffUbDays } from '../../lib/date.js';
 import { productStatus, roundFields } from '../../modules/catalog/productFields.js';
@@ -246,6 +246,9 @@ adminRoundsRouter.patch(
 
       await replaceRoundOptionPrices(tx, updated.id, body.optionPrices);
       await replaceRoundSkuStocks(tx, updated.id, body.skuStocks);
+      if (body.skuStocks === undefined && body.stock != null) {
+        await syncRoundAvailable(tx, updated.id, body.stock);
+      }
 
       if (batchId !== undefined) {
         if (batchId) {

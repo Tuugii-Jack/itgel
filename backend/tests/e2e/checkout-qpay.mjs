@@ -221,6 +221,7 @@ function isolatedEnv() {
     DIRECT_URL: LOCAL_DB,
     JWT_SECRET: 'isolated-checkout-qpay-tests',
     CRON_ENABLED: 'false',
+    CRON_SECRET: 'isolated-checkout-cron-secret',
     SMS_PROVIDER: 'console',
     SHOP_SMS_PROVIDER: 'console',
     STORAGE_PROVIDER: 'mock',
@@ -248,6 +249,16 @@ function isolatedEnv() {
     R2_ACCESS_KEY_ID: '',
     R2_SECRET_ACCESS_KEY: '',
   };
+}
+
+function cancelUnpaidNow() {
+  const out = execFileSync('npx', ['tsx', 'tests/e2e/cancel-unpaid-once.ts'], {
+    cwd: BACKEND_ROOT,
+    env: isolatedEnv(),
+    encoding: 'utf8',
+  });
+  const match = out.match(/UNPAID_CANCELLED=(\d+)/);
+  return Number(match?.[1] ?? 'NaN');
 }
 
 function startBackend(logs) {
@@ -357,30 +368,53 @@ function skuKey(selections) {
 
 function bumpStock(product, qty) {
   sql(
-    `UPDATE "ProductRound" SET stock = stock + ${qty}, status = CASE WHEN stock + ${qty} > 0 THEN 'ACTIVE' ELSE status END WHERE id='${product.id}'`,
+    `UPDATE "ProductRound" SET stock = stock + ${qty}, available = available + ${qty}, status = CASE WHEN available + ${qty} > 0 THEN 'ACTIVE' ELSE status END WHERE id='${product.id}'`,
   );
   const line = lineOf(product);
   if (line.selections && Object.keys(line.selections).length) {
     sql(
-      `UPDATE "RoundSkuStock" SET stock = stock + ${qty} WHERE "roundId"='${product.id}' AND "skuKey"='${skuKey(line.selections)}'`,
+      `UPDATE "RoundSkuStock" SET stock = stock + ${qty}, available = available + ${qty} WHERE "roundId"='${product.id}' AND "skuKey"='${skuKey(line.selections)}'`,
     );
   }
 }
 
 function setStock(product, qty) {
   sql(
-    `UPDATE "ProductRound" SET stock = ${qty}, status = CASE WHEN ${qty} > 0 THEN 'ACTIVE' ELSE status END WHERE id='${product.id}'`,
+    `UPDATE "ProductRound" SET stock = ${qty}, reserved = 0, available = ${qty}, status = CASE WHEN ${qty} > 0 THEN 'ACTIVE' ELSE status END WHERE id='${product.id}'`,
   );
   const line = lineOf(product);
   if (line.selections && Object.keys(line.selections).length) {
     sql(
-      `UPDATE "RoundSkuStock" SET stock = ${qty} WHERE "roundId"='${product.id}' AND "skuKey"='${skuKey(line.selections)}'`,
+      `UPDATE "RoundSkuStock" SET stock = ${qty}, reserved = 0, available = ${qty} WHERE "roundId"='${product.id}' AND "skuKey"='${skuKey(line.selections)}'`,
     );
   }
 }
 
+function roundHold(product) {
+  const raw = sql(
+    `SELECT stock || ' ' || reserved || ' ' || available FROM "ProductRound" WHERE id='${product.id}'`,
+  );
+  const [stock, reserved, available] = raw.split(' ').map(Number);
+  return { stock, reserved, available };
+}
+
+function skuHold(roundId, skuKey) {
+  const raw = sql(
+    `SELECT stock || ' ' || reserved || ' ' || available FROM "RoundSkuStock" WHERE "roundId"='${roundId}' AND "skuKey"='${skuKey}'`,
+  );
+  const [stock, reserved, available] = raw.split(' ').map(Number);
+  return { stock, reserved, available };
+}
+
 function roundStock(product) {
-  return Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${product.id}'`));
+  return roundHold(product).stock;
+}
+
+function assertReserved(product, before, qty = 1) {
+  const after = roundHold(product);
+  assert.equal(after.stock, before.stock, 'checkout must not consume warehouse stock');
+  assert.equal(after.reserved, before.reserved + qty);
+  assert.equal(after.available, before.available - qty);
 }
 
 function paymentsOf(orderId) {
@@ -469,7 +503,7 @@ try {
   const leaseLine = lineOf(leaseReady);
 
   const keyReplay = randomUUID();
-  const stockBefore = roundStock(shopReady);
+  const stockBefore = roundHold(shopReady);
   const first = await req('/api/orders', {
     method: 'POST',
     token: userA.token,
@@ -486,7 +520,7 @@ try {
   });
   assert.equal(replay.status, 201, replay.text);
   assert.deepEqual(data(replay), firstData);
-  assert.equal(roundStock(shopReady), stockBefore - 1);
+  assertReserved(shopReady, stockBefore);
   const orderId = sql(`SELECT id FROM "Order" WHERE code='${firstData.code}'`);
   const audits = Number(
     sql(`SELECT COUNT(*) FROM "AuditLog" WHERE entity='Order' AND "entityId"='${orderId}' AND action='CREATE'`),
@@ -506,7 +540,7 @@ try {
   });
   assert.equal(conflictRes.status, 409, conflictRes.text);
   assert.equal(conflictRes.json?.error?.details?.code, 'IDEMPOTENCY_KEY_REUSED');
-  assert.equal(roundStock(shopReady), stockBefore - 1);
+  assertReserved(shopReady, stockBefore);
   passLog('same key different payload → 409, no extra stock hit');
 
   const other = await req('/api/orders', {
@@ -556,7 +590,7 @@ try {
   passLog('mixed-cart retry returns the same splitOrders', `${mixedData.code}+${mixedData.splitOrders[0].code}`);
 
   const concKey = randomUUID();
-  const skuBefore = roundStock(skuProduct);
+  const skuBefore = roundHold(skuProduct);
   const concurrent = await Promise.all([
     req('/api/orders', {
       method: 'POST',
@@ -573,8 +607,8 @@ try {
   ]);
   assert.equal(concurrent.every((r) => r.status === 201), true, concurrent.map((r) => r.text).join(' | '));
   assert.equal(data(concurrent[0]).code, data(concurrent[1]).code);
-  assert.equal(roundStock(skuProduct), skuBefore - 1);
-  passLog('concurrent same key — one SKU decrement', data(concurrent[0]).code);
+  assertReserved(skuProduct, skuBefore);
+  passLog('concurrent same key — one reserved hold', data(concurrent[0]).code);
 
   const rollbackProduct = shopReady;
   setStock(rollbackProduct, 1);
@@ -603,7 +637,10 @@ try {
     `SELECT COUNT(*) FROM "CheckoutIdempotency" WHERE "customerId"='${userA.customerId}' AND "idempotencyKey"='${lostKey}'`,
   );
   assert.equal(Number(lostRow), 0);
-  assert.equal(roundStock(rollbackProduct), 0);
+  const racedHold = roundHold(rollbackProduct);
+  assert.equal(racedHold.stock, 1, 'unpaid checkout keeps warehouse stock');
+  assert.equal(racedHold.reserved, 1);
+  assert.equal(racedHold.available, 0);
   passLog('failed stock transaction rolls back its idempotency row');
   bumpStock(rollbackProduct, 10);
 
@@ -643,6 +680,10 @@ try {
   assert.deepEqual(paymentsOf(shopOrderId), [`PAYMENT:${shopDue}:${oldInvoice}`]);
   assert.equal(Number(sql(`SELECT "paidAmount" FROM "Order" WHERE id='${shopOrderId}'`)), shopDue);
   assert.equal(Number(sql(`SELECT "dueAmount" FROM "Order" WHERE id='${shopOrderId}'`)), 0);
+  assert.equal(
+    sql(`SELECT "stockHold" FROM "OrderItem" WHERE "orderId"='${shopOrderId}' LIMIT 1`),
+    'CONSUMED',
+  );
   passLog('old-invoice callback still posts to the order ledger');
 
   const leaseKey = randomUUID();
@@ -779,6 +820,816 @@ try {
   assert.ok(mock.requests.some((r) => r.url === '/v2/invoice'));
   assert.ok(mock.requests.some((r) => r.url === '/v2/payment/check'));
   passLog(`mock QPay saw ${mock.requests.length} merchant-shaped calls`);
+
+  // --- Лизинг / нөөц / Итгэлийн тооцоо ---
+  async function payMock(invoiceId, amount, path = '/api/orders/qpay/callback') {
+    mock.pay(invoiceId, amount);
+    const cb = await req(path, { method: 'POST', body: { invoice_id: invoiceId }, raw: true });
+    assert.equal(cb.status, 200, cb.text);
+    return cb;
+  }
+
+  async function qpayCallbackRetry(invoiceId, path = '/api/orders/qpay/callback') {
+    let last = { status: 0, text: '' };
+    for (let i = 0; i < 8; i += 1) {
+      last = await req(path, { method: 'POST', body: { invoice_id: invoiceId }, raw: true });
+      if (last.status === 200) return last;
+      if (last.status !== 503) return last;
+      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
+    }
+    return last;
+  }
+
+  const adminLogin = await req('/api/admin/auth/login', {
+    method: 'POST',
+    body: { email: 'admin@itgel.mn', password: 'admin123' },
+  });
+  assert.equal(adminLogin.status, 200, adminLogin.text);
+  const adminToken = data(adminLogin).token;
+  const leasingLogin = await req('/api/admin/auth/login', {
+    method: 'POST',
+    body: { email: 'leasing@itgel.mn', password: 'leasing123' },
+  });
+  assert.equal(leasingLogin.status, 200, leasingLogin.text);
+  const leasingToken = data(leasingLogin).token;
+  const leasingAdminId = sql(`SELECT id FROM "AdminUser" WHERE email='leasing@itgel.mn'`);
+  const ownerPatch = await req('/api/admin/settings', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { leasingSettlementAdminId: leasingAdminId },
+  });
+  assert.equal(ownerPatch.status, 200, ownerPatch.text);
+  assert.equal(data(ownerPatch).leasingSettlementAdminId, leasingAdminId);
+  const categoryId = sql(`SELECT "categoryId" FROM "Product" WHERE "deletedAt" IS NULL LIMIT 1`);
+  assert.ok(categoryId);
+
+  async function createShopReady(name, stock, price, cargoFee = 0) {
+    const created = await req('/api/admin/products', {
+      method: 'POST',
+      token: adminToken,
+      body: { name, categoryId, images: [] },
+    });
+    assert.ok([200, 201].includes(created.status), created.text);
+    const productId = data(created).id;
+    const roundRes = await req(`/api/admin/products/${productId}/rounds`, {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        sellPrice: price,
+        stock,
+        closeAt: null,
+        status: 'ACTIVE',
+        optionPrices: [],
+        note: name,
+      },
+    });
+    assert.equal(roundRes.status, 201, roundRes.text);
+    const rounds = data(roundRes).rounds ?? [];
+    const round = rounds.find((r) => r.note === name) ?? rounds[0];
+    assert.ok(round?.id, roundRes.text);
+    if (cargoFee > 0) {
+      sql(`UPDATE "ProductRound" SET "cargoFee"=${cargoFee} WHERE id='${round.id}'`);
+    }
+    sql(
+      `UPDATE "ProductRound" SET stock=${stock}, reserved=0, available=${stock}, status='ACTIVE' WHERE id='${round.id}'`,
+    );
+    return { productId, id: round.id, price, stock };
+  }
+
+  async function createShopReadySkus(name, price, skus) {
+    const colors = skus.map((row) => row.selections['Өнгө']).filter(Boolean);
+    const created = await req('/api/admin/products', {
+      method: 'POST',
+      token: adminToken,
+      body: { name, categoryId, images: [], colors },
+    });
+    assert.ok([200, 201].includes(created.status), created.text);
+    const productId = data(created).id;
+    const total = skus.reduce((sum, row) => sum + row.stock, 0);
+    const roundRes = await req(`/api/admin/products/${productId}/rounds`, {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        sellPrice: price,
+        stock: total,
+        closeAt: null,
+        status: 'ACTIVE',
+        optionPrices: [],
+        skuStocks: skus,
+        note: name,
+      },
+    });
+    assert.equal(roundRes.status, 201, roundRes.text);
+    const rounds = data(roundRes).rounds ?? [];
+    const round = rounds.find((r) => r.note === name) ?? rounds[0];
+    assert.ok(round?.id, roundRes.text);
+    sql(
+      `UPDATE "ProductRound" SET stock=${total}, reserved=0, available=${total}, status='ACTIVE' WHERE id='${round.id}'`,
+    );
+    for (const row of skus) {
+      const key = skuKey(row.selections);
+      sql(
+        `UPDATE "RoundSkuStock" SET stock=${row.stock}, reserved=0, available=${row.stock} WHERE "roundId"='${round.id}' AND "skuKey"='${key}'`,
+      );
+    }
+    return { productId, id: round.id, price, stock: total };
+  }
+
+  const shopPhone = sql(`SELECT phone FROM "Setting" WHERE id=1`);
+  const contactPatch = await req('/api/leasing/settings', {
+    method: 'PATCH',
+    token: leasingToken,
+    body: {
+      publicName: 'Тест лизинг',
+      contactPhone: '99118877',
+      chatUrl: 'https://t.me/itgel-leasing-test',
+    },
+  });
+  assert.equal(contactPatch.status, 200, contactPatch.text);
+  assert.equal(data(contactPatch).publicName, 'Тест лизинг');
+  const badPhone = await req('/api/leasing/settings', {
+    method: 'PATCH',
+    token: leasingToken,
+    body: { contactPhone: 'not-a-phone' },
+  });
+  assert.equal(badPhone.status, 400, badPhone.text);
+  const adminSettingsForbidden = await req('/api/leasing/settings', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { publicName: 'Хак' },
+  });
+  assert.equal(adminSettingsForbidden.status, 403);
+  const storeAfter = data(await req('/api/store'));
+  assert.equal(storeAfter.phone, shopPhone);
+  assert.equal(storeAfter.leasingContact?.name, 'Тест лизинг');
+  assert.equal(storeAfter.leasingContact?.phone, '99118877');
+  passLog('leasing public contact saved; shop phone unchanged');
+
+  const hideProduct = await createShopReady(`HideZero ${phoneA}`, 1, 55_000);
+  const hideLine = { productId: hideProduct.id, qty: 1 };
+  const hideOrder = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem A', items: [hideLine] },
+  });
+  assert.equal(hideOrder.status, 201, hideOrder.text);
+  const listedGone = data(await req('/api/products?type=ready&pageSize=60'));
+  const listedGoneRow = listedGone.find((p) => p.id === hideProduct.id);
+  if (listedGoneRow) assert.equal(listedGoneRow.stock, 0, 'unexpired reserve must not be sellable');
+  const searchedGone = data(
+    await req(`/api/products?type=ready&q=${encodeURIComponent(`HideZero ${phoneA}`)}&pageSize=20`),
+  );
+  const searchedGoneRow = searchedGone.find((p) => p.id === hideProduct.id);
+  if (searchedGoneRow) assert.equal(searchedGoneRow.stock, 0);
+  const detailGone = await req(`/api/products/${hideProduct.id}`);
+  assert.equal(detailGone.status, 200, detailGone.text);
+  assert.equal(data(detailGone).stock, 0);
+  const blocked = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem A', items: [hideLine] },
+  });
+  assert.equal(blocked.status, 409, blocked.text);
+  passLog('zero-available ready product hidden from list/search, detail unsellable');
+
+  const hideOrderId = sql(`SELECT id FROM "Order" WHERE code='${data(hideOrder).code}'`);
+  sql(`UPDATE "Order" SET "createdAt"=NOW() - INTERVAL '13 hours' WHERE id='${hideOrderId}'`);
+  const agedWarehouse = roundHold(hideProduct);
+  assert.equal(agedWarehouse.stock, 1);
+  assert.equal(agedWarehouse.reserved, 1);
+  assert.equal(agedWarehouse.available, 0);
+  const listedAged = data(await req('/api/products?type=ready&pageSize=60'));
+  assert.ok(listedAged.some((p) => p.id === hideProduct.id), 'expired unpaid hold is sellable before cancel');
+  const detailAged = data(await req(`/api/products/${hideProduct.id}`));
+  assert.equal(detailAged.stock, 1);
+  const cancelledUnpaid = cancelUnpaidNow();
+  assert.ok(cancelledUnpaid >= 1, `expected unpaid cancel, got ${cancelledUnpaid}`);
+  assert.equal(sql(`SELECT status FROM "Order" WHERE id='${hideOrderId}'`), 'CANCELLED');
+  assert.equal(roundHold(hideProduct).available, 1);
+  assert.equal(roundHold(hideProduct).reserved, 0);
+  assert.equal(roundHold(hideProduct).stock, 1);
+  const listedBack = data(await req('/api/products?type=ready&pageSize=60'));
+  assert.ok(listedBack.some((p) => p.id === hideProduct.id));
+  const detailAfterCancel = data(await req(`/api/products/${hideProduct.id}`));
+  assert.equal(detailAfterCancel.stock, 1, 'expired hold must not be added twice after cancel');
+  passLog('unpaid cancel releases reserve and product reappears');
+
+  const partialProd = await createShopReady(`PartialKeep ${phoneA}`, 2, 40_000);
+  const partialKeep = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem A', items: [{ productId: partialProd.id, qty: 1 }] },
+  });
+  const partialKeepId = sql(`SELECT id FROM "Order" WHERE code='${data(partialKeep).code}'`);
+  const partialKeepCode = data(partialKeep).code;
+  const partialInv = data(
+    await req(`/api/orders/${partialKeepCode}/qpay/invoice`, {
+      method: 'POST',
+      token: userA.token,
+      body: {},
+    }),
+  ).invoiceId;
+  await payMock(partialInv, 1000);
+  const partialHoldAfterPay = roundHold(partialProd);
+  sql(`UPDATE "Order" SET "createdAt"=NOW() - INTERVAL '13 hours' WHERE id='${partialKeepId}'`);
+  const partialAged = data(await req(`/api/products/${partialProd.id}`));
+  assert.equal(
+    partialAged.stock,
+    partialHoldAfterPay.available,
+    'partial-paid hold must not overlay back into sellable',
+  );
+  cancelUnpaidNow();
+  assert.equal(sql(`SELECT status FROM "Order" WHERE id='${partialKeepId}'`), 'NEW');
+  assert.equal(Number(sql(`SELECT "paidAmount" FROM "Order" WHERE id='${partialKeepId}'`)), 1000);
+  const partialAfterCancel = roundHold(partialProd);
+  assert.equal(partialAfterCancel.available, partialHoldAfterPay.available);
+  assert.equal(partialAfterCancel.stock, partialHoldAfterPay.stock);
+  passLog('partial payment is not unpaid-cancelled');
+
+  const skuProd = await createShopReadySkus(`SkuHold ${phoneA}`, 20_000, [
+    { selections: { Өнгө: 'Хар' }, stock: 1 },
+    { selections: { Өнгө: 'Цагаан' }, stock: 1 },
+  ]);
+  const skuBlack = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: {
+      name: 'Idem A',
+      items: [{ productId: skuProd.id, qty: 1, selections: { Өнгө: 'Хар' }, color: 'Хар' }],
+    },
+  });
+  assert.equal(skuBlack.status, 201, skuBlack.text);
+  const skuBlackId = sql(`SELECT id FROM "Order" WHERE code='${data(skuBlack).code}'`);
+  sql(`UPDATE "Order" SET "createdAt"=NOW() - INTERVAL '13 hours' WHERE id='${skuBlackId}'`);
+  const skuWh = roundHold(skuProd);
+  assert.equal(skuWh.stock, 2);
+  assert.equal(skuWh.reserved, 1);
+  assert.equal(skuWh.available, 1);
+  assert.equal(skuHold(skuProd.id, 'Өнгө=Хар').available, 0);
+  assert.equal(skuHold(skuProd.id, 'Өнгө=Цагаан').available, 1);
+  const skuAged = data(await req(`/api/products/${skuProd.id}`));
+  assert.equal(skuAged.stock, 2);
+  const skuBlackRow = (skuAged.skuStocks ?? []).find((s) => s.selections?.['Өнгө'] === 'Хар');
+  const skuWhiteRow = (skuAged.skuStocks ?? []).find((s) => s.selections?.['Өнгө'] === 'Цагаан');
+  assert.equal(skuBlackRow?.stock, 1);
+  assert.equal(skuWhiteRow?.stock, 1);
+  cancelUnpaidNow();
+  assert.equal(roundHold(skuProd).available, 2);
+  assert.equal(roundHold(skuProd).reserved, 0);
+  assert.equal(roundHold(skuProd).stock, 2);
+  assert.equal(skuHold(skuProd.id, 'Өнгө=Хар').available, 1);
+  assert.equal(skuHold(skuProd.id, 'Өнгө=Цагаан').available, 1);
+  const skuAfter = data(await req(`/api/products/${skuProd.id}`));
+  assert.equal(skuAfter.stock, 2, 'expired SKU hold must not double-count after cancel');
+  passLog('SKU sellable overlay is per-sku and not double-counted');
+
+  const lateProd = await createShopReady(`LatePay ${phoneA}`, 1, 33_000);
+  const lateOrder = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem A', items: [{ productId: lateProd.id, qty: 1 }] },
+  });
+  const lateCode = data(lateOrder).code;
+  const lateId = sql(`SELECT id FROM "Order" WHERE code='${lateCode}'`);
+  const lateInv = data(
+    await req(`/api/orders/${lateCode}/qpay/invoice`, { method: 'POST', token: userA.token, body: {} }),
+  ).invoiceId;
+  sql(`UPDATE "Order" SET "createdAt"=NOW() - INTERVAL '13 hours' WHERE id='${lateId}'`);
+  cancelUnpaidNow();
+  const winnerLate = await req('/api/orders', {
+    method: 'POST',
+    token: userB.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem B', items: [{ productId: lateProd.id, qty: 1 }] },
+  });
+  assert.equal(winnerLate.status, 201, winnerLate.text);
+  const winnerLateCode = data(winnerLate).code;
+  const winnerLateDue = Number(sql(`SELECT "dueAmount" FROM "Order" WHERE code='${winnerLateCode}'`));
+  const winnerLateInv = data(
+    await req(`/api/orders/${winnerLateCode}/qpay/invoice`, {
+      method: 'POST',
+      token: userB.token,
+      body: {},
+    }),
+  ).invoiceId;
+  await payMock(winnerLateInv, winnerLateDue);
+  const lateDue = Number(sql(`SELECT "dueAmount" FROM "Order" WHERE id='${lateId}'`));
+  await payMock(lateInv, lateDue > 0 ? lateDue : 33_000);
+  const latePayCount = Number(sql(`SELECT count(*) FROM "Payment" WHERE "orderId"='${lateId}' AND kind='PAYMENT'`));
+  assert.ok(latePayCount >= 1, 'late payment after cancel is recorded');
+  const lateEx = Number(
+    sql(`SELECT count(*) FROM "MoneyException" WHERE "orderId"='${lateId}' AND kind IN ('LATE_AFTER_CANCEL','STOCK_SHORTFALL')`),
+  );
+  assert.ok(lateEx >= 1, 'stock shortfall after cancel is visible to admin');
+  assert.equal(sql(`SELECT status FROM "Order" WHERE id='${lateId}'`), 'CANCELLED');
+  assert.equal(sql(`SELECT "stockHold" FROM "OrderItem" WHERE "orderId"='${lateId}'`), 'RELEASED');
+  assert.equal(sql(`SELECT "stockShortfall" FROM "OrderItem" WHERE "orderId"='${lateId}'`), 't');
+  assert.equal(sql(`SELECT "handedOverAt" FROM "OrderItem" WHERE "orderId"='${lateId}'`), '');
+  const winnerLateId = sql(`SELECT id FROM "Order" WHERE code='${winnerLateCode}'`);
+  assert.equal(sql(`SELECT "stockHold" FROM "OrderItem" WHERE "orderId"='${winnerLateId}'`), 'CONSUMED');
+  assert.equal(roundHold(lateProd).stock, 0);
+  assert.equal(roundHold(lateProd).reserved, 0);
+  assert.equal(roundHold(lateProd).available, 0);
+  passLog('late QPay after cancel recorded with money exception');
+
+  const cargoProd = await createShopReady(`CargoLease ${phoneA}`, 8, 100_000, 15_000);
+  async function createLeasingPaid(product, token, name, { expectSettlement = true } = {}) {
+    const created = await req('/api/orders', {
+      method: 'POST',
+      token,
+      idempotencyKey: randomUUID(),
+      body: { name, leasing: true, items: [{ productId: product.id, qty: 1 }] },
+    });
+    assert.equal(created.status, 201, created.text);
+    const payload = data(created);
+    assert.equal(payload.isLeasing, true);
+    const orderId = sql(`SELECT id FROM "Order" WHERE code='${payload.code}'`);
+    const fee = Number(sql(`SELECT "leasingFee" FROM "Order" WHERE id='${orderId}'`));
+    assert.ok(fee > 0, 'leasing fee snapshot');
+    const feeInv = data(
+      await req(`/api/orders/${payload.code}/qpay/invoice`, { method: 'POST', token, body: {} }),
+    ).invoiceId;
+    assert.match(feeInv, /^inv_leasing_/);
+    await payMock(feeInv, fee, '/api/orders/leasing-qpay/callback');
+    const status = sql(`SELECT status FROM "Order" WHERE id='${orderId}'`);
+    assert.ok(['CONFIRMED', 'ARRIVED'].includes(status), `leasing after fee: ${status}`);
+    const settlements = Number(sql(`SELECT count(*) FROM "ItgelSettlement" WHERE "sourceOrderId"='${orderId}'`));
+    if (expectSettlement) assert.equal(settlements, 1);
+    else assert.equal(settlements, 0);
+    return { ...payload, orderId, fee };
+  }
+
+  const lease1 = await createLeasingPaid(cargoProd, userA.token, 'Idem A');
+  const publicLease = data(await req(`/api/orders/${lease1.code}`, { token: userA.token }));
+  assert.equal(publicLease.contact?.kind, 'LEASING');
+  assert.equal(publicLease.contact?.title, 'Тест лизинг');
+  assert.equal(publicLease.contact?.phone, '99118877');
+  assert.equal(publicLease.unpaidCargoFee, 15_000);
+  const shopPublic = data(await req(`/api/orders/${shopCode}`, { token: userA.token }));
+  assert.equal(shopPublic.contact?.kind, 'SHOP');
+  passLog('mixed shop vs leasing contact on customer orders');
+
+  const feeKeepProd = await createShopReady(`FeeKeep ${phoneA}`, 1, 88_000);
+  const feeKeep = await createLeasingPaid(feeKeepProd, userA.token, 'Idem A');
+  sql(`UPDATE "Order" SET "createdAt"=NOW() - INTERVAL '13 hours' WHERE id='${feeKeep.orderId}'`);
+  assert.ok(['CONFIRMED', 'ARRIVED'].includes(sql(`SELECT status FROM "Order" WHERE id='${feeKeep.orderId}'`)));
+  const feeWh = roundHold(feeKeepProd);
+  assert.equal(feeWh.stock, 0);
+  assert.equal(feeWh.available, 0);
+  const feeAged = data(await req(`/api/products/${feeKeepProd.id}`));
+  assert.equal(feeAged.stock, 0, 'fee-paid leasing must not overlay back into sellable');
+  const feeBlocked = await req('/api/orders', {
+    method: 'POST',
+    token: userB.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem B', items: [{ productId: feeKeepProd.id, qty: 1 }] },
+  });
+  assert.equal(feeBlocked.status, 409, feeBlocked.text);
+  cancelUnpaidNow();
+  assert.ok(['CONFIRMED', 'ARRIVED'].includes(sql(`SELECT status FROM "Order" WHERE id='${feeKeep.orderId}'`)));
+  assert.equal(roundHold(feeKeepProd).stock, 0);
+  assert.equal(roundHold(feeKeepProd).available, 0);
+  passLog('fee-paid leasing stock is not returned to sellable');
+
+  const settleAmount = Number(
+    sql(`SELECT amount FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`),
+  );
+  assert.equal(settleAmount, 100_000);
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`),
+    leasingAdminId,
+  );
+  assert.equal(
+    sql(`SELECT "leasingOperatorAdminId" FROM "Order" WHERE id='${lease1.orderId}'`),
+    leasingAdminId,
+  );
+  const principalInv = data(
+    await req(`/api/orders/${lease1.code}/qpay/invoice`, {
+      method: 'POST',
+      token: userA.token,
+      body: { amount: 20_000 },
+    }),
+  ).invoiceId;
+  assert.match(principalInv, /^inv_leasing_/);
+  await payMock(principalInv, 20_000, '/api/orders/leasing-qpay/callback');
+  assert.equal(
+    Number(sql(`SELECT "remainingAmount" FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`)),
+    100_000,
+  );
+  passLog('customer partial principal does not reduce Itgel settlement');
+
+  const cargoInvRes = await req(`/api/orders/${lease1.code}/qpay/invoice`, {
+    method: 'POST',
+    token: userA.token,
+    body: { purpose: 'CARGO' },
+  });
+  assert.equal(cargoInvRes.status, 201, cargoInvRes.text);
+  const cargoInv = data(cargoInvRes).invoiceId;
+  assert.match(cargoInv, /^inv_shop_/);
+  assert.equal(sql(`SELECT purpose FROM "QpayInvoice" WHERE id='${cargoInv}'`), 'CARGO');
+  await payMock(cargoInv, 15_000);
+  const cargoPayee = sql(
+    `SELECT "payeeKind" FROM "Payment" WHERE "orderId"='${lease1.orderId}' AND "qpayInvoiceId"='${cargoInv}'`,
+  );
+  assert.equal(cargoPayee, 'SHOP');
+  assert.equal(
+    Number(sql(`SELECT "remainingAmount" FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`)),
+    100_000,
+  );
+  const afterCargo = data(await req(`/api/orders/${lease1.code}`, { token: userA.token }));
+  assert.ok(afterCargo.leasingPrincipalDue > 0, 'cargo paid is not full product payment');
+  assert.equal(afterCargo.unpaidCargoFee ?? 0, 0);
+  const confirmAgain = Number(sql(`SELECT count(*) FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`));
+  assert.equal(confirmAgain, 1);
+  passLog('leasing cargo pays Itgel shop QPay without closing product debt');
+
+  const lease2 = await createLeasingPaid(cargoProd, userA.token, 'Idem A');
+  const s1 = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`);
+  const s2 = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease2.orderId}'`);
+  const doublePay = await Promise.all([
+    req('/api/leasing/finance/itgel/pay', {
+      method: 'POST',
+      token: leasingToken,
+      body: { settlementIds: [s2], method: 'QPAY' },
+    }),
+    req('/api/leasing/finance/itgel/pay', {
+      method: 'POST',
+      token: leasingToken,
+      body: { settlementIds: [s2], method: 'QPAY' },
+    }),
+  ]);
+  assert.equal(doublePay.filter((r) => r.status === 201).length, 1, doublePay.map((r) => r.text).join(' | '));
+  assert.equal(doublePay.filter((r) => r.status === 409 || r.status === 404).length, 1);
+  passLog('double-tab settlement pay locks once');
+
+  const overlapBank = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      settlementIds: [s2],
+      method: 'BANK_TRANSFER',
+      bankRef: 'overlap-ref',
+      bankDate: '2026-09-18',
+    },
+  });
+  assert.equal(overlapBank.status, 409, overlapBank.text);
+
+  const multiPay = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [s1, s2], method: 'QPAY' },
+  });
+  // s2 is already invoiced, so this should fail; cancel open invoice first
+  const openPayId = data(doublePay.find((r) => r.status === 201)).payment.id;
+  await req(`/api/leasing/finance/itgel/payments/${openPayId}/cancel`, {
+    method: 'POST',
+    token: leasingToken,
+  });
+  const multiPay2 = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [s1, s2], method: 'QPAY' },
+  });
+  assert.equal(multiPay2.status, 201, `${multiPay.status}:${multiPay.text} | ${multiPay2.text}`);
+  const multiInv = data(multiPay2).invoice.invoiceId;
+  assert.match(multiInv, /^inv_shop_/);
+  assert.equal(sql(`SELECT purpose FROM "QpayInvoice" WHERE id='${multiInv}'`), 'ITGEL_SETTLEMENT');
+  const multiAmount = data(multiPay2).payment.amount;
+  assert.equal(multiAmount, 200_000);
+  await payMock(multiInv, multiAmount);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${s1}'`), 'PAID');
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${s2}'`), 'PAID');
+  passLog('one shop QPay closes two Itgel settlements');
+
+  const lease3 = await createLeasingPaid(cargoProd, userA.token, 'Idem A');
+  const s3 = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease3.orderId}'`);
+  const bankPay = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      settlementIds: [s3],
+      method: 'BANK_TRANSFER',
+      bankRef: 'BANK-ISO-1',
+      bankDate: '2026-09-18T00:00:00.000Z',
+    },
+  });
+  assert.equal(bankPay.status, 201, bankPay.text);
+  const bankPaymentId = data(bankPay).payment.id;
+  const leasingConfirm = await req(`/api/admin/leasing-settlements/payments/${bankPaymentId}/confirm`, {
+    method: 'POST',
+    token: leasingToken,
+  });
+  assert.equal(leasingConfirm.status, 403);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${s3}'`), 'PENDING_BANK');
+  const adminConfirm = await req(`/api/admin/leasing-settlements/payments/${bankPaymentId}/confirm`, {
+    method: 'POST',
+    token: adminToken,
+  });
+  assert.equal(adminConfirm.status, 200, adminConfirm.text);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${s3}'`), 'PAID');
+  passLog('bank transfer confirmed only by shop admin');
+
+  sql(
+    `UPDATE "ItgelSettlement" SET "confirmedAt"=NOW() - INTERVAL '1 day' WHERE id='${s3}'`,
+  );
+  const summary = data(await req('/api/leasing/finance/itgel/summary', { token: leasingToken }));
+  assert.ok(summary.priorUnpaidAmount === 0 || summary.priorUnpaidCount >= 0);
+  const yDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ulaanbaatar' }).format(
+    new Date(Date.now() - 24 * 60 * 60 * 1000),
+  );
+  const ySummary = data(
+    await req(`/api/leasing/finance/itgel/summary?day=${yDay}`, { token: leasingToken }),
+  );
+  assert.ok(ySummary.lines.some((line) => line.id === s3) || ySummary.amount >= 100_000);
+  passLog('UB day boundary keeps yesterday settlement on that day');
+
+  const xferGet = await req(`/api/leasing/orders/${lease3.orderId}/ready-transfer`, {
+    token: leasingToken,
+  });
+  assert.equal(xferGet.status, 200, xferGet.text);
+  const eligible = (data(xferGet).items ?? []).filter((i) => i.eligible);
+  assert.ok(eligible.length > 0, xferGet.text);
+  const xfer = await req(`/api/leasing/orders/${lease3.orderId}/ready-transfer`, {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      reason: 'e2e-ready',
+      lines: [{ orderItemId: eligible[0].id, qty: eligible[0].availableQty, resaleUnitPrice: eligible[0].unitPrice }],
+    },
+  });
+  assert.ok([200, 201].includes(xfer.status), xfer.text);
+  const destRoundId = data(xfer).destRoundIds?.[0];
+  assert.ok(destRoundId);
+  assert.equal(
+    sql(`SELECT "readyTransferId" IS NOT NULL FROM "ItgelSettlement" WHERE id='${s3}'`),
+    't',
+  );
+  const resale = await req('/api/orders', {
+    method: 'POST',
+    token: userB.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem B', items: [{ productId: destRoundId, qty: 1 }] },
+  });
+  assert.equal(resale.status, 201, resale.text);
+  const resaleId = sql(`SELECT id FROM "Order" WHERE code='${data(resale).code}'`);
+  assert.equal(Number(sql(`SELECT count(*) FROM "ItgelSettlement" WHERE "sourceOrderId"='${resaleId}'`)), 0);
+  assert.equal(Number(sql(`SELECT count(*) FROM "ItgelSettlement" WHERE id='${s3}'`)), 1);
+  passLog('ready-transfer keeps original Itgel bill; resale does not create another');
+
+  const leaseBEmail = `lease2${phoneA}@itgel.mn`;
+  const leaseBCreate = await req('/api/admin/staff', {
+    method: 'POST',
+    token: adminToken,
+    body: { email: leaseBEmail, name: 'Leasing Two', password: 'leasing123', role: 'LEASING' },
+  });
+  assert.ok([200, 201].includes(leaseBCreate.status), leaseBCreate.text);
+  const leaseBLogin = await req('/api/admin/auth/login', {
+    method: 'POST',
+    body: { email: leaseBEmail, password: 'leasing123' },
+  });
+  const leaseBToken = data(leaseBLogin).token;
+  const leaseBProduct = await req('/api/leasing/products', {
+    method: 'POST',
+    token: leaseBToken,
+    body: {
+      name: `B-only ${phoneA}`,
+      categoryId,
+      images: [],
+      sellPrice: 22_000,
+      stock: 3,
+      status: 'ACTIVE',
+    },
+  });
+  assert.equal(leaseBProduct.status, 201, leaseBProduct.text);
+  const leaseBRoundId = data(leaseBProduct).rounds[0].id;
+  const aProducts = data(await req('/api/leasing/products?pageSize=50', { token: leasingToken }));
+  assert.equal(aProducts.some((p) => (p.rounds ?? []).some((r) => r.id === leaseBRoundId) || p.id === data(leaseBProduct).id), false);
+  const bProducts = data(await req('/api/leasing/products?pageSize=50', { token: leaseBToken }));
+  assert.ok(bProducts.some((p) => p.id === data(leaseBProduct).id));
+  const bPayA = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leaseBToken,
+    body: { settlementIds: [s1], method: 'QPAY' },
+  });
+  assert.ok([403, 404, 409].includes(bPayA.status), bPayA.text);
+  const aCustomer = await req(`/api/orders/${lease1.code}`, { token: userB.token });
+  assert.ok([401, 403, 404].includes(aCustomer.status), aCustomer.text);
+  passLog('two leasing admins and customer orders stay isolated');
+
+  const leaseBId = data(leaseBCreate).id;
+  const switchOwner = await req('/api/admin/settings', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { leasingSettlementAdminId: leaseBId },
+  });
+  assert.equal(switchOwner.status, 200, switchOwner.text);
+  const leaseBContract = await createLeasingPaid(cargoProd, userA.token, 'Idem A');
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE "sourceOrderId"='${leaseBContract.orderId}'`),
+    leaseBId,
+  );
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`),
+    leasingAdminId,
+  );
+  const deactivateB = await req(`/api/admin/staff/${leaseBId}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { isActive: false },
+  });
+  assert.equal(deactivateB.status, 200, deactivateB.text);
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE "sourceOrderId"='${leaseBContract.orderId}'`),
+    leaseBId,
+  );
+  const restoreOwner = await req('/api/admin/settings', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { leasingSettlementAdminId: leasingAdminId },
+  });
+  assert.equal(restoreOwner.status, 200, restoreOwner.text);
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE "sourceOrderId"='${leaseBContract.orderId}'`),
+    leaseBId,
+  );
+  const clearOwner = await req('/api/admin/settings', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { leasingSettlementAdminId: null },
+  });
+  assert.equal(clearOwner.status, 200, clearOwner.text);
+  const noOwner = await createLeasingPaid(cargoProd, userA.token, 'Idem A', { expectSettlement: false });
+  assert.equal(
+    Number(
+      sql(
+        `SELECT count(*) FROM "MoneyException" WHERE "orderId"='${noOwner.orderId}' AND kind='SETTLEMENT_OWNER_MISSING'`,
+      ),
+    ),
+    1,
+  );
+  const putOwnerBack = await req('/api/admin/settings', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { leasingSettlementAdminId: leasingAdminId },
+  });
+  assert.equal(putOwnerBack.status, 200, putOwnerBack.text);
+  passLog('settlement owner snapshot survives deactivate/switch; unset does not assign first-active');
+
+  const reactivateB = await req(`/api/admin/staff/${leaseBId}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { isActive: true },
+  });
+  assert.equal(reactivateB.status, 200, reactivateB.text);
+  const [assignA, assignB] = await Promise.all([
+    req('/api/admin/leasing-settlements/missing-owners/assign', {
+      method: 'POST',
+      token: adminToken,
+      body: { ownerAdminId: leasingAdminId, orderIds: [noOwner.orderId] },
+    }),
+    req('/api/admin/leasing-settlements/missing-owners/assign', {
+      method: 'POST',
+      token: adminToken,
+      body: { ownerAdminId: leaseBId, orderIds: [noOwner.orderId] },
+    }),
+  ]);
+  assert.equal(assignA.status, 200, assignA.text);
+  assert.equal(assignB.status, 200, assignB.text);
+  assert.equal(
+    Number(sql(`SELECT count(*) FROM "ItgelSettlement" WHERE "sourceOrderId"='${noOwner.orderId}'`)),
+    1,
+  );
+  const assignedOwner = sql(
+    `SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE "sourceOrderId"='${noOwner.orderId}'`,
+  );
+  const assignedSnap = sql(
+    `SELECT "leasingOperatorAdminId" FROM "Order" WHERE id='${noOwner.orderId}'`,
+  );
+  assert.equal(assignedOwner, assignedSnap);
+  assert.ok([leasingAdminId, leaseBId].includes(assignedOwner), assignedOwner);
+  assert.equal(
+    Number(
+      sql(
+        `SELECT count(*) FROM "MoneyException" WHERE "orderId"='${noOwner.orderId}' AND kind='SETTLEMENT_OWNER_MISSING' AND status='OPEN'`,
+      ),
+    ),
+    0,
+  );
+  const assignedAmount = Number(
+    sql(`SELECT COALESCE(sum(amount),0) FROM "ItgelSettlement" WHERE "sourceOrderId"='${noOwner.orderId}'`),
+  );
+  const assignedItemAmount = Number(
+    sql(`SELECT COALESCE(sum("unitPrice" * qty),0) FROM "OrderItem" WHERE "orderId"='${noOwner.orderId}' AND "cancelledAt" IS NULL`),
+  );
+  assert.equal(assignedAmount, assignedItemAmount);
+  passLog('concurrent missing-owner assign keeps one owner and one debt');
+
+  const cronSecret = 'isolated-checkout-cron-secret';
+  const cronDenied = await req('/api/cron/unpaid-cancel');
+  assert.equal(cronDenied.status, 401, cronDenied.text);
+  const cronProd = await createShopReady(`CronHttp ${phoneA}`, 1, 21_000);
+  const cronOrder = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem A', items: [{ productId: cronProd.id, qty: 1 }] },
+  });
+  assert.equal(cronOrder.status, 201, cronOrder.text);
+  const cronOrderId = sql(`SELECT id FROM "Order" WHERE code='${data(cronOrder).code}'`);
+  sql(`UPDATE "Order" SET "createdAt"=NOW() - INTERVAL '13 hours' WHERE id='${cronOrderId}'`);
+  const beforeHold = roundHold(cronProd);
+  const cronFirst = await req('/api/cron/unpaid-cancel', { token: cronSecret });
+  assert.equal(cronFirst.status, 200, cronFirst.text);
+  assert.ok(data(cronFirst).cancelled >= 1, cronFirst.text);
+  assert.equal(sql(`SELECT status FROM "Order" WHERE id='${cronOrderId}'`), 'CANCELLED');
+  assert.equal(roundHold(cronProd).available, beforeHold.available + 1);
+  assert.equal(roundHold(cronProd).reserved, beforeHold.reserved - 1);
+  assert.equal(roundHold(cronProd).stock, beforeHold.stock);
+  const cronSecond = await req('/api/cron/unpaid-cancel', { token: cronSecret });
+  assert.equal(cronSecond.status, 200, cronSecond.text);
+  assert.equal(sql(`SELECT status FROM "Order" WHERE id='${cronOrderId}'`), 'CANCELLED');
+  assert.equal(roundHold(cronProd).available, beforeHold.available + 1);
+  assert.equal(roundHold(cronProd).reserved, beforeHold.reserved - 1);
+  assert.equal(roundHold(cronProd).stock, beforeHold.stock);
+  passLog('HTTP unpaid-cancel auth, catch-up, and no double stock restore');
+
+  const raceProd = await createShopReady(`RaceLast ${phoneA}`, 1, 44_000);
+  const raceA = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: { name: 'Idem A', items: [{ productId: raceProd.id, qty: 1 }] },
+  });
+  assert.equal(raceA.status, 201, raceA.text);
+  const raceACode = data(raceA).code;
+  const raceAId = sql(`SELECT id FROM "Order" WHERE code='${raceACode}'`);
+  const raceInv = data(
+    await req(`/api/orders/${raceACode}/qpay/invoice`, { method: 'POST', token: userA.token, body: {} }),
+  ).invoiceId;
+  const raceDue = Number(sql(`SELECT "dueAmount" FROM "Order" WHERE id='${raceAId}'`));
+  sql(`UPDATE "Order" SET "createdAt"=NOW() - INTERVAL '13 hours' WHERE id='${raceAId}'`);
+  const raceCheckoutKey = randomUUID();
+  async function raceCheckoutOnce() {
+    let last = { status: 0, text: '' };
+    for (let i = 0; i < 8; i += 1) {
+      last = await req('/api/orders', {
+        method: 'POST',
+        token: userB.token,
+        idempotencyKey: raceCheckoutKey,
+        body: { name: 'Idem B', items: [{ productId: raceProd.id, qty: 1 }] },
+      });
+      if (last.status !== 503) return last;
+      await new Promise((r) => setTimeout(r, 120 * (i + 1)));
+    }
+    return last;
+  }
+  const [raceCheckout, racePay, raceRelease] = await Promise.all([
+    raceCheckoutOnce(),
+    (async () => {
+      mock.pay(raceInv, raceDue > 0 ? raceDue : 44_000);
+      return qpayCallbackRetry(raceInv);
+    })(),
+    req('/api/cron/unpaid-cancel', { token: cronSecret }),
+  ]);
+  assert.ok([200, 201, 409].includes(raceCheckout.status), raceCheckout.text);
+  assert.equal(racePay.status, 200, racePay.text);
+  assert.equal(raceRelease.status, 200, raceRelease.text);
+  const raceHold = roundHold(raceProd);
+  assert.ok(raceHold.stock >= 0 && raceHold.reserved >= 0 && raceHold.available >= 0, JSON.stringify(raceHold));
+  assert.equal(raceHold.stock, raceHold.available + raceHold.reserved);
+  const raceConsumed = Number(
+    sql(`SELECT count(*) FROM "OrderItem" WHERE "roundId"='${raceProd.id}' AND "stockHold"='CONSUMED'`),
+  );
+  assert.ok(raceConsumed <= 1, `oversell consumed=${raceConsumed}`);
+  const racePaid = Number(sql(`SELECT count(*) FROM "Payment" WHERE "orderId"='${raceAId}' AND kind='PAYMENT'`));
+  if (racePaid >= 1 && raceConsumed === 0) {
+    assert.ok(
+      Number(
+        sql(
+          `SELECT count(*) FROM "MoneyException" WHERE "orderId"='${raceAId}' AND kind IN ('LATE_AFTER_CANCEL','STOCK_SHORTFALL')`,
+        ),
+      ) >= 1,
+    );
+    assert.equal(sql(`SELECT "stockHold" FROM "OrderItem" WHERE "orderId"='${raceAId}'`), 'RELEASED');
+    assert.equal(sql(`SELECT "stockShortfall" FROM "OrderItem" WHERE "orderId"='${raceAId}'`), 't');
+    assert.equal(sql(`SELECT "handedOverAt" FROM "OrderItem" WHERE "orderId"='${raceAId}'`), '');
+  }
+  passLog('concurrent last-unit checkout/callback/release does not oversell');
+
+  const salesA = await req('/api/leasing/finance/ready/sales', { token: leasingToken });
+  assert.equal(salesA.status, 200, salesA.text);
+  const stockA = await req('/api/leasing/finance/ready/stock', { token: leasingToken });
+  assert.equal(stockA.status, 200, stockA.text);
+  assert.equal(typeof data(stockA).available, 'number');
+  const holds = await req('/api/admin/leasing-settlements/unpaid-ready-holds', { token: adminToken });
+  assert.equal(holds.status, 200, holds.text);
+  assert.equal(typeof data(holds).unpaidCancelHours, 'number');
+  passLog('leasing ready finance + read-only unpaid holds');
 
   const finalBoot = logs.join('');
   if (/merchant\.qpay\.mn/.test(finalBoot)) fail('backend жинхэнэ QPay руу хандсан');

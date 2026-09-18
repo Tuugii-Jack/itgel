@@ -5,7 +5,6 @@ import {
   computeTotals,
   PAYMENT_STATE_LABEL,
   paymentState,
-  shopDueAmount,
 } from '../../services/money.js';
 import { buildTimeline } from './timeline.js';
 import {
@@ -37,7 +36,7 @@ export function adminOrderDetail(order: AdminOrderDetailRecord, payGaps?: number
     statusLabel: orderStatusLabel(order.status),
     customer: {
       id: order.customer.id,
-      name: order.customer.name,
+      name: order.customer.name?.trim() || null,
       phone: order.customer.phone,
       email: order.customer.email,
     },
@@ -50,7 +49,6 @@ export function adminOrderDetail(order: AdminOrderDetailRecord, payGaps?: number
     paidAmount: order.paidAmount,
     refundedAmount: order.refundedAmount,
     dueAmount: order.dueAmount,
-    shopDueAmount: shopDueAmount(order),
     total: totals.total,
     netPaid: totals.netPaid,
     paymentState: state,

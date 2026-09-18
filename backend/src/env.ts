@@ -74,7 +74,7 @@ const schema = z.object({
     .string()
     .default('true')
     .transform((v) => v === 'true'),
-  /** Vercel cron /api/cron/sms-delivery — Authorization: Bearer. Production-д заавал. */
+  /** Vercel cron: /api/cron/sms-delivery болон /api/cron/unpaid-cancel — Authorization: Bearer. Production-д заавал. */
   CRON_SECRET: z.preprocess(emptyToUndef, z.string().min(8).optional()),
 
   ADMIN_EMAIL: z.string().email().default('admin@itgel.mn'),

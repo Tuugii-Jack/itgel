@@ -20,6 +20,7 @@ export function QpayPay({
   hideAmounts,
   onPaid,
   onPayAttempt,
+  purpose = "ORDER",
 }: {
   order: PublicOrder;
   store: Store;
@@ -27,6 +28,7 @@ export function QpayPay({
   hideAmounts?: boolean;
   onPaid?: () => void;
   onPayAttempt?: () => void;
+  purpose?: "ORDER" | "CARGO";
 }) {
   const toast = useToast();
   const onPayAttemptRef = useRef(onPayAttempt);
@@ -38,10 +40,11 @@ export function QpayPay({
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cargoPay = purpose === "CARGO";
   const feeFirst = Boolean(
-    order.isLeasing && (order.nextPayKind === "FEE" || !order.leasingFeePaid),
+    !cargoPay && order.isLeasing && (order.nextPayKind === "FEE" || !order.leasingFeePaid),
   );
-  const splitPay = isLeasingSplitPay(order);
+  const splitPay = !cargoPay && isLeasingSplitPay(order);
   const maxSplit = order.leasingPrincipalDue ?? order.dueAmount;
   const suggestedSplit = order.payPlan?.nextAmount ?? order.nextPayAmount ?? 0;
   const feePercent = formatLeasingPercent(
@@ -51,16 +54,21 @@ export function QpayPay({
     suggestedSplit > 0 ? String(suggestedSplit) : "",
   );
   const chosenSplit = Number(splitAmount.replace(/\D/g, "")) || 0;
-  const payAmount = feeFirst
-    ? leasingNowPayAmount(order)
-    : splitPay
-      ? Math.min(Math.max(0, chosenSplit), maxSplit)
-      : (order.nextPayAmount ?? order.dueAmount);
-  const payLabel = feeFirst
-    ? `Одоо төлөх (${feePercent}% шимтгэл)`
-    : splitPay
-      ? "Энэ удаагийн төлөлт"
-      : "Төлөх дүн";
+  const cargoDue = order.unpaidCargoFee ?? 0;
+  const payAmount = cargoPay
+    ? cargoDue
+    : feeFirst
+      ? leasingNowPayAmount(order)
+      : splitPay
+        ? Math.min(Math.max(0, chosenSplit), maxSplit)
+        : (order.nextPayAmount ?? order.dueAmount);
+  const payLabel = cargoPay
+    ? "Карго — Итгэл"
+    : feeFirst
+      ? `Одоо төлөх (${feePercent}% шимтгэл)`
+      : splitPay
+        ? "Энэ удаагийн төлөлт"
+        : "Төлөх дүн";
   const presets = splitPresets(maxSplit, suggestedSplit);
 
   const loadInvoice = useCallback(async (amount?: number, source: "auto" | "user" = "auto") => {
@@ -70,7 +78,11 @@ export function QpayPay({
     try {
       const inv = await api.createQpayInvoice(
         order.code,
-        amount != null && amount > 0 ? { amount } : undefined,
+        cargoPay
+          ? { purpose: "CARGO" }
+          : amount != null && amount > 0
+            ? { amount }
+            : undefined,
       );
       setInvoice(inv);
     } catch (e) {
@@ -83,15 +95,17 @@ export function QpayPay({
     } finally {
       setBusy(false);
     }
-  }, [order.code, toast]);
+  }, [cargoPay, order.code, toast]);
 
   const invoiceKey = [
     String(ready),
     order.code,
+    purpose,
     String(order.nextPayKind ?? ""),
     String(order.leasingFeePaid),
     String(splitPay),
     String(suggestedSplit),
+    String(cargoDue),
   ].join("|");
   useOnKeyChange(invoiceKey, () => {
     lastAutoInvoiceKey.current = null;
@@ -101,15 +115,18 @@ export function QpayPay({
     if (splitPay) setSplitAmount(suggestedSplit > 0 ? String(suggestedSplit) : "");
   });
 
-  const requestedKind = splitPay ? "split" : feeFirst ? "fee" : "full";
-  const requestedAmount = splitPay
-    ? (suggestedSplit > 0 ? suggestedSplit : 0)
-    : feeFirst
-      ? leasingNowPayAmount(order)
-      : 0;
+  const requestedKind = cargoPay ? "cargo" : splitPay ? "split" : feeFirst ? "fee" : "full";
+  const requestedAmount = cargoPay
+    ? cargoDue
+    : splitPay
+      ? (suggestedSplit > 0 ? suggestedSplit : 0)
+      : feeFirst
+        ? leasingNowPayAmount(order)
+        : 0;
 
   useEffect(() => {
     if (!ready) return;
+    if (cargoPay && cargoDue <= 0) return;
     const key = autoInvoiceDedupeKey({
       code: order.code,
       kind: requestedKind,
@@ -122,9 +139,13 @@ export function QpayPay({
         if (requestedAmount > 0) void loadInvoice(requestedAmount);
         return;
       }
+      if (requestedKind === "cargo") {
+        if (requestedAmount > 0) void loadInvoice();
+        return;
+      }
       void loadInvoice(requestedKind === "fee" ? requestedAmount : undefined);
     });
-  }, [ready, requestedKind, requestedAmount, order.code, loadInvoice]);
+  }, [ready, requestedKind, requestedAmount, cargoPay, cargoDue, order.code, loadInvoice]);
 
   const verifyPaid = useCallback(async () => {
     setChecking(true);
@@ -133,7 +154,11 @@ export function QpayPay({
       // Лизингт эхний 10% орсон ч нийт үлдэгдэл үлдэнэ — paidAmount өссөн бол амжилт.
       if (st.paid || st.paidAmount > order.paidAmount) {
         toast.success(
-          feeFirst ? "Шимтгэл төлөгдлөө. Захиалга үүслээ." : "QPay төлбөр амжилттай.",
+          cargoPay
+            ? "Карго төлбөр Итгэлд бүртгэгдлээ."
+            : feeFirst
+              ? "Шимтгэл төлөгдлөө. Захиалга үүслээ."
+              : "QPay төлбөр амжилттай.",
         );
         onPaid?.();
       }
@@ -143,7 +168,7 @@ export function QpayPay({
     } finally {
       setChecking(false);
     }
-  }, [feeFirst, onPaid, order.code, order.paidAmount, toast]);
+  }, [cargoPay, feeFirst, onPaid, order.code, order.paidAmount, toast]);
 
   const invoiceId = invoice?.invoiceId;
   useEffect(() => {
@@ -159,7 +184,11 @@ export function QpayPay({
     return (
       <div className="rounded-[8px] border border-dashed border-line bg-surface p-4">
         <div className="text-[15px] font-medium">
-          {order.isLeasing ? "QPay Лизинг бэлэн биш" : "QPay бэлэн биш"}
+          {cargoPay
+            ? "Карго (Итгэл) QPay бэлэн биш"
+            : order.isLeasing
+              ? "QPay Лизинг бэлэн биш"
+              : "QPay бэлэн биш"}
         </div>
         <p className="mt-1 mb-0 text-[13px] leading-[1.6] text-ink-2">
           QPay түр ажиллахгүй байна.{" "}
@@ -169,9 +198,21 @@ export function QpayPay({
           дугаарт холбогдоно уу.
         </p>
         <div className="mt-3 text-[13px] text-muted">
-          {feeFirst ? `Одоо төлөх (${feePercent}%): ` : splitPay ? "Үндсэн үлдэгдэл: " : "Үлдэгдэл: "}
+          {cargoPay
+            ? "Карго — Итгэл: "
+            : feeFirst
+              ? `Одоо төлөх (${feePercent}%): `
+              : splitPay
+                ? "Үндсэн үлдэгдэл: "
+                : "Үлдэгдэл: "}
           <span className="tnum font-medium text-ink">
-            {money(feeFirst || splitPay ? leasingNowPayAmount(order) : order.dueAmount)}
+            {money(
+              cargoPay
+                ? cargoDue
+                : feeFirst || splitPay
+                  ? leasingNowPayAmount(order)
+                  : order.dueAmount,
+            )}
           </span>
         </div>
       </div>
@@ -182,6 +223,10 @@ export function QpayPay({
 
   return (
     <div className="flex flex-col gap-3">
+      {cargoPay && !hideAmounts && (
+        <Row label="Карго — Итгэл" value={money(qrAmount || payAmount)} big />
+      )}
+
       {feeFirst && !hideAmounts && (
         <>
           <Row label={`Одоо төлөх (${feePercent}% шимтгэл)`} value={money(qrAmount || payAmount)} big />
@@ -238,7 +283,7 @@ export function QpayPay({
         </>
       )}
 
-      {!order.isLeasing && !hideAmounts && (
+      {!order.isLeasing && !cargoPay && !hideAmounts && (
         <Row label={payLabel} value={money(qrAmount || payAmount)} big />
       )}
 
@@ -313,7 +358,7 @@ export function QpayPay({
           <p className="m-0 text-[12px] text-muted">
             Банкны аппаас буцаж ирээд төлбөр автоматаар бүртгэгдэнэ. Хэрэв шинэчлэгдэхгүй бол
             доорх товчийг дарна уу.
-            {store.unpaidCancelHours > 0 && (
+            {store.unpaidCancelHours > 0 && !cargoPay && (
               <>
                 {" "}
                 <span className="tnum">{store.unpaidCancelHours}</span> цагийн дотор

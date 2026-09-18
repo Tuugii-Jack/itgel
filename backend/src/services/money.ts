@@ -60,15 +60,28 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
       select: { qty: true, unitPrice: true },
     }),
     tx.payment.groupBy({
-      by: ['kind'],
+      by: ['kind', 'payeeKind'],
       where: { orderId },
       _sum: { amount: true },
     }),
   ]);
 
   const subtotal = items.reduce((sum, i) => sum + i.unitPrice * i.qty, 0);
-  const paidAmount = payments.find((p) => p.kind === 'PAYMENT')?._sum.amount ?? 0;
-  const refundedAmount = payments.find((p) => p.kind === 'REFUND')?._sum.amount ?? 0;
+  const paidAmount = payments
+    .filter((p) => p.kind === 'PAYMENT')
+    .reduce((sum, p) => sum + (p._sum.amount ?? 0), 0);
+  const refundedAmount = payments
+    .filter((p) => p.kind === 'REFUND')
+    .reduce((sum, p) => sum + (p._sum.amount ?? 0), 0);
+  const shopPaidAmount = Math.max(
+    0,
+    payments
+      .filter((p) => p.kind === 'PAYMENT' && p.payeeKind === 'SHOP')
+      .reduce((sum, p) => sum + (p._sum.amount ?? 0), 0) -
+      payments
+        .filter((p) => p.kind === 'REFUND' && p.payeeKind === 'SHOP')
+        .reduce((sum, p) => sum + (p._sum.amount ?? 0), 0),
+  );
   let leasingFee = 0;
   if (order.isLeasing) {
     if (order.subtotal > 0 && order.leasingFee > 0) {
@@ -100,6 +113,7 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
       subtotal: totals.subtotal,
       leasingFee: totals.leasingFee,
       paidAmount: totals.paidAmount,
+      shopPaidAmount,
       refundedAmount: totals.refundedAmount,
       dueAmount: totals.dueAmount,
     },
@@ -193,15 +207,11 @@ export function unpaidCargoFee(input: {
   leasingFee?: number;
   paidAmount: number;
   refundedAmount: number;
+  shopPaidAmount?: number | null;
 }): number {
   const cargoFee = Math.max(0, input.cargoFee ?? 0);
   if (cargoFee <= 0) return 0;
-  const netPaid = input.paidAmount - input.refundedAmount;
-  const towardCargo = Math.max(
-    0,
-    netPaid - input.subtotal - (input.leasingFee ?? 0) - (input.storageFee ?? 0),
-  );
-  return Math.max(0, cargoFee - towardCargo);
+  return Math.min(cargoFee, shopDueAmount(input));
 }
 
 type ShopDueInput = {
@@ -214,6 +224,7 @@ type ShopDueInput = {
   paidAmount: number;
   refundedAmount: number;
   writtenOffAmount?: number | null;
+  shopPaidAmount?: number | null;
 };
 
 /**
@@ -231,8 +242,9 @@ export function shopDueAmount(input: ShopDueInput): number {
   if (!leasing) {
     return Math.max(0, input.subtotal + storageFee + cargoFee - netPaid - (input.writtenOffAmount ?? 0));
   }
-  const towardShop = Math.max(0, netPaid - leasingFee - input.subtotal);
-  return Math.max(0, storageFee + cargoFee - towardShop);
+  const shopPaid = Math.max(0, input.shopPaidAmount ?? 0);
+  const leftoverToShop = Math.max(0, netPaid - shopPaid - leasingFee - input.subtotal);
+  return Math.max(0, storageFee + cargoFee - shopPaid - leftoverToShop);
 }
 
 /** Лизингийн дансны үлдэгдэл (шимтгэл + үндсэн). Дэлгүүрийн кассанд оруулахгүй. */

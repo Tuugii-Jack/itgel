@@ -16,6 +16,7 @@ import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui
 import { leasingApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
 import type { AdminCategory, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
+import { money } from "@/lib/format";
 
 const OPEN_STATUSES: ProductStatus[] = ["ACTIVE", "HIDDEN", "DRAFT"];
 
@@ -28,16 +29,19 @@ export default function LeasingReadyPage() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<AdminProduct | null | "new">(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [stock, setStock] = useState<{ onHand: number; reserved: number; available: number } | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [list, cats] = await Promise.all([
+      const [list, cats, stockSummary] = await Promise.all([
         leasingApi.products({ pageSize: 100, q: search.trim() || undefined }),
         leasingApi.categories(),
+        leasingApi.readyStock().catch(() => null),
       ]);
       setProducts(list.data);
       setCategories(cats);
+      if (stockSummary) setStock(stockSummary);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
@@ -102,10 +106,13 @@ export default function LeasingReadyPage() {
         hint="Өөрийн эзэмшлийн бэлэн бараа. Шинэ борлуулалтын төлбөр лизингийн дансанд орно."
         actions={<Button onClick={() => setEditing("new")}>Бэлэн бараа нэмэх</Button>}
       />
-      <div className="mb-5 grid grid-cols-3 gap-3">
+      <div className="mb-5 grid grid-cols-3 gap-3 lg:grid-cols-6">
         <Metric label="Ажиллаж буй" value={counts.open} tone="ok" />
         <Metric label="Нуусан" value={counts.hidden} />
         <Metric label="Нийт" value={counts.total} />
+        <Metric label="Байгаа" value={stock?.onHand ?? "—"} />
+        <Metric label="Түр нөөц" value={stock?.reserved ?? "—"} />
+        <Metric label="Боломжтой" value={stock?.available ?? "—"} tone="ok" />
       </div>
       <div className="mb-4">
         <Input value={search} onChange={setSearch} placeholder="Нэрээр хайх" className="w-52" />
@@ -130,7 +137,9 @@ export default function LeasingReadyPage() {
               <tr>
                 <Th>Бараа</Th>
                 <Th>Үнэ</Th>
-                <Th>Үлдэгдэл</Th>
+                <Th>Байгаа</Th>
+                <Th>Нөөц</Th>
+                <Th>Боломжтой</Th>
                 <Th>Төлөв</Th>
                 <Th />
               </tr>
@@ -155,8 +164,10 @@ export default function LeasingReadyPage() {
                       </div>
                     </div>
                   </Td>
-                  <Td className="tnum">{round.sellPrice.toLocaleString("mn-MN")}₮</Td>
+                  <Td className="tnum">{money(round.sellPrice)}</Td>
                   <Td className="tnum">{round.stock}</Td>
+                  <Td className="tnum">{round.reserved ?? 0}</Td>
+                  <Td className="tnum">{round.available ?? Math.max(0, round.stock - (round.reserved ?? 0))}</Td>
                   <Td>
                     <ProductStatusBadge status={round.status} />
                   </Td>

@@ -2,11 +2,13 @@ import type { Payment, PaymentKind, PaymentMethod, Prisma } from '@prisma/client
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { conflict, notFound } from '../lib/errors.js';
-import { assertRefundable, computeTotals, fullyPaid, recalcOrderTotals, type OrderTotals } from './money.js';
+import { assertRefundable, computeTotals, recalcOrderTotals, type OrderTotals } from './money.js';
 import { changeOrderStatus } from './orders.js';
-import { restoreReadyStock, selectionsFromItem } from './readyStock.js';
+import { commitOrderReadyStock, releaseItemReadyStock } from './stockHold.js';
+import { createItgelSettlementsForOrder } from './itgelSettlement.js';
 import { syncOrderCargoFee } from './cargoFee.js';
 import { lockOrder } from '../lib/orderLock.js';
+import { leasingView } from '../lib/leasing.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -19,6 +21,7 @@ export interface RecordPaymentInput {
   qpayInvoiceId?: string;
   note?: string | null;
   actor: string;
+  payeeKind?: 'SHOP' | 'LEASING' | null;
 }
 
 /**
@@ -49,10 +52,12 @@ export async function recordPaymentWithTotals(
   }
 
   const order = await tx.order.findFirst({
-    where: { id: input.orderId, deletedAt: null },
+    where: { id: input.orderId },
     select: {
       id: true,
       code: true,
+      status: true,
+      deletedAt: true,
       subtotal: true,
       deliveryFee: true,
       storageFee: true,
@@ -77,11 +82,20 @@ export async function recordPaymentWithTotals(
       reference: input.reference ?? null,
       qpayInvoiceId: input.qpayInvoiceId,
       note: input.note ?? null,
+      payeeKind: input.payeeKind ?? null,
       actor: input.actor,
     },
   });
 
   const totals = await recalcOrderTotals(tx, order.id);
+
+  if (input.kind === 'PAYMENT') {
+    await commitOrderReadyStock(
+      tx,
+      { id: order.id, status: order.status, deletedAt: order.deletedAt },
+      input.actor,
+    );
+  }
 
   await audit(
     {
@@ -109,30 +123,35 @@ export async function recordPaymentWithTotals(
  */
 export async function confirmLeasingIfFeePaid(orderId: string, actor: string): Promise<void> {
   const order = await prisma.order.findFirst({
-    where: { id: orderId, deletedAt: null, status: 'NEW', isLeasing: true, debtClosedAt: null },
+    where: { id: orderId, deletedAt: null, isLeasing: true, debtClosedAt: null },
     select: {
       id: true,
+      status: true,
       subtotal: true,
       leasingFee: true,
       paidAmount: true,
       refundedAmount: true,
       storageFee: true,
       cargoFee: true,
+      shopPaidAmount: true,
+      isLeasing: true,
     },
   });
   if (!order) return;
+  if (order.status === 'CANCELLED') return;
+  if (!leasingView(order).feePaid) return;
 
-  const totals = computeTotals(order);
-  if (!fullyPaid(totals)) return;
-
-  try {
-    await changeOrderStatus(order.id, 'CONFIRMED', {
-      actor,
-      reason: 'Лизингийн шимтгэл төлөгдсөн',
-    });
-  } catch (error) {
-    console.warn('[leasing] шимтгэлээр баталгаажуулж чадсангүй:', error);
+  if (order.status === 'NEW') {
+    try {
+      await changeOrderStatus(order.id, 'CONFIRMED', {
+        actor,
+        reason: 'Лизингийн шимтгэл төлөгдсөн',
+      });
+    } catch (error) {
+      console.warn('[leasing] шимтгэлээр баталгаажуулж чадсангүй:', error);
+    }
   }
+  await createItgelSettlementsForOrder(order.id);
 }
 
 /**
@@ -160,7 +179,7 @@ export async function cancelOrderItem(input: {
 
     const item = await tx.orderItem.findFirst({
       where: { id: input.itemId, orderId: order.id },
-      include: { round: { include: { skuStocks: true } } },
+      include: { round: { include: { skuStocks: true, product: { select: { name: true } } } } },
     });
     if (!item) throw notFound('Захиалгын мөр олдсонгүй.');
     if (item.cancelledAt) throw conflict('Энэ мөр аль хэдийн цуцлагдсан байна.');
@@ -180,7 +199,15 @@ export async function cancelOrderItem(input: {
 
     // Бэлэн бараа байсан бол үлдэгдлийг тухайн тойрогт нь буцаана.
     if (item.round && item.round.closeAt === null && order.status !== 'CANCELLED') {
-      await restoreReadyStock(tx, item.round, item.qty, selectionsFromItem(item));
+      await releaseItemReadyStock(tx, {
+        id: item.id,
+        qty: item.qty,
+        stockHold: item.stockHold,
+        round: item.round,
+        selections: item.selections,
+        size: item.size,
+        color: item.color,
+      });
     }
 
     let refunded = 0;

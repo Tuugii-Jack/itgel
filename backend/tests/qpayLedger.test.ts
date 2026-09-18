@@ -42,7 +42,7 @@ beforeEach(() => {
         return { count: found.length };
       }),
       aggregate: vi.fn(async ({ where }) => ({ _sum: { amount: payments.filter(p => matches(p, where)).reduce((s,p) => s + p.amount, 0) } })),
-      groupBy: vi.fn(async () => ['PAYMENT', 'REFUND'].map(kind => ({ kind,
+      groupBy: vi.fn(async () => ['PAYMENT', 'REFUND'].map(kind => ({ kind, payeeKind: 'SHOP',
         _sum: { amount: payments.filter(p => p.kind === kind).reduce((s,p) => s + p.amount, 0) } }))),
     },
     qpayInvoice: {

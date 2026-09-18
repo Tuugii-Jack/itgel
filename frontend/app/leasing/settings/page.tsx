@@ -55,6 +55,9 @@ export default function LeasingSettingsPage() {
   const [paymentNote, setPaymentNote] = useState("");
   const [gapInputs, setGapInputs] = useState<string[]>(["5", "8", "8"]);
   const [sample, setSample] = useState("350000");
+  const [publicName, setPublicName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [chatUrl, setChatUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +79,9 @@ export default function LeasingSettingsPage() {
       setBankAccountName(data.bankAccountName ?? "");
       setPaymentNote(data.paymentNote ?? "");
       setGapInputs((data.payGaps?.length ? data.payGaps : DEFAULT_LEASING_PAY_GAPS).map(String));
+      setPublicName(data.publicName ?? "");
+      setContactPhone(data.contactPhone ?? "");
+      setChatUrl(data.chatUrl ?? "");
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
       setError(message);
@@ -137,6 +143,9 @@ export default function LeasingSettingsPage() {
         bankAccountNumber,
         bankAccountName,
         paymentNote,
+        publicName,
+        contactPhone,
+        chatUrl,
       });
       setSettings(updated);
       setRows(tiersToRows(updated.feeTiers));
@@ -151,6 +160,9 @@ export default function LeasingSettingsPage() {
       setBankAccountName(updated.bankAccountName ?? "");
       setPaymentNote(updated.paymentNote ?? "");
       setGapInputs(updated.payGaps.map(String));
+      setPublicName(updated.publicName ?? "");
+      setContactPhone(updated.contactPhone ?? "");
+      setChatUrl(updated.chatUrl ?? "");
       toast.success("Лизингийн тохиргоо хадгалагдлаа.");
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
@@ -173,10 +185,52 @@ export default function LeasingSettingsPage() {
     <div className="max-w-[720px]">
       <PageHead
         title="Лизингийн тохиргоо"
-        hint="Шимтгэл, үндсэн төлбөрийн хоногийн зай, SMS загвар, хэрэглэгчид харагдах нөхцөл"
+        hint="Шимтгэл, үндсэн төлбөрийн хоногийн зай, холбоо барих, SMS загвар"
       />
 
       <div className="flex flex-col gap-4">
+        <Card className="flex flex-col gap-3 p-4">
+          <div className="text-[15px] font-medium">Хэрэглэгчид харагдах холбоо барих</div>
+          <p className="m-0 text-[13px] text-ink-2">
+            Лизингээр авсан захиалга дээр харагдана. Дэлгүүрийн ерөнхий утас өөрчлөгдөхгүй.
+          </p>
+          <Field label="Харагдах нэр">
+            <Input value={publicName} onChange={setPublicName} placeholder="Жишээ: Итгэл лизинг" />
+          </Field>
+          <Field label="Утас">
+            <Input
+              value={contactPhone}
+              onChange={setContactPhone}
+              inputMode="tel"
+              placeholder="99112233"
+            />
+          </Field>
+          <Field label="Чатын холбоос">
+            <Input
+              value={chatUrl}
+              onChange={setChatUrl}
+              placeholder="https://m.me/…"
+            />
+          </Field>
+        </Card>
+
+        <Card className="flex flex-col gap-3 p-4">
+          <div className="text-[15px] font-medium">Итгэлд төлөх хариуцагч</div>
+          {settings.settlementAdmin ? (
+            <p className="m-0 text-[14px]">
+              {settings.settlementAdmin.name}
+              {" · "}
+              {settings.settlementAdmin.email}
+              {settings.settlementAdmin.isActive ? "" : " · идэвхгүй"}
+            </p>
+          ) : (
+            <p className="m-0 text-[13px] text-ink-2">
+              Үндсэн админ хариуцагч тохируулаагүй. Шимтгэл төлөгдсөн захиалга дээр Итгэлд
+              төлөх өр автоматаар үүсэхгүй.
+            </p>
+          )}
+        </Card>
+
         <Card className="flex flex-col gap-3 p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>

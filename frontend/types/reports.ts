@@ -53,6 +53,8 @@ export interface Settings {
   unpaidCancelHours: number;
   storageFreeDays: number;
   storageFeePerDay: number;
+  /** Итгэлд төлөх өрийн хариуцсан лизингийн админ. Хоосон бол өр үүсгэхгүй. */
+  leasingSettlementAdminId: string | null;
   updatedAt: string;
 }
 
@@ -70,6 +72,20 @@ export interface LeasingSettings {
   bankAccountNumber?: string;
   bankAccountName?: string;
   paymentNote?: string;
+  publicName?: string;
+  contactPhone?: string;
+  chatUrl?: string;
+  contact?: {
+    name: string | null;
+    phone: string | null;
+    chatUrl: string | null;
+  };
+  settlementAdmin?: {
+    id: string;
+    name: string;
+    email: string;
+    isActive: boolean;
+  } | null;
   updatedAt: string;
 }
 

@@ -3,6 +3,7 @@ import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { lockOrder } from '../../lib/orderLock.js';
 import { prisma } from '../../prisma.js';
 import { confirmLeasingIfFeePaid, recordPayment, recordPaymentWithTotals } from '../../services/payments.js';
+import { applySettlementQpayPayment } from '../../services/itgelSettlement.js';
 import {
   cancelQpayInvoice,
   cancelQpayPayment,
@@ -15,17 +16,28 @@ import {
 
 /** Keep invoice ownership after replacement, cancellation, or a payment-method switch. */
 export async function rememberQpayInvoice(
-  orderId: string,
+  orderId: string | null,
   invoiceId: string,
   account: QpayAccountKind,
   client: Pick<typeof prisma, 'qpayInvoice'> = prisma,
+  extras?: { purpose?: string; amount?: number; settlementPaymentId?: string },
 ): Promise<void> {
   const invoice = await client.qpayInvoice.upsert({
     where: { id: invoiceId },
-    create: { id: invoiceId, orderId, account },
+    create: {
+      id: invoiceId,
+      orderId: orderId ?? undefined,
+      account,
+      purpose: extras?.purpose ?? 'ORDER',
+      amount: extras?.amount ?? 0,
+      settlementPaymentId: extras?.settlementPaymentId ?? undefined,
+    },
     update: {},
   });
-  if (invoice.orderId !== orderId || invoice.account !== account) {
+  if (orderId && invoice.orderId && invoice.orderId !== orderId) {
+    throw conflict('QPay нэхэмжлэл өөр захиалга эсвэл данстай холбогдсон байна.');
+  }
+  if (invoice.account !== account) {
     throw conflict('QPay нэхэмжлэл өөр захиалга эсвэл данстай холбогдсон байна.');
   }
 }
@@ -39,16 +51,32 @@ export async function applyQpayPayment(
   actor = 'system:qpay',
 ): Promise<boolean> {
   if (!Number.isSafeInteger(amount) || amount <= 0) return false;
+  const invoiceMeta = await prisma.qpayInvoice.findUnique({ where: { id: invoiceId } });
+  if (invoiceMeta?.purpose === 'ITGEL_SETTLEMENT') {
+    return applySettlementQpayPayment(invoiceId, amount, actor);
+  }
   const recorded = await prisma.$transaction(async (tx) => {
     await lockOrder(tx, orderId);
     const order = await tx.order.findFirst({
-      where: { id: orderId, deletedAt: null },
-      select: { id: true, isLeasing: true, payeeKind: true },
+      where: { id: orderId },
+      select: { id: true, isLeasing: true, payeeKind: true, status: true, deletedAt: true },
     });
     if (!order) return false;
     const invoice = await tx.qpayInvoice.findUnique({ where: { id: invoiceId } });
-    if (invoice && invoice.orderId !== orderId) throw conflict('QPay нэхэмжлэлийн захиалга зөрсөн.');
-    if (!invoice) await rememberQpayInvoice(orderId, invoiceId, qpayAccountForOrder(order), tx);
+    if (invoice && invoice.orderId && invoice.orderId !== orderId) {
+      throw conflict('QPay нэхэмжлэлийн захиалга зөрсөн.');
+    }
+    const account = (invoice?.account as QpayAccountKind | undefined) ?? qpayAccountForOrder(order);
+    const purpose = invoice?.purpose ?? 'ORDER';
+    if (purpose === 'CARGO' && account !== 'shop') {
+      throw conflict('Карго нэхэмжлэл Итгэлийн QPay данстай байх ёстой.');
+    }
+    if (purpose === 'ORDER' && order.isLeasing && account !== 'leasing' && order.payeeKind === 'LEASING') {
+      throw conflict('Лизингийн нэхэмжлэл лизингийн QPay данстай байх ёстой.');
+    }
+    if (!invoice) await rememberQpayInvoice(orderId, invoiceId, account, tx, { purpose });
+
+    const payeeKind = account === 'shop' || purpose === 'CARGO' ? 'SHOP' : 'LEASING';
 
     // Associate legacy records before calculating the already recorded cumulative amount.
     const reference = paymentRef ?? `qpay:${invoiceId}`;
@@ -57,7 +85,7 @@ export async function applyQpayPayment(
         orderId, kind: 'PAYMENT', method: 'QPAY', qpayInvoiceId: null,
         reference: { in: [...new Set([reference, `qpay:${invoiceId}`])] },
       },
-      data: { qpayInvoiceId: invoiceId },
+      data: { qpayInvoiceId: invoiceId, payeeKind },
     });
     const previous = await tx.payment.aggregate({
       where: { orderId, kind: 'PAYMENT', qpayInvoiceId: invoiceId },
@@ -69,10 +97,11 @@ export async function applyQpayPayment(
     await recordPaymentWithTotals(tx, {
       orderId, kind: 'PAYMENT', amount: payAmount, method: 'QPAY',
       reference, qpayInvoiceId: invoiceId, note: 'QPay автомат бүртгэл', actor,
+      payeeKind,
     });
     await audit({
       actor, action: 'QPAY_PAID', entity: 'Order', entityId: orderId,
-      after: { invoiceId, amount: payAmount, reference },
+      after: { invoiceId, amount: payAmount, reference, purpose, payeeKind },
     }, tx);
     return true;
   });
@@ -98,8 +127,22 @@ export async function findOrderByQpayInvoice(invoiceId: string) {
     include: { order: { select } },
   });
   if (invoice) {
-    if (invoice.order.deletedAt) return null;
-    return { ...invoice.order, qpayAccount: invoice.account as QpayAccountKind };
+    if (!invoice.order) {
+      return {
+        id: '',
+        code: '',
+        dueAmount: 0,
+        paidAmount: 0,
+        qpayInvoiceId: invoice.id,
+        qpayInvoiceAt: invoice.createdAt,
+        isLeasing: false,
+        payeeKind: 'SHOP' as const,
+        deletedAt: null,
+        qpayAccount: invoice.account as QpayAccountKind,
+        purpose: invoice.purpose,
+      };
+    }
+    return { ...invoice.order, qpayAccount: invoice.account as QpayAccountKind, purpose: invoice.purpose };
   }
   const order = await prisma.order.findFirst({
     where: { qpayInvoiceId: invoiceId, deletedAt: null }, select,

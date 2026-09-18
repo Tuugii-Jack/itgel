@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FulfilmentChooser } from "@/components/FulfilmentChooser";
 import { PaymentPanel } from "@/components/PaymentPanel";
+import { OrderContactCard } from "@/components/shop/OrderContactCard";
 import { Badge, Button, ErrorNote, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { dayLabel, money, rangeLabel, refundPayoutLabel } from "@/lib/format";
@@ -337,7 +338,8 @@ function TrackDetail({ code }: { code: string }) {
               </div>
               {(order.cargoFee ?? 0) > 0 && order.dueAmount > 0 && (
                 <div className="tnum text-warn">
-                  Карго {money(order.dueAmount)} — QPay-ээр төлнө үү.
+                  Карго {order.isLeasing ? "— Итгэл " : ""}
+                  {money(order.unpaidCargoFee ?? order.dueAmount)} — QPay-ээр төлнө үү.
                 </div>
               )}
             </div>
@@ -495,7 +497,7 @@ function TrackDetail({ code }: { code: string }) {
           )}
           {(order.cargoFee ?? 0) > 0 && (
             <div className="flex items-center justify-between gap-3 text-[13px] text-ink-2">
-              <span>Карго</span>
+              <span>{order.isLeasing ? "Карго — Итгэл" : "Карго"}</span>
               <span className="tnum">{money(order.cargoFee)}</span>
             </div>
           )}
@@ -527,38 +529,10 @@ function TrackDetail({ code }: { code: string }) {
       </div>
 
       {/* Холбоо барих */}
-      {store && (
-      <div className="mx-4 mb-8 mt-6 flex flex-col gap-3 rounded-[12px] border border-line bg-surface p-4 lg:mx-0 lg:mb-0 lg:mt-0 lg:p-5">
-        <div>
-          <div className="text-[15px] font-medium">Асуух зүйл байна уу?</div>
-          <div className="mt-0.5 text-[13px] text-ink-2">{store.workHours}</div>
+      {order.contact && (
+        <div className="mx-4 mb-8 mt-6 lg:mx-0 lg:mb-0 lg:mt-0">
+          <OrderContactCard order={order} shopHours={store?.workHours} />
         </div>
-        <div className="flex gap-2">
-          <a
-            href={`tel:${store.phone.replace(/\D/g, "")}`}
-            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] border border-line bg-bg text-[14px] no-underline"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#57534E" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14.5 11.4v2a1.3 1.3 0 0 1-1.5 1.3 12.6 12.6 0 0 1-5.5-2 12.4 12.4 0 0 1-3.8-3.8 12.6 12.6 0 0 1-2-5.5A1.3 1.3 0 0 1 3 2h2a1.3 1.3 0 0 1 1.3 1.1c.1.7.3 1.3.5 1.9a1.3 1.3 0 0 1-.3 1.4l-.8.8a10 10 0 0 0 3.8 3.8l.8-.8a1.3 1.3 0 0 1 1.4-.3c.6.2 1.2.4 1.9.5a1.3 1.3 0 0 1 1.1 1.3Z" />
-            </svg>
-            Залгах
-          </a>
-          {store.facebookUrl && (
-            <a
-              href={store.facebookUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex h-11 flex-1 items-center justify-center gap-2 rounded-[8px] border border-line bg-bg text-[14px] no-underline"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#57534E" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M8 1.6c-3.6 0-6.4 2.6-6.4 5.9 0 1.8.9 3.5 2.3 4.6v2.3l2.1-1.2c.6.2 1.3.3 2 .3 3.6 0 6.4-2.6 6.4-5.9S11.6 1.6 8 1.6Z" />
-                <path d="M4.6 9.2 6.9 6.8l1.7 1.7 2.3-1.7-2.2 2.4-1.7-1.7-2.4 1.7Z" />
-              </svg>
-              Messenger
-            </a>
-          )}
-        </div>
-      </div>
       )}
     </>
   );

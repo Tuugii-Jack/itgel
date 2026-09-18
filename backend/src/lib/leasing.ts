@@ -234,6 +234,7 @@ export function leasingView(order: {
   createdAt?: Date | string | null;
   debtClosedAt?: Date | string | null;
   writtenOffAmount?: number | null;
+  shopPaidAmount?: number | null;
 }): LeasingView {
   const isLeasing = Boolean(order.isLeasing);
   const stored = order.leasingFee ?? 0;
@@ -243,10 +244,12 @@ export function leasingView(order: {
       : leasingFeeOf(order.subtotal)
     : 0;
   const netPaid = order.paidAmount - order.refundedAmount;
-  const feePaidAmount = Math.min(Math.max(0, netPaid), leasingFee);
+  const shopPaid = Math.max(0, Math.min(netPaid, order.shopPaidAmount ?? 0));
+  const leasingNet = Math.max(0, netPaid - shopPaid);
+  const feePaidAmount = Math.min(Math.max(0, leasingNet), leasingFee);
   const feeDue = Math.max(0, leasingFee - feePaidAmount);
   const feePaid = leasingFee > 0 && feeDue === 0;
-  const principalPaid = Math.min(Math.max(0, netPaid - leasingFee), order.subtotal);
+  const principalPaid = Math.min(Math.max(0, leasingNet - leasingFee), order.subtotal);
   const principalDue = Math.max(0, order.subtotal - principalPaid);
   const dueAmount =
     order.dueAmount ??
@@ -497,6 +500,12 @@ export function serializeLeasing(
 ) {
   const view = leasingView(order);
   const payPlan = view.isLeasing ? buildLeasingPayPlan({ ...order, payGaps }) : null;
+  const netPaid = order.paidAmount - order.refundedAmount;
+  const shopPaid = Math.max(0, order.shopPaidAmount ?? 0);
+  const leftoverToShop = Math.max(0, netPaid - shopPaid - view.leasingFee - order.subtotal);
+  const shopDueAmount = view.isLeasing
+    ? Math.max(0, (order.storageFee ?? 0) + (order.cargoFee ?? 0) - shopPaid - leftoverToShop)
+    : Math.max(0, (order.dueAmount ?? view.nextPayAmount) );
   return {
     isLeasing: view.isLeasing,
     leasingFee: view.leasingFee,
@@ -505,6 +514,10 @@ export function serializeLeasing(
     leasingPrincipalPaid: view.principalPaid,
     leasingPrincipalDue: view.principalDue,
     leasingDueAmount: view.feeDue + view.principalDue,
+    shopDueAmount: view.isLeasing ? shopDueAmount : 0,
+    unpaidCargoFee: view.isLeasing
+      ? Math.min(Math.max(0, order.cargoFee ?? 0), shopDueAmount)
+      : Math.max(0, order.cargoFee ?? 0),
     nextPayAmount: view.nextPayKind === 'PRINCIPAL' && payPlan?.nextAmount
       ? Math.min(view.nextPayAmount, payPlan.nextAmount)
       : view.nextPayAmount,

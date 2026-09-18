@@ -38,6 +38,7 @@ import {
   serializeTransferPreview,
   transferAvailability,
 } from '../../services/readyTransfer.js';
+import { attachItgelToItems } from '../../services/itgelSettlement.js';
 import { selectionsOf } from '../../lib/options.js';
 
 export const leasingOrdersRouter = Router();
@@ -204,7 +205,7 @@ leasingOrdersRouter.get(
         statusLabel: orderStatusLabel(order.status),
         customer: {
           id: order.customer.id,
-          name: order.customer.name,
+            name: order.customer.name?.trim() || null,
           phone: order.customer.phone,
           email: order.customer.email,
         },
@@ -253,8 +254,14 @@ leasingOrdersRouter.get(
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
     const gaps = leasingPayGapsOf(await getSettingsCached());
-
-    res.json({ data: { ...adminOrderDetail(order, gaps), timeline: buildTimeline(order) } });
+    const detail = adminOrderDetail(order, gaps);
+    res.json({
+      data: {
+        ...detail,
+        timeline: buildTimeline(order),
+        items: await attachItgelToItems(detail.items, order.id),
+      },
+    });
   }),
 );
 

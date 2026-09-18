@@ -8,7 +8,7 @@ import { leasingOwnedProductWhere, leasingOwnedRoundWhere } from '../../lib/inve
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
-import { replaceRoundSkuStocks, skuStockSum } from '../../lib/skuStock.js';
+import { replaceRoundSkuStocks, skuStockSum, syncRoundAvailable } from '../../lib/skuStock.js';
 import { selectionsOf, variantRowsFromOptions, type ProductOption } from '../../lib/options.js';
 import { roundStats } from '../../services/roundStats.js';
 import { adminProduct, adminRound } from '../../services/serialize.js';
@@ -203,6 +203,8 @@ leasingProductsRouter.post(
           costPrice: body.costPrice ?? 0,
           sellPrice: body.sellPrice,
           stock,
+          reserved: 0,
+          available: stock,
           closeAt: null,
           status: body.status ?? 'DRAFT',
           note: body.note ?? null,
@@ -295,7 +297,7 @@ leasingProductsRouter.patch(
         data: {
           costPrice: body.costPrice,
           sellPrice: body.sellPrice,
-          stock: skuRows ? skuStockSum(skuRows) ?? body.stock : body.stock,
+          stock: skuStockSum(skuRows) ?? body.stock,
           status: body.status,
           note: body.note,
         },
@@ -313,6 +315,7 @@ leasingProductsRouter.patch(
       });
       if (body.optionPrices) await replaceRoundOptionPrices(tx, updated.id, body.optionPrices);
       if (skuRows) await replaceRoundSkuStocks(tx, updated.id, skuRows);
+      else if (body.stock != null) await syncRoundAvailable(tx, updated.id, body.stock);
       return tx.productRound.findFirstOrThrow({
         where: { id: updated.id },
         include: {

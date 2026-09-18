@@ -47,6 +47,7 @@ const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] 
     label: "Тайлан",
     items: [
       { href: "/admin/reports", label: "Тайлан" },
+      { href: "/admin/leasing-settlements", label: "Лизингийн тооцоо" },
       { href: "/admin/archive", label: "Архив" },
     ],
   },

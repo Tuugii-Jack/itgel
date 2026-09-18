@@ -4,9 +4,29 @@ import { shopRoundWhere } from '../lib/roundShop.js';
 import { publicProduct } from './serialize.js';
 import { districtList, districtNames, getSettingsCached, publicLeasingOf } from './settings.js';
 import { qpayPublicStatus, leasingQpayPublicStatus } from './qpay.js';
+import { hasPublicLeasingContact, publicLeasingContactOf } from '../lib/leasingContact.js';
+import {
+  indexExpiredReserved,
+  loadExpiredReservedHolds,
+  overlaySellableOnRound,
+  unpaidHoldCutoff,
+} from '../lib/expiredReadyHold.js';
 
 const ORDER_PREVIEW = 8;
 const READY_PAGE = 20;
+
+export async function overlaySellableRounds<T extends Parameters<typeof overlaySellableOnRound>[0]>(
+  rounds: T[],
+  now = new Date(),
+): Promise<T[]> {
+  const readyIds = rounds.filter((row) => row.closeAt === null).map((row) => row.id);
+  if (readyIds.length === 0) return rounds;
+  const settings = await getSettingsCached();
+  const cutoff = unpaidHoldCutoff(settings.unpaidCancelHours, now);
+  if (!cutoff) return rounds;
+  const index = indexExpiredReserved(await loadExpiredReservedHolds(prisma, cutoff, readyIds));
+  return rounds.map((row) => overlaySellableOnRound(row, index));
+}
 
 const listProductSelect = {
   id: true,
@@ -29,7 +49,7 @@ export function listRoundInclude(type?: 'order' | 'ready'): Prisma.ProductRoundI
     },
     ...(type === 'order'
       ? {}
-      : { skuStocks: { select: { selections: true, stock: true } } }),
+      : { skuStocks: { select: { selections: true, stock: true, reserved: true, available: true } } }),
   };
 }
 
@@ -69,8 +89,25 @@ export async function listShopRounds(opts: {
           }
         : {}),
     },
-    ...(opts.type === 'order' ? { closeAt: { not: null } } : {}),
-    ...(opts.type === 'ready' ? { closeAt: null } : {}),
+    AND: [
+      ...(opts.type === 'order' ? [{ closeAt: { not: null } as const }] : []),
+      ...(opts.type === 'ready'
+        ? [
+            { closeAt: null },
+            { OR: [{ available: { gt: 0 } }, { reserved: { gt: 0 } }] },
+          ]
+        : []),
+      ...(opts.type
+        ? []
+        : [
+            {
+              OR: [
+                { closeAt: { not: null } },
+                { closeAt: null, OR: [{ available: { gt: 0 } }, { reserved: { gt: 0 } }] },
+              ],
+            },
+          ]),
+    ],
   };
 
   const orderBy: Prisma.ProductRoundOrderByWithRelationInput =
@@ -93,8 +130,10 @@ export async function listShopRounds(opts: {
     }),
   ]);
 
+  const sellable = await overlaySellableRounds(rounds as Parameters<typeof overlaySellableOnRound>[0][], now);
+
   return {
-    data: rounds.map((r) =>
+    data: sellable.map((r) =>
       publicProductListItem(r as Parameters<typeof publicProduct>[0], now),
     ),
     meta: {
@@ -133,8 +172,12 @@ export async function listShopCategories(now = new Date()) {
           rounds: {
             some: {
               deletedAt: null,
-              status: 'ACTIVE',
-              OR: [{ closeAt: null }, { closeAt: { gt: now } }],
+              status: { in: ['ACTIVE', 'SOLD_OUT'] },
+              OR: [
+                { closeAt: { gt: now } },
+                { closeAt: null, available: { gt: 0 } },
+                { closeAt: null, reserved: { gt: 0 } },
+              ],
             },
           },
         },
@@ -184,6 +227,9 @@ export async function publicStorePayload() {
     storageFreeDays: settings.storageFreeDays,
     storageFeePerDay: settings.storageFeePerDay,
     leasing: publicLeasingOf(settings),
+    leasingContact: hasPublicLeasingContact(publicLeasingContactOf(settings))
+      ? publicLeasingContactOf(settings)
+      : null,
   };
 }
 

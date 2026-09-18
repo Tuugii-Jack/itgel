@@ -23,7 +23,7 @@ import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { useDeferredReload } from "@/lib/useDeferredReload";
 import { useToast } from "@/lib/toast";
-import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { customerNameLabel, dayLabel, money, phoneLabel } from "@/lib/format";
 import {
   downloadOrdersExcel,
   printOrders,
@@ -491,7 +491,7 @@ export default function AdminOrdersPage() {
                       )}
                     </Td>
                     <Td>
-                      <div>{order.customer.name ?? "—"}</div>
+                      <div>{customerNameLabel(order.customer.name)}</div>
                       <div className="tnum text-[13px] text-muted">
                         {phoneLabel(order.customer.phone)}
                       </div>
@@ -565,7 +565,7 @@ export default function AdminOrdersPage() {
                   </label>
                   <OrderBadge status={order.status} />
                 </div>
-                <div className="mt-2 text-[14px]">{order.customer.name ?? "Нэргүй"}</div>
+                <div className="mt-2 text-[14px]">{customerNameLabel(order.customer.name)}</div>
                 <div className="tnum text-[13px] text-muted">
                   {phoneLabel(order.customer.phone)} · {order.itemCount} бараа
                 </div>

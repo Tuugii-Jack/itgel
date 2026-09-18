@@ -7,11 +7,14 @@ import { badRequest, conflict, notFound } from '../lib/errors.js';
 import { subtotalOf } from '../lib/money.js';
 import { comboLabel, findSku } from '../lib/skuStock.js';
 import { normalizeSelections, optionsFromVariants } from '../lib/options.js';
-import { consumeReadyStock } from './readyStock.js';
+import { reserveReadyStock } from './readyStock.js';
+import { releaseExpiredReadyHoldsForRounds } from './stockHold.js';
 import { changeOrderStatus } from './orders.js';
 import { recordPayment } from './payments.js';
-import { leasingFeeFromSettings } from './settings.js';
+import { getSettings, leasingFeeFromSettings } from './settings.js';
+import { snapshotLeasingOperatorAdminId } from './itgelSettlement.js';
 import { isLeasingOwned } from '../lib/inventoryOwner.js';
+import { unpaidHoldCutoff } from '../lib/expiredReadyHold.js';
 
 export interface CreateOrderItemInput {
   /** Тойргийн id (дэлгүүрийн productId). */
@@ -105,6 +108,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
   const subtotal = subtotalOf(items);
   const isLeasing = Boolean(input.leasing);
   const leasingFee = isLeasing ? await leasingFeeFromSettings(subtotal) : 0;
+  const holdCutoff = unpaidHoldCutoff((await getSettings()).unpaidCancelHours, now);
 
   const order = await prisma.$transaction(async (tx) => {
     if (input.customerName && input.customerName !== customer.name) {
@@ -114,10 +118,17 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       });
     }
 
+    const readyRoundIds = items
+      .map((mapped) => byId.get(mapped.roundId))
+      .filter((round): round is NonNullable<typeof round> => Boolean(round && round.closeAt === null))
+      .map((round) => round.id);
+    await releaseExpiredReadyHoldsForRounds(tx, readyRoundIds, holdCutoff);
+
     for (const mapped of items) {
       const round = byId.get(mapped.roundId)!;
       if (round.closeAt !== null) continue;
-      await consumeReadyStock(tx, round, mapped.qty, mapped.selections);
+      await reserveReadyStock(tx, round, mapped.qty, mapped.selections);
+      mapped.stockHold = 'RESERVED';
     }
 
     const created = await createOrderWithUniqueCode(tx, {
@@ -126,6 +137,7 @@ export async function createOrder(input: CreateOrderInput): Promise<Order> {
       isLeasing,
       leasingFee,
       payeeKind: isLeasing ? 'LEASING' : 'SHOP',
+      leasingOperatorAdminId: await snapshotLeasingOperatorAdminId(tx, isLeasing),
       note: input.note ?? null,
       items,
     });

@@ -25,6 +25,7 @@ export default function SettingsPage() {
   const toast = useToast();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [districts, setDistricts] = useState<string[]>([]);
+  const [operators, setOperators] = useState<{ id: string; name: string; email: string; isActive: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -33,9 +34,13 @@ export default function SettingsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminApi.settings();
+      const [data, ops] = await Promise.all([
+        adminApi.settings(),
+        adminApi.leasingSettlementOperators().catch(() => []),
+      ]);
       setSettings(data);
       setDistricts(Object.keys(data.deliveryFees ?? {}));
+      setOperators(ops);
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
       setError(message);
@@ -83,6 +88,7 @@ export default function SettingsPage() {
         unpaidCancelHours: settings.unpaidCancelHours,
         storageFreeDays: settings.storageFreeDays,
         storageFeePerDay: settings.storageFeePerDay,
+        leasingSettlementAdminId: settings.leasingSettlementAdminId || null,
       });
       setSettings(updated);
       setDistricts(Object.keys(updated.deliveryFees ?? {}));
@@ -178,6 +184,22 @@ export default function SettingsPage() {
               type="number"
               value={String(settings.unpaidCancelHours)}
               onChange={(v) => patch({ unpaidCancelHours: Number(v) || 0 })}
+            />
+          </Field>
+          <Field
+            label="Итгэлд төлөх хариуцагч"
+            hint="Лизингийн гэрээ баталгаажих үед энэ идэвхтэй админд өр үүснэ. Хоосон бол өр үүсгэхгүй. Идэвхгүй админыг шинээр оноохгүй. Хуучин тооцоо энэ утгыг өөрчлөхөд шилжихгүй."
+          >
+            <Select
+              value={settings.leasingSettlementAdminId ?? ""}
+              onChange={(v) => patch({ leasingSettlementAdminId: v || null })}
+              placeholder="Тохируулаагүй"
+              options={operators
+                .filter((op) => op.isActive || op.id === settings.leasingSettlementAdminId)
+                .map((op) => ({
+                value: op.id,
+                label: op.isActive ? `${op.name} · ${op.email}` : `${op.name} · идэвхгүй`,
+              }))}
             />
           </Field>
           <Field

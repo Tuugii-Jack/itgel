@@ -206,9 +206,11 @@ function skuKey(selections) {
     .join('|');
 }
 
-const shopStockBefore = Number(
-  sql(`SELECT stock FROM "ProductRound" WHERE id='${shopReady.id}'`),
-);
+const shopHoldBefore = {
+  stock: Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${shopReady.id}'`)),
+  reserved: Number(sql(`SELECT reserved FROM "ProductRound" WHERE id='${shopReady.id}'`)),
+  available: Number(sql(`SELECT available FROM "ProductRound" WHERE id='${shopReady.id}'`)),
+};
 const shopOrder = await req('/api/orders', {
   method: 'POST',
   token: customerToken,
@@ -220,20 +222,30 @@ const shopCreated = data(shopOrder);
 assert.equal(shopCreated.payeeKind, 'SHOP');
 assert.equal(shopCreated.isLeasing, false);
 assert.equal(shopCreated.splitOrders?.length ?? 0, 0);
-const shopStockAfter = Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${shopReady.id}'`));
-assert.equal(shopStockAfter, shopStockBefore - 1);
-pass('shop order create + stock decrement', shopCreated.code);
+const shopHoldAfter = {
+  stock: Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${shopReady.id}'`)),
+  reserved: Number(sql(`SELECT reserved FROM "ProductRound" WHERE id='${shopReady.id}'`)),
+  available: Number(sql(`SELECT available FROM "ProductRound" WHERE id='${shopReady.id}'`)),
+};
+assert.equal(shopHoldAfter.stock, shopHoldBefore.stock);
+assert.equal(shopHoldAfter.reserved, shopHoldBefore.reserved + 1);
+assert.equal(shopHoldAfter.available, shopHoldBefore.available - 1);
+pass('shop order create + reserve not consume', shopCreated.code);
 
 const cancelProduct = shopSkuReady ?? shopReady;
 const cancelLine = lineOf(cancelProduct);
+const cancelHoldBefore = {
+  stock: Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${cancelProduct.id}'`)),
+  reserved: Number(sql(`SELECT reserved FROM "ProductRound" WHERE id='${cancelProduct.id}'`)),
+  available: Number(sql(`SELECT available FROM "ProductRound" WHERE id='${cancelProduct.id}'`)),
+};
 const skuBefore = cancelLine.selections
   ? Number(
       sql(
-        `SELECT stock FROM "RoundSkuStock" WHERE "roundId"='${cancelProduct.id}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
+        `SELECT available FROM "RoundSkuStock" WHERE "roundId"='${cancelProduct.id}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
       ) || '0',
     )
   : null;
-const cancelStockBefore = Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${cancelProduct.id}'`));
 const cancelOrderRes = await req('/api/orders', {
   method: 'POST',
   token: customerToken,
@@ -242,19 +254,23 @@ const cancelOrderRes = await req('/api/orders', {
 });
 assert.equal(cancelOrderRes.status, 201, cancelOrderRes.text);
 const cancelCreated = data(cancelOrderRes);
-const cancelStockAfterCreate = Number(
-  sql(`SELECT stock FROM "ProductRound" WHERE id='${cancelProduct.id}'`),
-);
-assert.equal(cancelStockAfterCreate, cancelStockBefore - 1);
+const cancelHoldAfterCreate = {
+  stock: Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${cancelProduct.id}'`)),
+  reserved: Number(sql(`SELECT reserved FROM "ProductRound" WHERE id='${cancelProduct.id}'`)),
+  available: Number(sql(`SELECT available FROM "ProductRound" WHERE id='${cancelProduct.id}'`)),
+};
+assert.equal(cancelHoldAfterCreate.stock, cancelHoldBefore.stock);
+assert.equal(cancelHoldAfterCreate.reserved, cancelHoldBefore.reserved + 1);
+assert.equal(cancelHoldAfterCreate.available, cancelHoldBefore.available - 1);
 if (skuBefore != null) {
   const skuAfterCreate = Number(
     sql(
-      `SELECT stock FROM "RoundSkuStock" WHERE "roundId"='${cancelProduct.id}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
+      `SELECT available FROM "RoundSkuStock" WHERE "roundId"='${cancelProduct.id}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
     ),
   );
   assert.equal(skuAfterCreate, skuBefore - 1);
 }
-pass('cancel-target order + SKU/stock decrement', cancelCreated.code);
+pass('cancel-target order + reserve not consume', cancelCreated.code);
 
 const mixed = await req('/api/orders', {
   method: 'POST',
@@ -407,11 +423,13 @@ const live = (cancelDetail.items ?? []).find((i) => !i.cancelled);
 assert.ok(live, 'cancel-target still has a live item');
 const roundId = live.roundId ?? cancelProduct.id;
 const stockBeforeCancel = Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${roundId}'`));
-const skuBeforeCancel =
+const availableBeforeCancel = Number(sql(`SELECT available FROM "ProductRound" WHERE id='${roundId}'`));
+const reservedBeforeCancel = Number(sql(`SELECT reserved FROM "ProductRound" WHERE id='${roundId}'`));
+const skuAvailBeforeCancel =
   cancelLine.selections
     ? Number(
         sql(
-          `SELECT stock FROM "RoundSkuStock" WHERE "roundId"='${roundId}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
+          `SELECT available FROM "RoundSkuStock" WHERE "roundId"='${roundId}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
         ) || '0',
       )
     : null;
@@ -422,16 +440,20 @@ const cancelled = await req(`/api/admin/orders/${cancelId}/payments/items/${live
 });
 assert.equal(cancelled.status, 200, cancelled.text);
 const stockAfterCancel = Number(sql(`SELECT stock FROM "ProductRound" WHERE id='${roundId}'`));
-assert.equal(stockAfterCancel, stockBeforeCancel + live.qty);
-if (skuBeforeCancel != null) {
+const availableAfterCancel = Number(sql(`SELECT available FROM "ProductRound" WHERE id='${roundId}'`));
+const reservedAfterCancel = Number(sql(`SELECT reserved FROM "ProductRound" WHERE id='${roundId}'`));
+assert.equal(stockAfterCancel, stockBeforeCancel);
+assert.equal(availableAfterCancel, availableBeforeCancel + live.qty);
+assert.equal(reservedAfterCancel, reservedBeforeCancel - live.qty);
+if (skuAvailBeforeCancel != null) {
   const skuAfterCancel = Number(
     sql(
-      `SELECT stock FROM "RoundSkuStock" WHERE "roundId"='${roundId}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
+      `SELECT available FROM "RoundSkuStock" WHERE "roundId"='${roundId}' AND "skuKey"='${skuKey(cancelLine.selections)}'`,
     ),
   );
-  assert.equal(skuAfterCancel, skuBeforeCancel + live.qty);
+  assert.equal(skuAfterCancel, skuAvailBeforeCancel + live.qty);
 }
-pass('cancel restores stock/SKU', `${stockBeforeCancel}→${stockAfterCancel}`);
+pass('cancel releases reserved available', `${availableBeforeCancel}→${availableAfterCancel}`);
 
 const batches = data(await req('/api/admin/batches?pageSize=20', { token: adminToken }));
 assert.ok(Array.isArray(batches));

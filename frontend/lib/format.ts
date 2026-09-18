@@ -154,6 +154,12 @@ export function arrivalLabel(product: {
   return rangeLabel(product.arriveFrom, product.arriveTo);
 }
 
+/** Хоосон нэрийг админд "Нэргүй" гэж харуулна — DB-д хуурамч нэр бичихгүй. */
+export function customerNameLabel(name: string | null | undefined): string {
+  const trimmed = name?.trim() ?? "";
+  return trimmed || "Нэргүй";
+}
+
 /** "99112233" → "9911-2233" */
 export function phoneLabel(phone: string | null | undefined): string {
   if (!phone) return "—";

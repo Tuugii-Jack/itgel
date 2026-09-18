@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Card } from "@/components/ui";
 import { money } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
@@ -19,6 +20,7 @@ export function OrderItems({
   busyKey: string | null;
   onCancel: (itemId: string, reason: string | undefined, refund: boolean) => Promise<void>;
 }) {
+  const [openItgel, setOpenItgel] = useState<string | null>(null);
   return (
     <Card className="divide-y divide-line">
       {order.items.map((item) => (
@@ -34,6 +36,27 @@ export function OrderItems({
               {formatSelections(item.selections, item.size, item.color) ? " · " : ""}
               {item.qty} ш × {money(item.unitPrice)}
             </div>
+            {item.itgel && (
+              <div className="mt-1">
+                <div className="text-[13px] text-ink-2">
+                  Хэрэглэгч: {order.paymentStateLabel}
+                  {" · "}
+                  <button
+                    type="button"
+                    className="cursor-pointer border-0 bg-transparent p-0 underline"
+                    onClick={() => setOpenItgel((id) => (id === item.id ? null : item.id))}
+                  >
+                    Итгэлд: {item.itgel.statusLabel}
+                  </button>
+                </div>
+                {openItgel === item.id && (
+                  <div className="mt-1 text-[12px] text-ink-2">
+                    {money(item.itgel.amount)} · төлсөн {money(item.itgel.paidAmount)} · үлдэгдэл{" "}
+                    {money(item.itgel.remainingAmount)} · {item.itgel.confirmedAt.slice(0, 10)}
+                  </div>
+                )}
+              </div>
+            )}
             {item.cancelled && item.cancelReason && (
               <div className="mt-1 text-[13px] text-danger">
                 {item.transferredAt ? "Бэлэн бараанд шилжүүлсэн" : "Цуцлагдсан"}: {item.cancelReason}

@@ -1,8 +1,9 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { env, isProd } from '../env.js';
 import { unauthorized } from '../lib/errors.js';
 import { asyncHandler } from '../middleware/validate.js';
 import { pollSmsDeliveries } from '../services/smsDeliveryJob.js';
+import { cancelUnpaidOrders } from '../cron/index.js';
 
 export const cronRouter = Router();
 
@@ -35,3 +36,16 @@ cronRouter.post(
     res.json({ data: result });
   }),
 );
+
+/**
+ * GET/POST /api/cron/unpaid-cancel — SMS cron-оос тусдаа.
+ * Төлөөгүй бэлэн барааны нөөцийг чөлөөлнө. Браузер шаардахгүй.
+ */
+async function runUnpaidCancel(req: Request, res: Response) {
+  assertCron(req);
+  const cancelled = await cancelUnpaidOrders();
+  res.json({ data: { cancelled } });
+}
+
+cronRouter.get('/unpaid-cancel', asyncHandler(runUnpaidCancel));
+cronRouter.post('/unpaid-cancel', asyncHandler(runUnpaidCancel));

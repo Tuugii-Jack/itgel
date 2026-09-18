@@ -11,6 +11,12 @@ import {
   leasingCopyOf,
   leasingSmsTemplatesOf,
 } from '../../lib/leasing.js';
+import {
+  parseLeasingChatUrl,
+  parseLeasingContactPhone,
+  parseLeasingPublicName,
+  publicLeasingContactOf,
+} from '../../lib/leasingContact.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
 import {
@@ -40,9 +46,15 @@ const patchBody = z.object({
   bankAccountNumber: z.string().trim().max(40).optional(),
   bankAccountName: z.string().trim().max(80).optional(),
   paymentNote: z.string().trim().max(300).optional(),
+  publicName: z.string().max(80).optional(),
+  contactPhone: z.string().trim().max(20).optional(),
+  chatUrl: z.string().trim().max(300).optional(),
 });
 
-function serializeLeasingSettings(settings: Awaited<ReturnType<typeof getSettings>>) {
+function serializeLeasingSettings(
+  settings: Awaited<ReturnType<typeof getSettings>>,
+  settlementAdmin: { id: string; name: string; email: string; isActive: boolean } | null,
+) {
   const copy = leasingCopyOf(settings);
   const sms = leasingSmsTemplatesOf(settings);
   return {
@@ -59,14 +71,33 @@ function serializeLeasingSettings(settings: Awaited<ReturnType<typeof getSetting
     bankAccountNumber: settings.leasingBankAccountNumber,
     bankAccountName: settings.leasingBankAccountName,
     paymentNote: settings.leasingPaymentNote,
+    publicName: settings.leasingPublicName,
+    contactPhone: settings.leasingContactPhone,
+    chatUrl: settings.leasingChatUrl,
+    contact: publicLeasingContactOf(settings),
+    settlementAdmin,
     updatedAt: settings.updatedAt.toISOString(),
   };
+}
+
+async function settlementAdminOf(id: string | null) {
+  if (!id) return null;
+  return prisma.adminUser.findUnique({
+    where: { id },
+    select: { id: true, name: true, email: true, isActive: true },
+  });
 }
 
 leasingSettingsRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
-    res.json({ data: serializeLeasingSettings(await getSettings()) });
+    const settings = await getSettings();
+    res.json({
+      data: serializeLeasingSettings(
+        settings,
+        await settlementAdminOf(settings.leasingSettlementAdminId),
+      ),
+    });
   }),
 );
 
@@ -94,19 +125,23 @@ leasingSettingsRouter.patch(
         ...(body.bankAccountNumber != null ? { leasingBankAccountNumber: body.bankAccountNumber } : {}),
         ...(body.bankAccountName != null ? { leasingBankAccountName: body.bankAccountName } : {}),
         ...(body.paymentNote != null ? { leasingPaymentNote: body.paymentNote } : {}),
+        ...(body.publicName != null ? { leasingPublicName: parseLeasingPublicName(body.publicName) } : {}),
+        ...(body.contactPhone != null ? { leasingContactPhone: parseLeasingContactPhone(body.contactPhone) } : {}),
+        ...(body.chatUrl != null ? { leasingChatUrl: parseLeasingChatUrl(body.chatUrl) } : {}),
       },
     });
     invalidateSettingsCache();
 
+    const settlementAdmin = await settlementAdminOf(after.leasingSettlementAdminId);
     await audit({
       actor: actorOf(req),
       action: 'UPDATE',
       entity: 'Setting',
       entityId: 'leasing',
-      before: serializeLeasingSettings(before),
-      after: serializeLeasingSettings(after),
+      before: serializeLeasingSettings(before, await settlementAdminOf(before.leasingSettlementAdminId)),
+      after: serializeLeasingSettings(after, settlementAdmin),
     });
 
-    res.json({ data: serializeLeasingSettings(after) });
+    res.json({ data: serializeLeasingSettings(after, settlementAdmin) });
   }),
 );

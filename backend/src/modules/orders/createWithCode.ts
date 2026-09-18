@@ -14,6 +14,7 @@ export type NewOrderLine = {
   costPriceSnapshot: number;
   arriveFrom: Date | null;
   arriveTo: Date | null;
+  stockHold?: 'NONE' | 'RESERVED' | 'CONSUMED' | 'RELEASED';
 };
 
 export type NewOrderData = {
@@ -22,6 +23,7 @@ export type NewOrderData = {
   isLeasing: boolean;
   leasingFee: number;
   payeeKind: 'SHOP' | 'LEASING';
+  leasingOperatorAdminId?: string | null;
   note: string | null;
   items: NewOrderLine[];
 };
@@ -41,11 +43,27 @@ export async function createOrderWithUniqueCode(
           isLeasing: data.isLeasing,
           leasingFee: data.leasingFee,
           payeeKind: data.payeeKind,
+          leasingOperatorAdminId: data.leasingOperatorAdminId ?? null,
           paidAmount: 0,
           refundedAmount: 0,
           dueAmount: data.subtotal + data.leasingFee,
           note: data.note,
-          items: { create: data.items },
+          items: {
+            create: data.items.map((item) => ({
+              roundId: item.roundId,
+              productId: item.productId,
+              nameSnapshot: item.nameSnapshot,
+              selections: item.selections,
+              size: item.size,
+              color: item.color,
+              qty: item.qty,
+              unitPrice: item.unitPrice,
+              costPriceSnapshot: item.costPriceSnapshot,
+              arriveFrom: item.arriveFrom,
+              arriveTo: item.arriveTo,
+              stockHold: item.stockHold ?? 'NONE',
+            })),
+          },
         },
       });
     } catch (error) {

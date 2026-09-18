@@ -12,11 +12,7 @@ import { conflict } from '../../lib/errors.js';
 import { lockOrder } from '../../lib/orderLock.js';
 import { canTransition, ORDER_STATUS_LABEL, previousInFlow, stepsToStatus } from '../../lib/orderStatus.js';
 import { isProductPaid } from '../../services/money.js';
-import {
-  consumeReadyStock as consumeRoundStock,
-  restoreReadyStock as restoreRoundStock,
-  selectionsFromItem,
-} from '../../services/readyStock.js';
+import { releaseOrderReadyStock, reholdOrderReadyStock } from '../../services/stockHold.js';
 import { notifyOrderConfirmed } from './notify.js';
 
 export type OrderWithItems = Order & {
@@ -148,7 +144,7 @@ export async function changeOrderStatus(
 
     // Захиалга бүтнээрээ цуцлагдвал бэлэн барааны үлдэгдлийг буцаана.
     // Эс бөгөөс цуцалсан бүрд агуулахын тоо худал багасаж үлдэнэ.
-    if (to === 'CANCELLED') await restoreReadyStock(tx, orderId);
+    if (to === 'CANCELLED') await releaseOrderReadyStock(tx, orderId);
 
     await audit(
       {
@@ -349,8 +345,7 @@ export async function revertOrderStatus(
     }
     if (from === 'CANCELLED') {
       data.cancelledAt = null;
-      // Цуцлах үед үлдэгдэл нэмэгдсэн тул дахин хасна.
-      await consumeReadyStock(tx, orderId);
+      await reholdOrderReadyStock(tx, orderId);
     }
 
     const next = await tx.order.update({ where: { id: orderId }, data });
@@ -392,29 +387,6 @@ async function previousStatusFromAudit(
   return null;
 }
 
-/** Цуцлалтыг буцаах үед бэлэн барааны үлдэгдлийг дахин хасна. */
-async function consumeReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
-  const items = await tx.orderItem.findMany({
-    where: { orderId, cancelledAt: null, handedOverAt: null },
-    include: {
-      round: { include: { skuStocks: true, product: { select: { name: true } } } },
-    },
-  });
-
-  for (const item of items) {
-    if (!item.round || item.round.closeAt !== null) continue;
-    await consumeRoundStock(
-      tx,
-      {
-        ...item.round,
-        product: { name: item.round.product.name },
-      },
-      item.qty,
-      selectionsFromItem(item),
-    );
-  }
-}
-
 /**
  * Захиалга аль багцад орох ёстойг тодорхойлно.
  *
@@ -444,23 +416,6 @@ async function batchForOrder(
     select: { id: true },
   });
   return batch?.id ?? null;
-}
-
-/**
- * Цуцлагдсан захиалгын бэлэн барааны үлдэгдлийг агуулахад буцаана.
- * Урьдчилсан захиалгын бараа (`closeAt` заасан) үлдэгдэлгүй тул хамаарахгүй.
- * Мөрөөр нь цуцалсан бараа энд дахин тоологдохгүй — тэр нь аль хэдийн буцаагдсан.
- */
-async function restoreReadyStock(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
-  const items = await tx.orderItem.findMany({
-    where: { orderId, cancelledAt: null, handedOverAt: null },
-    include: { round: { include: { skuStocks: true } } },
-  });
-
-  for (const item of items) {
-    if (!item.round || item.round.closeAt !== null) continue;
-    await restoreRoundStock(tx, item.round, item.qty, selectionsFromItem(item));
-  }
 }
 
 /** Мөрүүдийг бүтнээр ирсэн гэж тэмдэглэнэ (arrivedQty = qty). */

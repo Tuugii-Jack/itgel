@@ -222,6 +222,11 @@ export function ProductDetail({
             )}
 
             {notice && <ErrorNote>{notice}</ErrorNote>}
+            {cannotBuy && !isOrder && !closed && (
+              <ErrorNote>
+                Энэ бэлэн бараа одоо авах боломжгүй. Үлдэгдэл дууссан эсвэл өөр захиалгад түр нөөцлөгдсөн.
+              </ErrorNote>
+            )}
 
             <div className='hidden lg:flex lg:flex-col lg:gap-2'>
               {cannotBuy ? (

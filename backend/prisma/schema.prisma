@@ -150,7 +150,12 @@ model ProductRound {
   sellPrice Int
   /// Нэгж барааны карго үнэ ₮. Багцад нэмсний дараа админ оруулна.
   cargoFee  Int           @default(0)
+  /// Агуулахад байгаа нийт ширхэг (түр нөөц + зарагдах боломжтой).
   stock     Int           @default(0)
+  /// Төлбөр хүлээгдэж буй захиалгын нөөц. stock-оос тусад нь.
+  reserved  Int           @default(0)
+  /// Зарагдах боломжтой = stock − reserved. Жагсаалтын шүүлтэнд.
+  available Int           @default(0)
   closeAt   DateTime? // null бол бэлэн бараа
   leadMinDays Int         @default(7)
   leadMaxDays Int         @default(14)
@@ -182,6 +187,7 @@ model ProductRound {
   @@index([batchId])
   @@index([deletedAt, status, closeAt])
   @@index([ownerKind, ownerAdminId])
+  @@index([closeAt, available])
 }
 
 /// Гаргалт дээрх сонголтын үнэ — ж: Хэмжээ S = 10,000₮, M = 20,000₮.
@@ -211,6 +217,8 @@ model RoundSkuStock {
   skuKey      String
   selections  Json
   stock       Int
+  reserved    Int @default(0)
+  available   Int @default(0)
 
   round ProductRound @relation(fields: [roundId], references: [id], onDelete: Cascade)
 
@@ -415,6 +423,8 @@ model Order {
   cargoFee    Int @default(0)
   /// Дэвтрийн PAYMENT мөрүүдийн нийлбэр.
   paidAmount     Int @default(0)
+  /// Дэлгүүрийн касс (карго/агуулах) руу орсон PAYMENT − SHOP REFUND.
+  shopPaidAmount Int @default(0)
   /// Дэвтрийн REFUND мөрүүдийн нийлбэр.
   refundedAmount Int @default(0)
   /// subtotal + storageFee + cargoFee − (paidAmount − refundedAmount). Сөрөг байвал илүү төлсөн.
@@ -449,6 +459,8 @@ model Order {
   /// QPay нэхэмжлэлийн id — invoice үүсгэсний дараа. Төлбөр шалгах/webhook-д ашиглана.
   qpayInvoiceId String?
   qpayInvoiceAt DateTime?
+  /// Лизингийн захиалгын карго — дэлгүүрийн (SHOP) QPay.
+  qpayCargoInvoiceId String?
 
   /// Лизингээр авсан захиалга. Энгийн QPay захиалгад false.
   isLeasing  Boolean @default(false)
@@ -457,6 +469,8 @@ model Order {
 
   /// Төлбөр хүлээн авагч. Лизингийн бэлэн борлуулалт isLeasing=false ч LEASING байна.
   payeeKind InventoryOwner @default(SHOP)
+  /// Итгэлд төлөх хариуцагчийн snapshot. Тохиргоо солигдсон ч энэ захиалгын тооцоо үлдэнэ.
+  leasingOperatorAdminId String?
 
   /// Өрийг төлөгдсөн гэж биш, тусдаа хаалтаар хаасан дүн. Payment мөр биш.
   writtenOffAmount Int       @default(0)
@@ -470,6 +484,8 @@ model Order {
   payments Payment[]
   qpayInvoices QpayInvoice[]
   readyTransfers ReadyStockTransfer[]
+  itgelSettlements ItgelSettlement[]
+  moneyExceptions  MoneyException[]
 
   @@index([status])
   @@index([customerId])
@@ -480,20 +496,29 @@ model Order {
   @@index([deletedAt, status, createdAt])
   @@index([isLeasing, createdAt])
   @@index([payeeKind, createdAt])
+  @@index([leasingOperatorAdminId])
   @@index([debtClosedAt])
 }
 
 /// Keep every invoice associated with its order, including replaced/cancelled invoices.
 model QpayInvoice {
   id        String   @id
-  orderId   String
+  /// Захиалгын нэхэмжлэл. Итгэлд төлөх тооцооны invoice дээр null.
+  orderId   String?
   account   String
+  /// ORDER | CARGO | ITGEL_SETTLEMENT
+  purpose   String   @default("ORDER")
+  amount    Int      @default(0)
+  settlementPaymentId String?
   createdAt DateTime @default(now())
 
-  order    Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order    Order?    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   payments Payment[]
+  settlementPayment ItgelSettlementPayment? @relation(fields: [settlementPaymentId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
+  @@index([purpose, createdAt])
+  @@index([settlementPaymentId])
 }
 
 /// Орлого, буцаалт бүрийн бичилт. Устгагдахгүй — залруулга нь эсрэг мөр.
@@ -508,6 +533,8 @@ model Payment {
   reference String?
   qpayInvoiceId String?
   note      String?
+  /// SHOP = карго/агуулах (Итгэл). LEASING = лизингийн төлбөр. Хоосон = захиалгын үндсэн данс.
+  payeeKind InventoryOwner?
   /// Хэн бүртгэсэн: "admin:<id>" | "system".
   actor     String
   createdAt DateTime      @default(now())
@@ -562,10 +589,16 @@ model OrderItem {
   transferredQty  Int       @default(0)
   readyTransferId String?
 
+  /// NONE | RESERVED | CONSUMED | RELEASED — бэлэн барааны нөөцийн төлөв.
+  stockHold       String  @default("NONE")
+  /// Цуцлагдсаны дараа төлбөр орсон ч үлдэгдэл хүрээгүй.
+  stockShortfall  Boolean @default(false)
+
   order   Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   round   ProductRound @relation(fields: [roundId], references: [id])
   product Product      @relation(fields: [productId], references: [id])
   readyTransfer ReadyStockTransfer? @relation(fields: [readyTransferId], references: [id])
+  itgelSettlement ItgelSettlement?
 
   @@index([orderId])
   @@index([productId])
@@ -575,6 +608,7 @@ model OrderItem {
   @@index([handedOverAt])
   @@index([readyTransferId])
   @@index([transferredAt])
+  @@index([stockHold])
 }
 
 /// Лизингийн захиалгаас бэлэн бараанд шилжүүлсэн бүртгэл. Орлого биш.
@@ -595,6 +629,7 @@ model ReadyStockTransfer {
   sourceOrder Order                    @relation(fields: [sourceOrderId], references: [id])
   lines       ReadyStockTransferLine[]
   items       OrderItem[]
+  itgelSettlements ItgelSettlement[]
 
   @@index([sourceOrderId])
   @@index([ownerAdminId, createdAt])
@@ -724,7 +759,115 @@ model Setting {
   leasingBankAccountName   String @default("")
   leasingPaymentNote       String @default("")
 
+  /// Хэрэглэгчид харагдах лизингийн холбоо барих. Дэлгүүрийн phone/facebook-ийг солихгүй.
+  leasingPublicName    String @default("")
+  leasingContactPhone  String @default("")
+  leasingChatUrl       String @default("")
+  /// Итгэлд төлөх өрийн хариуцсан лизингийн админ. Хоосон бол өр үүсгэхгүй.
+  leasingSettlementAdminId String?
+
   updatedAt DateTime @updatedAt
+}
+
+/// Лизингийн баталгаажсан борлуулалтаас Итгэлд төлөх барааны бүтэн дүн.
+model ItgelSettlement {
+  id                String   @id @default(cuid())
+  sourceOrderItemId String   @unique
+  sourceOrderId     String
+  sourceOrderCode   String
+  customerId        String
+  customerName      String   @default("")
+  ownerAdminId      String
+  productId         String
+  roundId           String
+  productName       String
+  qty               Int
+  unitPrice         Int
+  amount            Int
+  confirmedAt       DateTime
+  /// OPEN | INVOICED | PENDING_BANK | PAID | VOID
+  status            String   @default("OPEN")
+  paidAmount        Int      @default(0)
+  remainingAmount   Int
+  lockPaymentId     String?
+  readyTransferId   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  sourceOrderItem OrderItem  @relation(fields: [sourceOrderItemId], references: [id], onDelete: Restrict)
+  sourceOrder     Order      @relation(fields: [sourceOrderId], references: [id], onDelete: Restrict)
+  readyTransfer   ReadyStockTransfer? @relation(fields: [readyTransferId], references: [id], onDelete: SetNull)
+  lines           ItgelSettlementPaymentLine[]
+
+  @@index([ownerAdminId, confirmedAt])
+  @@index([status, confirmedAt])
+  @@index([sourceOrderId])
+  @@index([lockPaymentId])
+}
+
+model ItgelSettlementPayment {
+  id            String   @id @default(cuid())
+  ownerAdminId  String
+  /// QPAY | BANK_TRANSFER
+  method        String
+  amount        Int
+  /// PENDING | CONFIRMED | REJECTED | SUPERSEDED
+  status        String   @default("PENDING")
+  qpayInvoiceId String?  @unique
+  bankRef       String?
+  bankDate      DateTime?
+  receiptUrl    String?
+  claimedBy     String
+  confirmedBy   String?
+  rejectedReason String?
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lines         ItgelSettlementPaymentLine[]
+  qpayInvoices  QpayInvoice[]
+  exceptions    MoneyException[]
+
+  @@index([ownerAdminId, createdAt])
+  @@index([status, createdAt])
+}
+
+model ItgelSettlementPaymentLine {
+  id            String @id @default(cuid())
+  paymentId     String
+  settlementId  String
+  amount        Int
+
+  payment    ItgelSettlementPayment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  settlement ItgelSettlement        @relation(fields: [settlementId], references: [id], onDelete: Restrict)
+
+  @@unique([paymentId, settlementId])
+  @@index([settlementId])
+}
+
+/// Хоцорсон төлбөр, илүү мөнгө, зөрсөн дүн — чимээгүй алдахгүй.
+model MoneyException {
+  id                   String   @id @default(cuid())
+  /// LATE_AFTER_CANCEL | STOCK_SHORTFALL | SETTLEMENT_OVERPAY | SETTLEMENT_MISMATCH | SETTLEMENT_OWNER_MISSING
+  kind                 String
+  orderId              String?
+  settlementPaymentId  String?
+  qpayInvoiceId        String?
+  amount               Int
+  /// OPEN | RESOLVED
+  status               String   @default("OPEN")
+  note                 String?
+  actor                String
+  createdAt            DateTime @default(now())
+  resolvedAt           DateTime?
+  resolvedBy           String?
+
+  order              Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  settlementPayment  ItgelSettlementPayment? @relation(fields: [settlementPaymentId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([orderId])
+  @@index([kind, status])
 }
 
 /// Админ буцаалтын мөнгийг хэрэглэгчийн данс руу шилжүүлсний баталгаа (10/20/30).

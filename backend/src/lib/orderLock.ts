@@ -10,3 +10,9 @@ export async function lockOrders(tx: Prisma.TransactionClient, orderIds: string[
   if (ids.length === 0) return;
   await tx.$queryRaw`SELECT "id" FROM "Order" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`;
 }
+
+export async function lockRounds(tx: Prisma.TransactionClient, roundIds: string[]): Promise<void> {
+  const ids = [...new Set(roundIds)].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw`SELECT "id" FROM "ProductRound" WHERE "id" IN (${Prisma.join(ids)}) ORDER BY "id" FOR UPDATE`;
+}

@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { scheduleCloseExpired } from '../../cron/index.js';
+import { scheduleCloseExpired, scheduleCancelUnpaid } from '../../cron/index.js';
 import { notFound } from '../../lib/errors.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { publicProduct } from '../../services/serialize.js';
-import { detailRoundInclude, listShopRounds } from '../../services/shopCatalog.js';
+import { detailRoundInclude, listShopRounds, overlaySellableRounds } from '../../services/shopCatalog.js';
 
 export const publicProductsRouter = Router();
 
@@ -30,6 +30,7 @@ publicProductsRouter.get(
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
     scheduleCloseExpired();
+    scheduleCancelUnpaid();
     const result = await listShopRounds(q);
     res.setHeader('Cache-Control', 'public, s-maxage=5, stale-while-revalidate=15');
     res.json(result);
@@ -41,6 +42,7 @@ publicProductsRouter.get(
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
     scheduleCloseExpired();
+    scheduleCancelUnpaid();
     const round = await prisma.productRound.findFirst({
       where: {
         id: req.params.id,
@@ -52,6 +54,7 @@ publicProductsRouter.get(
     });
 
     if (!round) throw notFound('Бараа олдсонгүй.');
-    res.json({ data: publicProduct(round) });
+    const [sellable] = await overlaySellableRounds([round]);
+    res.json({ data: publicProduct(sellable ?? round) });
   }),
 );

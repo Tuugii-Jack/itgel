@@ -55,7 +55,7 @@ function publicCustomer(c: {
     id: c.id,
     email: c.email,
     phone: c.phone,
-    name: c.name,
+    name: c.name?.trim() || null,
     emailVerified: Boolean(c.emailVerifiedAt),
     hasPassword: Boolean(c.passwordHash),
   };

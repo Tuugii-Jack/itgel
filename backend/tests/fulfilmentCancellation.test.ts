@@ -8,8 +8,18 @@ const db = vi.hoisted(() => ({
       findFirst: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(),
       update: vi.fn(), updateMany: vi.fn(),
     },
-    orderItem: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), count: vi.fn() },
-    productRound: { update: vi.fn() },
+    orderItem: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), count: vi.fn() },
+    productRound: {
+      update: vi.fn(),
+      updateMany: vi.fn(),
+      findUniqueOrThrow: vi.fn(async ({ where }: { where: { id: string } }) => ({
+        id: where.id,
+        skuStocks: [],
+        available: 1,
+        status: 'ACTIVE',
+        closeAt: null,
+      })),
+    },
     payment: { create: vi.fn(), groupBy: vi.fn() },
     auditLog: { findMany: vi.fn() },
   },
@@ -98,6 +108,11 @@ beforeEach(() => {
     rows.forEach((row) => Object.assign(row, data));
     return { count: rows.length };
   });
+  db.tx.orderItem.update.mockImplementation(async ({ where, data }) => {
+    const row = items.find((item) => item.id === where.id);
+    if (row) Object.assign(row, data);
+    return row;
+  });
   db.tx.productRound.update.mockResolvedValue({});
   db.tx.payment.create.mockImplementation(async ({ data }) => {
     payments.push(data);
@@ -105,6 +120,7 @@ beforeEach(() => {
   });
   db.tx.payment.groupBy.mockImplementation(async () => ['PAYMENT', 'REFUND'].map((kind) => ({
     kind,
+    payeeKind: 'SHOP',
     _sum: { amount: payments.filter((payment) => payment.kind === kind).reduce((sum, p) => sum + p.amount, 0) },
   })));
 });
@@ -133,7 +149,8 @@ describe('Cancellation after partial handover', () => {
     expect(items[1]!.cancelledAt).toBeInstanceOf(Date);
     expect(db.tx.productRound.update).toHaveBeenCalledTimes(1);
     expect(db.tx.productRound.update).toHaveBeenCalledWith({
-      where: { id: 'round-waiting' }, data: { stock: { increment: 1 } },
+      where: { id: 'round-waiting' },
+      data: { stock: { increment: 1 }, available: { increment: 1 } },
     });
   });
 

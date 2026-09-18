@@ -19,25 +19,40 @@ import { subtotalOf } from '../../lib/money.js';
 import { ipRateLimit } from '../../lib/rateLimit.js';
 import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
-import { consumeReadyStock } from '../../services/readyStock.js';
+import { reserveReadyStock } from '../../services/readyStock.js';
+import { releaseExpiredReadyHoldsForRounds } from '../../services/stockHold.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, customerFacingStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
 import { paidPayoutDaySet } from '../../services/returns.js';
 import { computeTotals, paymentState, recalcOrderTotals, unpaidCargoFee } from '../../services/money.js';
 import { syncOrderCargoFee, lineCargoFee } from '../../services/cargoFee.js';
 import { getSettings, getSettingsCached, districtNames, leasingFeeFromSettings, leasingTiersOf, leasingPayGapsOf } from '../../services/settings.js';
+import { snapshotLeasingOperatorAdminId } from '../../services/itgelSettlement.js';
 import { peekStorageFee, syncOrderStorageFee } from '../../services/storageFee.js';
 import { comboLabel, findSku } from '../../lib/skuStock.js';
+import {
+  indexExpiredReserved,
+  loadExpiredReservedHolds,
+  sellableAvailable,
+  skuExpiredKey,
+  unpaidHoldCutoff,
+} from '../../lib/expiredReadyHold.js';
 import { itemNeedsFulfilment, orderCanChooseFulfilment, syncOrderFulfilment } from '../../lib/itemFulfilment.js';
 import { normalizeDeliveryPlace } from '../../lib/locations.js';
 import { itemSelections, normalizeSelections, optionsFromVariants } from '../../lib/options.js';
 import { leasingFlagOf, leasingHoldsGoods, serializeLeasing } from '../../lib/leasing.js';
+import {
+  orderContactKindOf,
+  publicLeasingContactOf,
+  serializeOrderContact,
+} from '../../lib/leasingContact.js';
 import { checkoutFlagsForGroup, splitItemsByPayee } from '../../lib/inventoryOwner.js';
 import { cancelQpayInvoice, qpayAccountForOrder, rememberQpayInvoice } from '../../services/qpay.js';
 
 export const publicOrdersRouter = Router();
 
 const createBody = z.object({
+  /** Хуучин клиент. Эзэн болон профайлыг энэ талбараар солихгүй. */
   name: z.string().trim().min(1).max(80).optional(),
   note: z.string().trim().max(500).optional(),
   leasing: z.boolean().optional(),
@@ -89,6 +104,11 @@ publicOrdersRouter.post(
       include: { product: { include: { variants: true } }, optionPrices: true, skuStocks: true },
     });
     const byId = new Map(rounds.map((r) => [r.id, r]));
+    const holdCutoff = unpaidHoldCutoff((await getSettingsCached()).unpaidCancelHours, now);
+    const readyIds = rounds.filter((round) => round.closeAt === null).map((round) => round.id);
+    const expiredIndex = holdCutoff
+      ? indexExpiredReserved(await loadExpiredReservedHolds(prisma, holdCutoff, readyIds))
+      : indexExpiredReserved([]);
 
     // Захиалахын өмнө бүх мөрийг шалгана — хэсэгчилсэн захиалга үүсгэхгүй.
     for (const item of body.items) {
@@ -97,7 +117,11 @@ publicOrdersRouter.post(
       const name = round.product.name;
 
       if (round.product.deletedAt !== null) throw conflict(`"${name}" олдсонгүй.`);
-      if (round.status !== 'ACTIVE') {
+      const sellableRound = sellableAvailable(
+        round.available ?? Math.max(0, round.stock - (round.reserved ?? 0)),
+        expiredIndex.byRound.get(round.id) ?? 0,
+      );
+      if (round.status !== 'ACTIVE' && !(round.closeAt === null && round.status === 'SOLD_OUT' && sellableRound > 0)) {
         throw conflict(`"${name}" одоогоор захиалах боломжгүй байна.`);
       }
       if (round.closeAt && round.closeAt <= now) {
@@ -125,13 +149,27 @@ publicOrdersRouter.post(
           if (!sku) {
             throw conflict(`"${name}" барааны сонголтыг сонгоно уу.`);
           }
-          if (sku.stock < item.qty) {
+          const stored = sku.available ?? Math.max(0, sku.stock - (sku.reserved ?? 0));
+          const available = sellableAvailable(
+            stored,
+            expiredIndex.bySku.get(skuExpiredKey(round.id, sku.skuKey)) ?? 0,
+          );
+          if (available < item.qty) {
             throw conflict(
-              `"${name}" — ${comboLabel(picked)} үлдэгдэл хүрэлцэхгүй байна (${sku.stock}).`,
+              `"${name}" — ${comboLabel(picked)} үлдэгдэл хүрэлцэхгүй байна (${available}).`,
             );
           }
-        } else if (round.stock < item.qty) {
-          throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${round.stock}).`);
+        } else if (
+          sellableAvailable(
+            round.available ?? Math.max(0, round.stock - (round.reserved ?? 0)),
+            expiredIndex.byRound.get(round.id) ?? 0,
+          ) < item.qty
+        ) {
+          const available = sellableAvailable(
+            round.available ?? Math.max(0, round.stock - (round.reserved ?? 0)),
+            expiredIndex.byRound.get(round.id) ?? 0,
+          );
+          throw conflict(`"${name}" барааны үлдэгдэл хүрэлцэхгүй байна (${available}).`);
         }
       }
     }
@@ -147,14 +185,12 @@ publicOrdersRouter.post(
     const shopLeasingFee = shopFlags.isLeasing ? await leasingFeeFromSettings(shopSubtotal) : 0;
 
     const persistOrders = async (tx: Prisma.TransactionClient) => {
-      if (body.name && body.name !== customer.name) {
-        await tx.customer.update({ where: { id: customerId }, data: { name: body.name } });
-      }
-
+      await releaseExpiredReadyHoldsForRounds(tx, readyIds, holdCutoff);
       for (const mapped of items) {
         const round = byId.get(mapped.roundId)!;
         if (round.closeAt !== null) continue;
-        await consumeReadyStock(tx, round, mapped.qty, mapped.selections);
+        await reserveReadyStock(tx, round, mapped.qty, mapped.selections);
+        mapped.stockHold = 'RESERVED';
       }
 
       const created: Order[] = [];
@@ -165,6 +201,7 @@ publicOrdersRouter.post(
           isLeasing: shopFlags.isLeasing,
           leasingFee: shopLeasingFee,
           payeeKind: shopFlags.payeeKind,
+          leasingOperatorAdminId: await snapshotLeasingOperatorAdminId(tx, shopFlags.isLeasing),
           note: body.note ?? null,
           items: shopItems,
         });
@@ -193,6 +230,7 @@ publicOrdersRouter.post(
           isLeasing: leasingFlags.isLeasing,
           leasingFee: 0,
           payeeKind: leasingFlags.payeeKind,
+          leasingOperatorAdminId: await snapshotLeasingOperatorAdminId(tx, leasingFlags.isLeasing),
           note: body.note ?? null,
           items: leasingOwnedItems,
         });
@@ -389,6 +427,11 @@ publicOrdersRouter.get(
         writtenOffAmount: order.writtenOffAmount,
         debtClosedAt: order.debtClosedAt?.toISOString() ?? null,
         ...leasing,
+        contact: serializeOrderContact({
+          kind: orderContactKindOf(order),
+          shop: settings,
+          leasing: publicLeasingContactOf(settings),
+        }),
         paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
         fulfilment: order.fulfilment,
         createdAt: order.createdAt.toISOString(),
@@ -528,6 +571,7 @@ publicOrdersRouter.patch(
           isLeasing: flag.isLeasing,
           leasingFee: flag.leasingFee,
           payeeKind: flag.isLeasing ? 'LEASING' : 'SHOP',
+          leasingOperatorAdminId: await snapshotLeasingOperatorAdminId(tx, flag.isLeasing),
           qpayInvoiceId: null,
           qpayInvoiceAt: null,
         },

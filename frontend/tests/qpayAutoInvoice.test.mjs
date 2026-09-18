@@ -17,3 +17,10 @@ test("fee then principal, or a new amount, issues another invoice", () => {
   assert.equal(shouldIssueAutoInvoice(fee, principal), true);
   assert.equal(shouldIssueAutoInvoice(principal, next), true);
 });
+
+test("cargo invoices are distinct from leftover leasing invoices", () => {
+  const leftover = autoInvoiceDedupeKey({ code: "PH-ABC123", kind: "split", amount: 15000 });
+  const cargo = autoInvoiceDedupeKey({ code: "PH-ABC123", kind: "cargo", amount: 15000 });
+  assert.notEqual(leftover, cargo);
+  assert.equal(shouldIssueAutoInvoice(leftover, cargo), true);
+});

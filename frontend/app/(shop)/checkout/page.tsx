@@ -56,20 +56,12 @@ export default function CheckoutPage() {
       return;
     }
     const idempotencyKey = checkoutIdempotencyKey();
-    const draft = readCheckoutDraft();
-    const name = draft.name.trim() || session.me.name?.trim() || "";
+    const draft = readCheckoutDraft(session.me.id);
     setError(null);
     setBusy(true);
     try {
-      if (name !== (session.me.name ?? "")) {
-        await api.updateMe({
-          name: name || null,
-        });
-        await session.refresh();
-      }
       const order = await api.createOrder(
         {
-          name: name || undefined,
           note: draft.note.trim() || undefined,
           leasing: shopLines.length > 0 ? leasing : false,
           items: cart.lines.map((line) => ({

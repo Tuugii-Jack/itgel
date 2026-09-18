@@ -45,7 +45,7 @@ export type RoundWithProduct = ProductRound & {
     RoundOptionPrice,
     'kind' | 'value' | 'sellPrice' | 'costPrice' | 'selections'
   >[];
-  skuStocks?: Pick<RoundSkuStock, 'selections' | 'stock'>[];
+  skuStocks?: Pick<RoundSkuStock, 'selections' | 'stock' | 'reserved' | 'available'>[];
 };
 
 /**
@@ -70,8 +70,11 @@ export function publicProduct(round: RoundWithProduct, now = new Date()) {
     price: range.price,
     priceMax: range.priceMax,
     optionPrices: publicOptionPrices(round.optionPrices),
-    skuStocks: publicSkuStocks(round.skuStocks),
-    stock: round.stock,
+    skuStocks: publicSkuStocks(round.skuStocks, { availableAsStock: round.closeAt === null }),
+    stock:
+      round.closeAt === null
+        ? (round.available ?? Math.max(0, round.stock - (round.reserved ?? 0)))
+        : round.stock,
     type: round.closeAt === null ? ('ready' as const) : ('order' as const),
     ownerKind: round.ownerKind === 'LEASING' ? ('LEASING' as const) : ('SHOP' as const),
     status: effectiveRoundStatus(round.status, round.closeAt, now),
@@ -113,6 +116,9 @@ export function adminRound(
     sellPrice: round.sellPrice,
     optionPrices: adminOptionPrices(round.optionPrices),
     skuStocks: publicSkuStocks(round.skuStocks),
+    stock: round.stock,
+    reserved: round.reserved ?? 0,
+    available: round.available ?? Math.max(0, round.stock - (round.reserved ?? 0)),
     profit: round.sellPrice - round.costPrice,
     marginPercent: marginPercent(round.sellPrice, round.costPrice),
     note: round.note,

@@ -201,6 +201,9 @@ export const leasingApi = {
     bankAccountNumber?: string;
     bankAccountName?: string;
     paymentNote?: string;
+    publicName?: string;
+    contactPhone?: string;
+    chatUrl?: string;
   }) =>
     request<LeasingSettings>("/leasing/settings", {
       ...adminAuth,
@@ -388,4 +391,112 @@ export const leasingApi = {
       method: "POST",
       body,
     }).then((r) => r.data),
+
+  readyStock: () =>
+    request<{ onHand: number; reserved: number; available: number; roundCount: number }>(
+      "/leasing/finance/ready/stock",
+      adminAuth,
+    ).then((r) => r.data),
+
+  readySales: (query?: Query) =>
+    request<{
+      totals: { received: number; refunded: number; net: number; receivable: number };
+      rows: {
+        id: string;
+        code: string;
+        status: string;
+        createdAt: string;
+        customer: { id: string; name: string; phone: string | null };
+        items: { id: string; name: string; qty: number; unitPrice: number; total: number; cancelled: boolean }[];
+        paidAmount: number;
+        refundedAmount: number;
+        dueAmount: number;
+        paymentState: string;
+        sourceTransfer: { id: string; sourceOrderId: string; paidKeptAmount: number } | null;
+      }[];
+    }>("/leasing/finance/ready/sales", { ...adminAuth, query }).then((r) => r.data),
+
+  itgelSummary: (day?: string) =>
+    request<{
+      day: string;
+      orderCount: number;
+      lineCount: number;
+      amount: number;
+      paidAmount: number;
+      remainingAmount: number;
+      priorUnpaidAmount: number;
+      priorUnpaidCount: number;
+      unpaidTodayIds: string[];
+      lines: {
+        id: string;
+        orderCode: string;
+        customerName: string;
+        productName: string;
+        qty: number;
+        amount: number;
+        paidAmount: number;
+        remainingAmount: number;
+        status: string;
+        statusLabel: string;
+      }[];
+    }>("/leasing/finance/itgel/summary", {
+      ...adminAuth,
+      query: day ? { day } : undefined,
+    }).then((r) => r.data),
+
+  itgelPay: (body: {
+    settlementIds: string[];
+    method: "QPAY" | "BANK_TRANSFER";
+    bankRef?: string;
+    bankDate?: string;
+    receiptUrl?: string;
+    note?: string;
+  }) =>
+    request<{
+      payment: { id: string; amount: number; status: string; method: string; qpayInvoiceId: string | null };
+      invoice: {
+        invoiceId: string;
+        qrText: string;
+        qrImage: string | null;
+        urls: { name: string; description: string; logo: string | null; link: string }[];
+        amount: number;
+      } | null;
+    }>("/leasing/finance/itgel/pay", {
+      ...adminAuth,
+      method: "POST",
+      body,
+    }).then((r) => r.data),
+
+  itgelVerify: (id: string) =>
+    request<{ id: string; status: string; amount: number }>(`/leasing/finance/itgel/payments/${id}/verify`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
+  itgelCancel: (id: string) =>
+    request<{ ok: boolean }>(`/leasing/finance/itgel/payments/${id}/cancel`, {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
+  itgelPayments: () =>
+    request<
+      {
+        id: string;
+        method: string;
+        amount: number;
+        status: string;
+        qpayInvoiceId: string | null;
+        bankRef: string | null;
+        bankDate: string | null;
+        receiptUrl: string | null;
+        createdAt: string;
+        rejectedReason: string | null;
+        note: string | null;
+        lines: {
+          amount: number;
+          settlement: { id: string; orderCode: string; productName: string; statusLabel: string };
+        }[];
+      }[]
+    >("/leasing/finance/itgel/payments", adminAuth).then((r) => r.data),
 };

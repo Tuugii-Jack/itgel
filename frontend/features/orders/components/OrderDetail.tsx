@@ -15,7 +15,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import { adminApi } from "@/lib/api";
-import { dayTimeLabel, money, phoneLabel } from "@/lib/format";
+import { customerNameLabel, dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { PAYMENT_TONE } from "@/lib/payment";
 import { leasingGoodsArrived } from "@/lib/leasing";
 import { hasCustomizedSms } from "@/lib/smsEditOnce";
@@ -114,7 +114,7 @@ export function OrderDetail({
                 router.push("/admin/customers");
               }}
             >
-              {order.customer.name ?? "Нэргүй"}
+              {customerNameLabel(order.customer.name)}
             </Link>
             {" · "}
             <a href={`tel:${order.customer.phone}`} className="tnum text-ink no-underline">

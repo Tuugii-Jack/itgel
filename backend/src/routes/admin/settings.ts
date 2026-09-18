@@ -36,6 +36,7 @@ const patchBody = z.object({
   unpaidCancelHours: z.coerce.number().int().min(0).max(720).optional(),
   storageFreeDays: z.coerce.number().int().min(0).max(365).optional(),
   storageFeePerDay: z.coerce.number().int().min(0).max(1_000_000).optional(),
+  leasingSettlementAdminId: z.union([z.string().trim().max(40), z.null()]).optional(),
 });
 
 adminSettingsRouter.patch(
@@ -49,9 +50,27 @@ adminSettingsRouter.patch(
     const max = body.defaultLeadMaxDays ?? before.defaultLeadMaxDays;
     if (min > max) throw badRequest('defaultLeadMinDays нь defaultLeadMaxDays-с их байж болохгүй.');
 
+    let leasingSettlementAdminId = body.leasingSettlementAdminId;
+    if (leasingSettlementAdminId !== undefined) {
+      leasingSettlementAdminId = leasingSettlementAdminId?.trim() || null;
+      if (leasingSettlementAdminId) {
+        const admin = await prisma.adminUser.findUnique({
+          where: { id: leasingSettlementAdminId },
+          select: { id: true, role: true, isActive: true },
+        });
+        if (!admin || admin.role !== 'LEASING') {
+          throw badRequest('Итгэлд төлөх хариуцагч нь лизингийн админ байх ёстой.');
+        }
+        if (!admin.isActive && leasingSettlementAdminId !== before.leasingSettlementAdminId) {
+          throw badRequest('Шинэ захиалгад идэвхгүй лизингийн админ оноохгүй.');
+        }
+      }
+    }
+
     // Хүргэлтийн төлбөрийг дэлгүүр авдаггүй — зөвхөн дүүргийн нэрийг хадгална.
     const data = {
       ...body,
+      ...(leasingSettlementAdminId !== undefined ? { leasingSettlementAdminId } : {}),
       ...(body.deliveryFees
         ? {
             deliveryFees: Object.fromEntries(

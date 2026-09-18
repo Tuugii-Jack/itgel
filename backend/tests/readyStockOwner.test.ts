@@ -5,7 +5,16 @@ describe('Бэлэн үлдэгдэл эзэмшигчид буцна', () => {
   it('цуцлалт тухайн тойргийн id дээр нэмнэ', async () => {
     const tx = {
       roundSkuStock: { update: vi.fn(async () => ({})) },
-      productRound: { update: vi.fn(async () => ({})) },
+      productRound: {
+        update: vi.fn(async () => ({})),
+        findUniqueOrThrow: vi.fn(async () => ({
+          id: 'leasing-round',
+          skuStocks: [{ id: 'sku-1', available: 1 }],
+          available: 1,
+          status: 'ACTIVE',
+          closeAt: null,
+        })),
+      },
     };
     await restoreReadyStock(
       tx as never,
@@ -14,27 +23,30 @@ describe('Бэлэн үлдэгдэл эзэмшигчид буцна', () => {
         closeAt: null,
         status: 'ACTIVE',
         skuStocks: [{ id: 'sku-1', skuKey: 'Өнгө=Хар', stock: 0 }],
+        stock: 0,
       },
       1,
       { Өнгө: 'Хар' },
     );
     expect(tx.productRound.update).toHaveBeenCalledWith({
       where: { id: 'leasing-round' },
-      data: { stock: { increment: 1 } },
+      data: { stock: { increment: 1 }, available: { increment: 1 } },
     });
     expect(tx.roundSkuStock.update).toHaveBeenCalledWith({
       where: { id: 'sku-1' },
-      data: { stock: { increment: 1 } },
+      data: { stock: { increment: 1 }, available: { increment: 1 } },
     });
   });
 
   it('SKU үлдэгдэл дуусмагц хоёр дахь хасалтыг таслана', async () => {
-    const sku = { id: 'sku-1', skuKey: 'Өнгө=Хар', stock: 1 };
+    const sku = { id: 'sku-1', skuKey: 'Өнгө=Хар', stock: 1, available: 1, reserved: 0 };
     const tx = {
       roundSkuStock: {
-        updateMany: vi.fn(async ({ where }: { where: { id: string; stock: { gte: number } } }) => {
-          if (where.id !== sku.id || sku.stock < where.stock.gte) return { count: 0 };
-          sku.stock -= where.stock.gte;
+        updateMany: vi.fn(async ({ where }: { where: { id: string; available?: { gte: number }; stock?: { gte: number } } }) => {
+          const need = where.available?.gte ?? where.stock?.gte ?? 0;
+          if (where.id !== sku.id || sku.available < need || sku.stock < need) return { count: 0 };
+          sku.stock -= need;
+          sku.available -= need;
           return { count: 1 };
         }),
       },
@@ -43,8 +55,9 @@ describe('Бэлэн үлдэгдэл эзэмшигчид буцна', () => {
         findUniqueOrThrow: vi.fn(async () => ({
           id: 'r1',
           skuStocks: [sku],
-          stock: sku.stock,
-          status: 'ACTIVE',
+          available: sku.available,
+          status: sku.available > 0 ? 'ACTIVE' : 'SOLD_OUT',
+          closeAt: null,
         })),
         update: vi.fn(),
       },
@@ -52,7 +65,7 @@ describe('Бэлэн үлдэгдэл эзэмшигчид буцна', () => {
     const round = {
       id: 'r1',
       closeAt: null,
-      status: 'ACTIVE',
+      status: 'ACTIVE' as const,
       stock: 1,
       product: { name: 'Цамц' },
       skuStocks: [sku],
@@ -62,5 +75,6 @@ describe('Бэлэн үлдэгдэл эзэмшигчид буцна', () => {
       status: 409,
     });
     expect(sku.stock).toBe(0);
+    expect(sku.available).toBe(0);
   });
 });

@@ -55,7 +55,7 @@ export const shopOrdersApi = {
     }).then((r) => r.data),
 
   /** QPay нэхэмжлэл үүсгэх — QR + deeplink. Лизингт `amount`-аар хувааж төлнө. */
-  createQpayInvoice: (code: string, body?: { amount?: number }) =>
+  createQpayInvoice: (code: string, body?: { amount?: number; purpose?: "ORDER" | "CARGO" }) =>
     request<QpayInvoice>(`/orders/${code}/qpay/invoice`, {
       method: "POST",
       auth: "customer",

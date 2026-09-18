@@ -1,35 +1,45 @@
 const KEY = "itgel.checkout.draft";
 
 export type CheckoutDraft = {
-  name: string;
-  phone: string;
+  customerId: string;
   note: string;
 };
 
-const empty = (): CheckoutDraft => ({ name: "", phone: "", note: "" });
+const empty = (customerId = ""): CheckoutDraft => ({ customerId, note: "" });
 
-export function readCheckoutDraft(): CheckoutDraft {
-  if (typeof window === "undefined") return empty();
+function storage(): Storage | null {
   try {
-    const raw = sessionStorage.getItem(KEY);
-    if (!raw) return empty();
+    if (typeof sessionStorage === "undefined") return null;
+    return sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function readCheckoutDraft(customerId: string): CheckoutDraft {
+  if (!customerId) return empty();
+  try {
+    const raw = storage()?.getItem(KEY);
+    if (!raw) return empty(customerId);
     const v = JSON.parse(raw) as Partial<CheckoutDraft>;
+    const storedId = typeof v.customerId === "string" ? v.customerId : "";
+    if (!storedId || storedId !== customerId) return empty(customerId);
     return {
-      name: typeof v.name === "string" ? v.name : "",
-      phone: typeof v.phone === "string" ? v.phone : "",
+      customerId,
       note: typeof v.note === "string" ? v.note : "",
     };
   } catch {
-    return empty();
+    return empty(customerId);
   }
 }
 
 export function writeCheckoutDraft(draft: CheckoutDraft): void {
-  if (typeof window === "undefined") return;
-  sessionStorage.setItem(KEY, JSON.stringify(draft));
+  storage()?.setItem(
+    KEY,
+    JSON.stringify({ customerId: draft.customerId, note: draft.note }),
+  );
 }
 
 export function clearCheckoutDraft(): void {
-  if (typeof window === "undefined") return;
-  sessionStorage.removeItem(KEY);
+  storage()?.removeItem(KEY);
 }

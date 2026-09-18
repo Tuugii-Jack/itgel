@@ -74,6 +74,26 @@ export function scheduleCloseExpired(): void {
     });
 }
 
+let unpaidCancelInFlight = false;
+let lastUnpaidCancelAt = 0;
+const UNPAID_CANCEL_THROTTLE_MS = 15 * 60 * 1000;
+
+/**
+ * Vercel дээр node-cron ажиллахгүй. SMS cron цуцлалт дууддаггүй.
+ * Каталог/нүүрний хүсэлт дээр 15 мин тутам нөхөж ажиллуулна — төлөгчийн браузер шаардахгүй.
+ */
+export function scheduleCancelUnpaid(): void {
+  const now = Date.now();
+  if (unpaidCancelInFlight || now - lastUnpaidCancelAt < UNPAID_CANCEL_THROTTLE_MS) return;
+  lastUnpaidCancelAt = now;
+  unpaidCancelInFlight = true;
+  void cancelUnpaidOrders()
+    .catch((err) => console.error('[cron] cancelUnpaidOrders:', err))
+    .finally(() => {
+      unpaidCancelInFlight = false;
+    });
+}
+
 /**
  * Хуучин автомат SMS — унтарсан. Бараа ирснийг админ багцаас товчоор илгээнэ.
  */

@@ -46,9 +46,17 @@ export function PaymentPanel({
     setLeasing(Boolean(order.isLeasing));
   });
 
+  const cargoDue = order.unpaidCargoFee ?? 0;
+  const shopQpay = store.qpay ?? { enabled: false, ready: false };
   const qpay = leasingPayee
     ? (store.leasingQpay ?? { enabled: false, ready: false })
-    : (store.qpay ?? { enabled: false, ready: false });
+    : shopQpay;
+  const showLeasingQr =
+    !order.isLeasing ||
+    !order.leasingFeePaid ||
+    (order.leasingPrincipalDue ?? 0) > 0 ||
+    cargoDue <= 0;
+  const showCargoQr = Boolean(order.isLeasing && order.leasingFeePaid && cargoDue > 0 && !feeHold);
 
   const fee = leasing
     ? order.isLeasing && (order.leasingFee ?? 0) > 0
@@ -147,14 +155,21 @@ export function PaymentPanel({
                 value={`${money(order.leasingFee ?? 0)} · төлсөн`}
               />
               <Row
-                label="Үндсэн үлдэгдэл"
-                value={money(order.leasingPrincipalDue ?? order.dueAmount)}
+                label="Лизингийн төлбөр"
+                value={money(order.leasingPrincipalDue ?? 0)}
               />
               {(order.storageFee ?? 0) > 0 && orderAccruesStorage(order) && (
                 <Row label="Агуулахын хураамж" value={money(order.storageFee)} />
               )}
               {(order.cargoFee ?? 0) > 0 && (
-                <Row label="Карго" value={money(order.cargoFee)} />
+                <Row
+                  label="Карго — Итгэл"
+                  value={
+                    (order.unpaidCargoFee ?? 0) > 0
+                      ? money(order.unpaidCargoFee ?? 0)
+                      : `${money(order.cargoFee ?? 0)} · төлсөн`
+                  }
+                />
               )}
               <Row label="Нийт үлдэгдэл" value={money(order.dueAmount)} big />
             </div>
@@ -173,14 +188,34 @@ export function PaymentPanel({
           Төлбөрийн хэлбэр шинэчилж байна…
         </div>
       ) : (
-        <QpayPay
-          order={order}
-          store={store}
-          ready={qpay.ready}
-          hideAmounts={unpaid}
-          onPaid={onClaimed}
-          onPayAttempt={onPayAttempt}
-        />
+        <div className="flex flex-col gap-4">
+          {showLeasingQr && (
+            <QpayPay
+              order={order}
+              store={store}
+              ready={qpay.ready}
+              hideAmounts={unpaid}
+              onPaid={onClaimed}
+              onPayAttempt={onPayAttempt}
+            />
+          )}
+          {showCargoQr && (
+            <div className="rounded-[8px] border border-line p-3">
+              <div className="mb-2 text-[14px] font-medium">Карго — Итгэл</div>
+              <p className="mt-0 mb-3 text-[13px] leading-[1.5] text-ink-2">
+                Карго төлбөр Итгэлийн QPay-ээр орно. Лизингийн үндсэн төлбөрт тооцогдохгүй.
+              </p>
+              <QpayPay
+                order={order}
+                store={store}
+                ready={shopQpay.ready}
+                purpose="CARGO"
+                onPaid={onClaimed}
+                onPayAttempt={onPayAttempt}
+              />
+            </div>
+          )}
+        </div>
       )}
     </Card>
   );

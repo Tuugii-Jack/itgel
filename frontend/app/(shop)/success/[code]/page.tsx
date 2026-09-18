@@ -6,6 +6,7 @@ import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } f
 import { useSearchParams } from "next/navigation";
 import { PhoneAuthForm } from "@/components/PhoneAuthForm";
 import { PaymentPanel } from "@/components/PaymentPanel";
+import { OrderContactCard } from "@/components/shop/OrderContactCard";
 import { Qr } from "@/components/Qr";
 import { Button, Card, ErrorNote, Skeleton, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
@@ -170,7 +171,7 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
           feeHold={feeHold}
         />
       ) : (
-        <Confirmed order={order} store={store} trackUrl={trackUrl} />
+        <Confirmed order={order} extraOrder={alsoOrder} store={store} trackUrl={trackUrl} />
       )}
     </div>
   );
@@ -236,13 +237,11 @@ function Pending({
                 </Button>
               </Link>
             )}
-            {store && (
-              <p className="m-0 text-center text-[13px] text-ink-2">
-                Асуух зүйл байвал{" "}
-                <a href={`tel:${store.phone.replace(/\D/g, "")}`} className="tnum">
-                  {store.phone}
-                </a>
-              </p>
+            {order.contact && (
+              <OrderContactCard order={order} shopHours={store?.workHours} />
+            )}
+            {extraOrder?.contact && extraOrder.contact.kind !== order.contact?.kind && (
+              <OrderContactCard order={extraOrder} shopHours={store?.workHours} />
             )}
           </div>
         </div>
@@ -290,7 +289,7 @@ function OrderSummary({ order }: { order: PublicOrder }) {
       )}
       {(order.cargoFee ?? 0) > 0 && (
         <div className="flex justify-between gap-3">
-          <span className="text-ink-2">Карго</span>
+          <span className="text-ink-2">{order.isLeasing ? "Карго — Итгэл" : "Карго"}</span>
           <span>{money(order.cargoFee)}</span>
         </div>
       )}
@@ -359,10 +358,12 @@ function OrderSummary({ order }: { order: PublicOrder }) {
 
 function Confirmed({
   order,
+  extraOrder,
   store,
   trackUrl,
 }: {
   order: PublicOrder;
+  extraOrder?: PublicOrder | null;
   store: Store | null;
   trackUrl: string;
 }) {
@@ -508,6 +509,16 @@ function Confirmed({
             <span className="tnum">{phoneLabel(order.customer.phone)}</span> дугаар руу SMS
             илгээнэ.
           </p>
+        )}
+        {order.contact && (
+          <div className="w-full">
+            <OrderContactCard order={order} shopHours={store?.workHours} />
+          </div>
+        )}
+        {extraOrder?.contact && extraOrder.contact.kind !== order.contact?.kind && (
+          <div className="w-full">
+            <OrderContactCard order={extraOrder} shopHours={store?.workHours} />
+          </div>
         )}
       </div>
         </div>

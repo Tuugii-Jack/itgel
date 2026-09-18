@@ -19,7 +19,6 @@ import {
   PAYMENT_STATE_LABEL,
   paymentState,
   confirmThreshold,
-  shopDueAmount,
 } from '../../services/money.js';
 import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
 import {
@@ -30,6 +29,7 @@ import {
 import { syncOrderStorageFee } from '../../services/storageFee.js';
 import { listOrdersByProduct, ordersByProductDates } from '../../services/ordersByProduct.js';
 import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
+import { attachItgelToItems } from '../../services/itgelSettlement.js';
 import { staffPhoneFields } from '../../services/phoneOtp.js';
 
 export const adminOrdersRouter = Router();
@@ -127,7 +127,7 @@ adminOrdersRouter.get(
           statusLabel: orderStatusLabel(order.status),
           customer: {
             id: order.customer.id,
-            name: order.customer.name,
+            name: order.customer.name?.trim() || null,
             phone: order.customer.phone,
             email: order.customer.email,
           },
@@ -141,7 +141,6 @@ adminOrdersRouter.get(
           paidAmount: order.paidAmount,
           refundedAmount: order.refundedAmount,
           dueAmount: order.dueAmount,
-          shopDueAmount: shopDueAmount(order),
           paymentState: paymentState(computeTotals(order)),
           ...serializeLeasing(order, gaps),
           paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
@@ -457,8 +456,12 @@ adminOrdersRouter.get(
     });
     if (!order) throw notFound('Захиалга олдсонгүй.');
 
+    const detail = adminOrderDetail(order, leasingPayGapsOf(await getSettingsCached()));
     res.json({
-      data: adminOrderDetail(order, leasingPayGapsOf(await getSettingsCached())),
+      data: {
+        ...detail,
+        items: await attachItgelToItems(detail.items, order.id),
+      },
     });
   }),
 );

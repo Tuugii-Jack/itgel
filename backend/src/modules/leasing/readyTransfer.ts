@@ -7,6 +7,7 @@ import { optionsFromVariants, selectionsOf, sizeColorFromSelections } from '../.
 import { skuKeyOf } from '../../lib/skuStock.js';
 import { recalcOrderTotals } from '../../services/money.js';
 import { syncOrderCargoFee } from '../../services/cargoFee.js';
+import { linkSettlementsToReadyTransfer } from '../../services/itgelSettlement.js';
 
 export const READY_TRANSFER_REASON_CODE = 'READY_TRANSFER';
 
@@ -287,6 +288,8 @@ export async function executeReadyTransfer(input: {
           skuKey: skuKeyOf(row.selections),
           selections: row.selections,
           stock: row.stock,
+          reserved: 0,
+          available: row.stock,
         })),
       });
       if (skuRows.some((row) => row.price !== skuRows[0]!.price)) {
@@ -302,7 +305,7 @@ export async function executeReadyTransfer(input: {
       }
       await tx.productRound.update({
         where: { id: dest.destRoundId },
-        data: { stock },
+        data: { stock, reserved: 0, available: stock },
       });
     }
 
@@ -343,6 +346,12 @@ export async function executeReadyTransfer(input: {
         remainingActiveQty: preview.remainingActiveQty,
       },
     });
+
+    await linkSettlementsToReadyTransfer(
+      tx,
+      input.lines.map((line) => line.orderItemId),
+      transfer.id,
+    );
 
     await audit(
       {
@@ -543,6 +552,8 @@ async function ensureDestRound(
       costPrice: 0,
       sellPrice: input.resaleUnitPrice,
       stock: 0,
+      reserved: 0,
+      available: 0,
       closeAt: null,
       status: 'ACTIVE',
       ownerKind: 'LEASING',
@@ -562,7 +573,7 @@ async function ensureDestRound(
   } else {
     await tx.productRound.update({
       where: { id: round.id },
-      data: { stock: input.qty },
+      data: { stock: input.qty, reserved: 0, available: input.qty },
     });
   }
 

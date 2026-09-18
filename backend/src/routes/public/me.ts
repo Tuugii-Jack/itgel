@@ -10,6 +10,11 @@ import { requireCustomer } from "../../middleware/auth.js";
 import { asyncHandler, query, validate } from "../../middleware/validate.js";
 import { computeTotals, paymentState } from "../../services/money.js";
 import { serializeLeasing } from "../../lib/leasing.js";
+import {
+  orderContactKindOf,
+  publicLeasingContactOf,
+  serializeOrderContact,
+} from "../../lib/leasingContact.js";
 import { buildTimeline } from "../../services/orders.js";
 import {
   customerFacingStatusLabel,
@@ -20,7 +25,7 @@ import {
 } from "../../services/serialize.js";
 import { paidPayoutDaySet } from "../../services/returns.js";
 import { ipLimiters, RateLimiter } from "../../lib/rateLimit.js";
-import { currentLeasingPayGaps } from "../../services/settings.js";
+import { currentLeasingPayGaps, getSettingsCached } from "../../services/settings.js";
 import { issueEmailChange } from "../../services/emailChange.js";
 import { issuePhoneChange, resendPhoneChange, verifyPhoneChange } from "../../services/phoneChange.js";
 import { signCustomerToken } from "../../lib/jwt.js";
@@ -38,7 +43,7 @@ function serializeCustomer(c: Customer) {
     id: c.id,
     email: c.email,
     phone: c.phone,
-    name: c.name,
+    name: c.name?.trim() || null,
     emailVerified: Boolean(c.emailVerifiedAt),
     hasPassword: Boolean(c.passwordHash),
     address: {
@@ -283,7 +288,7 @@ publicMeRouter.get(
     const q = query<z.infer<typeof ordersQuery>>(req);
     const where = { customerId: req.auth!.sub, deletedAt: null };
 
-    const [total, spent, activeCount, orders] = await Promise.all([
+    const [total, spent, activeCount, orders, settings] = await Promise.all([
       prisma.order.count({ where }),
       prisma.order.aggregate({
         where: { ...where, status: { not: "CANCELLED" } },
@@ -304,6 +309,7 @@ publicMeRouter.get(
           payments: { where: { kind: "REFUND" }, select: { createdAt: true } },
         },
       }),
+      getSettingsCached(),
     ]);
 
     const paidDays = await paidPayoutDaySet(
@@ -335,6 +341,11 @@ publicMeRouter.get(
           dueAmount: order.dueAmount,
           paymentState: paymentState(computeTotals(order)),
           ...serializeLeasing(order, gaps),
+          contact: serializeOrderContact({
+            kind: orderContactKindOf(order),
+            shop: settings,
+            leasing: publicLeasingContactOf(settings),
+          }),
           fulfilment: order.fulfilment,
           canChooseFulfilment: orderCanChooseFulfilment(order),
           itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),

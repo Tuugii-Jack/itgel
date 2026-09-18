@@ -1,10 +1,14 @@
 {
   "regions": ["sin1"],
   "crons": [
-    {
-      "path": "/api/cron/sms-delivery",
-      "schedule": "0 0 * * *"
-    }
+  {
+    "path": "/api/cron/sms-delivery",
+    "schedule": "0 0 * * *"
+  },
+  {
+    "path": "/api/cron/unpaid-cancel",
+    "schedule": "0 0 * * *"
+  }
   ],
   "functions": {
     "src/app.ts": {

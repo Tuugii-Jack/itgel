@@ -106,6 +106,14 @@ export interface PublicOrder {
   nextPayAmount?: number;
   nextPayKind?: LeasingPayKind;
   payPlan?: LeasingPayPlan | null;
+  shopDueAmount?: number;
+  unpaidCargoFee?: number;
+  contact?: {
+    kind: "SHOP" | "LEASING";
+    title: string;
+    phone: string | null;
+    chatUrl: string | null;
+  };
   /** Хэрэглэгч "шилжүүлсэн" гэж мэдэгдсэн огноо. Төлбөр орсны баталгаа биш. */
   paymentClaimedAt: string | null;
   fulfilment: Fulfilment | null;
@@ -222,6 +230,15 @@ export interface AdminOrderDetail extends Omit<AdminOrderRow, "itemCount"> {
     profit: number;
     cancelledAt: string | null;
     cancelReason: string | null;
+    itgel?: {
+      id: string;
+      status: string;
+      statusLabel: string;
+      amount: number;
+      paidAmount: number;
+      remainingAmount: number;
+      confirmedAt: string;
+    } | null;
   })[];
   total: number;
   netPaid: number;

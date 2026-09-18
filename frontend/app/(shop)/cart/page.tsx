@@ -2,21 +2,22 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
 import { PhoneAuthForm } from "@/components/PhoneAuthForm";
 import {
   Button,
   Empty,
-  Input,
   Spinner,
   Textarea,
 } from "@/components/ui";
+import { api } from "@/lib/api";
 import { useCart, type CartLine } from "@/lib/cart";
-import { writeCheckoutDraft } from "@/lib/checkoutDraft";
+import { readCheckoutDraft, writeCheckoutDraft } from "@/lib/checkoutDraft";
 import { useSession } from "@/lib/session";
 import { money, relativeDay } from "@/lib/format";
-import { formatSelections } from "@/lib/options";
+import { formatMnPhone } from "@/lib/phone";
+import { formatSelections, selectedSkuStock } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 
 /**
@@ -31,18 +32,53 @@ export default function CartPage() {
   const router = useRouter();
   const toast = useToast();
 
-  const [buyerName, setBuyerName] = useState("");
-  const [contactPhone, setContactPhone] = useState("");
   const [note, setNote] = useState("");
-  const me = session.me;
-  const [seenMe, setSeenMe] = useState(me);
-  if (me !== seenMe) {
-    setSeenMe(me);
-    if (me?.name) setBuyerName(me.name);
-    if (me?.phone) setContactPhone(me.phone);
+  const [fetchedUnsellable, setFetchedUnsellable] = useState<Set<string>>(new Set());
+  const customerId = session.me?.id ?? "";
+  const [noteOwner, setNoteOwner] = useState(customerId);
+  if (noteOwner !== customerId) {
+    setNoteOwner(customerId);
+    setNote(customerId ? readCheckoutDraft(customerId).note : "");
   }
 
   const groups = useMemo(() => groupLines(cart.lines), [cart.lines]);
+  const readyLines = useMemo(
+    () => cart.lines.filter((line) => line.type === "ready"),
+    [cart.lines],
+  );
+  const unsellable = readyLines.length === 0 ? new Set<string>() : fetchedUnsellable;
+
+  useEffect(() => {
+    if (readyLines.length === 0) return;
+    const ids = [...new Set(readyLines.map((line) => line.productId))];
+    let cancelled = false;
+    void Promise.all(
+      ids.map((id) =>
+        api.product(id).then(
+          (product) => ({ id, product }),
+          () => ({ id, product: null }),
+        ),
+      ),
+    ).then((rows) => {
+      if (cancelled) return;
+      const byId = new Map(rows.map((row) => [row.id, row.product]));
+      const gone = new Set<string>();
+      for (const line of readyLines) {
+        const product = byId.get(line.productId);
+        if (!product) {
+          gone.add(line.productId);
+          continue;
+        }
+        const sku = selectedSkuStock(product.skuStocks, line.selections ?? {}, product.options);
+        const stock = sku != null ? sku : product.stock;
+        if (stock <= 0) gone.add(line.productId);
+      }
+      setFetchedUnsellable(gone);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [readyLines]);
 
   if (!cart.ready || session.loading) {
     return (
@@ -72,9 +108,12 @@ export default function CartPage() {
       toast.error("Эхлээд нэвтэрнэ үү.");
       return;
     }
+    if (unsellable.size > 0) {
+      toast.error("Үлдэгдэлгүй бэлэн барааг сагснаас хасна уу.");
+      return;
+    }
     writeCheckoutDraft({
-      name: buyerName.trim(),
-      phone: contactPhone.trim(),
+      customerId: session.me.id,
       note: note.trim(),
     });
     router.push("/checkout");
@@ -101,6 +140,7 @@ export default function CartPage() {
                   <CartRow
                     key={`${line.productId}-${JSON.stringify(line.selections)}`}
                     line={line}
+                    unsellable={unsellable.has(line.productId)}
                     onQty={(qty) => cart.setQty(index, qty)}
                     onRemove={() => cart.remove(index)}
                   />
@@ -126,46 +166,19 @@ export default function CartPage() {
                   Захиалагчийн мэдээлэл
                 </div>
 
-                <div className='flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-4'>
-                  <div className='flex flex-col gap-2'>
-                    <span className='text-[13px] text-ink-2'>Нэр</span>
-                    <Input
-                      value={buyerName}
-                      onChange={setBuyerName}
-                      placeholder='Овог, нэр'
-                    />
-                  </div>
-                  <div className='flex flex-col gap-2'>
-                    <span className='text-[13px] text-ink-2'>Утас</span>
-                    <div className='flex h-11 items-center justify-between gap-3 rounded-[8px] border border-line px-3'>
-                      <span className='truncate text-[15px]'>
-                        {session.me.phone ?? session.me.email ?? "—"}
-                      </span>
-                      <button
-                        type='button'
-                        onClick={() => session.signOut()}
-                        className='cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ink-2 underline'
-                      >
-                        Гарах
-                      </button>
-                    </div>
-                  </div>
-                  <div className='flex flex-col gap-2 lg:col-span-2'>
-                    <span className='text-[13px] text-ink-2'>
-                      Утасны дугаар
+                <div className='flex flex-col gap-2'>
+                  <span className='text-[13px] text-ink-2'>Утас</span>
+                  <div className='flex h-11 items-center justify-between gap-3 rounded-[8px] border border-line px-3'>
+                    <span className='tnum truncate text-[15px]'>
+                      {session.me.phone ? formatMnPhone(session.me.phone) : "—"}
                     </span>
-                    <Input
-                      value={contactPhone}
-                      onChange={(v) =>
-                        setContactPhone(v.replace(/\D/g, "").slice(0, 8))
-                      }
-                      inputMode='numeric'
-                      placeholder='99112233'
-                      className='tnum'
-                    />
-                    <div className='text-[13px] text-ink-2'>
-                      Хүргэлт, холбоо барихад ашиглана. Хоосон байж болно.
-                    </div>
+                    <button
+                      type='button'
+                      onClick={() => session.signOut()}
+                      className='cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ink-2 underline'
+                    >
+                      Гарах
+                    </button>
                   </div>
                 </div>
 
@@ -212,10 +225,12 @@ function Rule() {
 
 function CartRow({
   line,
+  unsellable,
   onQty,
   onRemove,
 }: {
   line: CartLine;
+  unsellable?: boolean;
   onQty: (qty: number) => void;
   onRemove: () => void;
 }) {
@@ -266,6 +281,11 @@ function CartRow({
             <RemoveButton onRemove={onRemove} />
           </div>
           {options && <div className='text-[13px] text-muted'>{options}</div>}
+          {unsellable && (
+            <div className='text-[13px] text-danger'>
+              Энэ бэлэн бараа одоо авах боломжгүй. Үлдэгдэл дууссан эсвэл түр нөөцлөгдсөн.
+            </div>
+          )}
           <div className='flex items-center justify-between gap-2'>
             {qtyControl("sm")}
             <div className='tnum text-[15px] font-medium'>
@@ -288,6 +308,11 @@ function CartRow({
         <div className='min-w-0'>
           <div className='text-[15px]'>{line.name}</div>
           {options && <div className='text-[13px] text-muted'>{options}</div>}
+          {unsellable && (
+            <div className='text-[13px] text-danger'>
+              Энэ бэлэн бараа одоо авах боломжгүй. Үлдэгдэл дууссан эсвэл түр нөөцлөгдсөн.
+            </div>
+          )}
         </div>
 
         <div className='justify-self-start'>{qtyControl("lg")}</div>
