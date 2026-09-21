@@ -123,6 +123,7 @@ export type SettlementPayResult = {
   payment: { id: string; amount: number; status: string; method: string; qpayInvoiceId: string | null };
   invoice: SettlementInvoice | null;
   invoicePending?: boolean;
+  resumed?: boolean;
 };
 
 export type SettlementListPage = {

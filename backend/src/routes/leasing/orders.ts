@@ -311,21 +311,49 @@ leasingOrdersRouter.get(
       batch: true,
     } as const;
 
-    let orders = await prisma.order.findMany({
-      where,
-      orderBy: q.deleted ? { deletedAt: 'desc' } : { createdAt: 'desc' },
-      include,
-      ...(scheduleFilter ? {} : { skip: (q.page - 1) * q.pageSize, take: q.pageSize }),
-    });
-    let total = scheduleFilter ? orders.length : await prisma.order.count({ where });
+    const orderBy = q.deleted ? ({ deletedAt: 'desc' } as const) : ({ createdAt: 'desc' } as const);
+    let orders: Awaited<ReturnType<typeof prisma.order.findMany<{ include: typeof include }>>>;
+    let total: number;
     if (scheduleFilter) {
-      orders = orders.filter((order) => {
-        const plan = buildLeasingPayPlan({ ...order, payGaps: gaps });
-        if (q.goods === 'pay_due_today') return Boolean(plan?.dueToday);
-        return Boolean(plan?.overdue);
+      const candidates = await prisma.order.findMany({
+        where,
+        orderBy,
+        select: {
+          id: true,
+          createdAt: true,
+          subtotal: true,
+          leasingFee: true,
+          paidAmount: true,
+          refundedAmount: true,
+          isLeasing: true,
+        },
       });
-      total = orders.length;
-      orders = orders.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
+      const matchedIds = candidates
+        .filter((order) => {
+          const plan = buildLeasingPayPlan({ ...order, payGaps: gaps });
+          return q.goods === 'pay_due_today' ? Boolean(plan?.dueToday) : Boolean(plan?.overdue);
+        })
+        .map((order) => order.id);
+      total = matchedIds.length;
+      const pageIds = matchedIds.slice((q.page - 1) * q.pageSize, q.page * q.pageSize);
+      const pageRows = pageIds.length
+        ? await prisma.order.findMany({ where: { id: { in: pageIds } }, include })
+        : [];
+      const byId = new Map(pageRows.map((row) => [row.id, row]));
+      orders = pageIds
+        .map((id) => byId.get(id))
+        .filter((row): row is (typeof pageRows)[number] => Boolean(row));
+    } else {
+      [orders, total] = await Promise.all([
+        prisma.order.findMany({
+          where,
+          orderBy,
+          include,
+          skip: (q.page - 1) * q.pageSize,
+          take: q.pageSize,
+        }),
+        prisma.order.count({ where }),
+      ]);
     }
 
     res.json({

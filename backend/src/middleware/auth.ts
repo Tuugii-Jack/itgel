@@ -8,6 +8,7 @@ import {
   isAdminRole,
 } from '../lib/adminRoles.js';
 import { verifyToken, type AdminToken, type TokenPayload } from '../lib/jwt.js';
+import { addAuthDuration } from '../lib/requestTiming.js';
 import { prisma } from '../prisma.js';
 import { resolveSupabaseToken, supabaseAuthConfigured } from '../lib/supabaseAuth.js';
 import {
@@ -44,22 +45,27 @@ function cookieToken(req: Request, kind: 'admin' | 'customer'): string | null {
  * JWT доторх эрх хуучирсан байж болно — идэвх, role, tokenVersion-ийг DB-ээс авна.
  */
 async function liveAdmin(payload: AdminToken): Promise<AdminToken | null> {
-  const user = await prisma.adminUser.findUnique({
-    where: { id: payload.sub },
-    select: {
-      id: true,
-      email: true,
-      role: true,
-      isActive: true,
-      tokenVersion: true,
-      phoneVerifiedAt: true,
-      loginPhones: { select: { id: true }, take: 1 },
-    },
-  });
-  if (!user?.isActive) return null;
-  if (user.loginPhones.length === 0 && !user.phoneVerifiedAt) return null;
-  if (payload.tv !== user.tokenVersion) return null;
-  return { sub: user.id, email: user.email, role: user.role, tv: user.tokenVersion };
+  const started = Date.now();
+  try {
+    const user = await prisma.adminUser.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        isActive: true,
+        tokenVersion: true,
+        phoneVerifiedAt: true,
+        loginPhones: { select: { id: true }, take: 1 },
+      },
+    });
+    if (!user?.isActive) return null;
+    if (user.loginPhones.length === 0 && !user.phoneVerifiedAt) return null;
+    if (payload.tv !== user.tokenVersion) return null;
+    return { sub: user.id, email: user.email, role: user.role, tv: user.tokenVersion };
+  } finally {
+    addAuthDuration(Date.now() - started);
+  }
 }
 
 type AuthKind = 'customer' | 'admin';

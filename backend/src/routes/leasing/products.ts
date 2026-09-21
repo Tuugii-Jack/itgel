@@ -58,6 +58,14 @@ const listQuery = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
+const listInclude = {
+  category: true,
+  rounds: {
+    where: { deletedAt: null, closeAt: null },
+    orderBy: { roundNo: 'desc' as const },
+  },
+} satisfies Prisma.ProductInclude;
+
 const roundInclude = {
   category: true,
   variants: { orderBy: { sortOrder: 'asc' as const } },
@@ -173,7 +181,7 @@ leasingProductsRouter.get(
         orderBy: { updatedAt: 'desc' },
         skip: (q.page - 1) * q.pageSize,
         take: q.pageSize,
-        include: roundInclude,
+        include: listInclude,
       }),
     ]);
     const stats = await roundStats(products.flatMap((p) => p.rounds.map((r) => r.id)));

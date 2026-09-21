@@ -16,6 +16,7 @@
  */
 import { env } from '../../env.js';
 import { conflict, isQpayTimeoutError, qpayTimeout } from '../../lib/errors.js';
+import { addQpayDuration } from '../../lib/requestTiming.js';
 
 export interface QpayBankLink {
   name: string;
@@ -252,6 +253,10 @@ async function getAccessToken(kind: QpayAccountKind): Promise<string> {
   return state.inflight;
 }
 
+function qpaySafePath(path: string): string {
+  return path.replace(/\/invoice\/[^/?]+/g, '/invoice/:id').replace(/\/payment\/[^/?]+/g, '/payment/:id');
+}
+
 async function qpayFetch<T>(
   path: string,
   init: RequestInit = {},
@@ -265,6 +270,7 @@ async function qpayFetch<T>(
   const timer = timeoutMs
     ? setTimeout(() => ac!.abort(), timeoutMs)
     : null;
+  const started = Date.now();
   try {
     const res = await fetch(`${creds.baseUrl}${path}`, {
       ...init,
@@ -278,7 +284,7 @@ async function qpayFetch<T>(
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.error(`[qpay:${kind}]`, path, res.status, body);
+      console.error(`[qpay:${kind}]`, qpaySafePath(path), res.status);
       throw conflict(qpayErrorMessage(res.status, body), { qpayStatus: res.status });
     }
 
@@ -289,6 +295,9 @@ async function qpayFetch<T>(
     }
     throw error;
   } finally {
+    const ms = Date.now() - started;
+    addQpayDuration(ms);
+    console.info(`[qpay] ${init.method ?? 'GET'} ${qpaySafePath(path)} ${ms}ms`);
     if (timer) clearTimeout(timer);
   }
 }

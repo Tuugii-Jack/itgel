@@ -15,8 +15,10 @@ import {
   type SettlementDisplayStatus,
   type SettlementInvoice,
   type SettlementLine,
+  type SettlementListPage,
   type SettlementOperator,
   type SettlementPayment,
+  type SettlementPaymentPage,
   type SettlementPreview,
   type SettlementSummary,
 } from "./types";
@@ -25,7 +27,6 @@ import {
   historyDateLabel,
   mergeSelectionOnPage,
   mergeSelectionOnReload,
-  payRequestFromPreview,
   restoredQpay,
   selectedRemainingTotal,
 } from "./selection";
@@ -110,6 +111,7 @@ export function ItgelWorkspace({
   const [invoice, setInvoice] = useState<SettlementInvoice | null>(null);
   const [paymentId, setPaymentId] = useState<string | null>(null);
   const [invoicePending, setInvoicePending] = useState(false);
+  const [invoiceCreating, setInvoiceCreating] = useState(false);
   const [bankOpen, setBankOpen] = useState(false);
   const [bankRef, setBankRef] = useState("");
   const [bankDate, setBankDate] = useState(ubToday);
@@ -131,62 +133,56 @@ export function ItgelWorkspace({
 
   const load = useCallback(async () => {
     try {
-      const [dayData, ops] = await Promise.all([
+      const summaryReq =
         variant === "leasing"
           ? leasingApi.itgelSummary({ day, ownerAdminId: ownerQuery })
-          : adminApi.leasingSettlementSummary({ day, ownerAdminId: ownerQuery }),
-        showOwnerFilter
+          : adminApi.leasingSettlementSummary({ day, ownerAdminId: ownerQuery });
+      const opsReq = showOwnerFilter
+        ? variant === "leasing"
+          ? leasingApi.itgelOperators()
+          : adminApi.leasingSettlementOperators()
+        : Promise.resolve([] as SettlementOperator[]);
+      const pendingReq =
+        variant === "leasing"
+          ? leasingApi.itgelPending(ownerQuery)
+          : adminApi.leasingSettlementPayments({ status: "PENDING", ownerAdminId: ownerQuery }).then((page) => page.rows);
+      const unpaidQuery = {
+        from: from || undefined,
+        to: to || undefined,
+        status: status || undefined,
+        q: q || undefined,
+        remaining: "1" as const,
+        ownerAdminId: ownerQuery,
+      };
+      const historyQuery = {
+        status: "CONFIRMED",
+        from: from || undefined,
+        to: to || undefined,
+        ownerAdminId: ownerQuery,
+      };
+      const listReq: Promise<SettlementListPage | SettlementPaymentPage | null> =
+        tab === "unpaid"
           ? variant === "leasing"
-            ? leasingApi.itgelOperators()
-            : adminApi.leasingSettlementOperators()
-          : Promise.resolve([] as SettlementOperator[]),
-      ]);
+            ? leasingApi.itgelSettlements(unpaidQuery)
+            : adminApi.leasingSettlements(unpaidQuery)
+          : tab === "history"
+            ? variant === "leasing"
+              ? leasingApi.itgelPayments(historyQuery)
+              : adminApi.leasingSettlementPayments(historyQuery)
+            : Promise.resolve(null);
+
+      const [dayData, ops, pendingRows, list] = await Promise.all([summaryReq, opsReq, pendingReq, listReq]);
       setSummary(dayData);
       setOperators(ops);
-      const pendingRows =
-        variant === "leasing"
-          ? await leasingApi.itgelPending(ownerQuery)
-          : (await adminApi.leasingSettlementPayments({ status: "PENDING", ownerAdminId: ownerQuery })).rows;
       setPending(pendingRows);
-
-      if (tab === "unpaid") {
-        const page =
-          variant === "leasing"
-            ? await leasingApi.itgelSettlements({
-                from: from || undefined,
-                to: to || undefined,
-                status: status || undefined,
-                q: q || undefined,
-                remaining: "1",
-                ownerAdminId: ownerQuery,
-              })
-            : await adminApi.leasingSettlements({
-                from: from || undefined,
-                to: to || undefined,
-                status: status || undefined,
-                q: q || undefined,
-                remaining: "1",
-                ownerAdminId: ownerQuery,
-              });
+      if (tab === "unpaid" && list) {
+        const page = list as SettlementListPage;
         setLines(page.rows);
         setNextCursor(page.nextCursor);
         setListTotals({ count: page.totals.count, remainingAmount: page.totals.remainingAmount });
         setSelected((prev) => mergeSelectionOnReload(prev, page.rows));
-      } else if (tab === "history") {
-        const page =
-          variant === "leasing"
-            ? await leasingApi.itgelPayments({
-                status: "CONFIRMED",
-                from: from || undefined,
-                to: to || undefined,
-                ownerAdminId: ownerQuery,
-              })
-            : await adminApi.leasingSettlementPayments({
-                status: "CONFIRMED",
-                from: from || undefined,
-                to: to || undefined,
-                ownerAdminId: ownerQuery,
-              });
+      } else if (tab === "history" && list) {
+        const page = list as SettlementPaymentPage;
         setHistory(page.rows);
         setHistoryCursor(page.nextCursor);
       }
@@ -323,17 +319,13 @@ export function ItgelWorkspace({
       return;
     }
     setBusy(true);
+    if (method === "QPAY") setInvoiceCreating(true);
     try {
-      const live = await leasingApi.itgelPreview({
+      const result = await leasingApi.itgelPay({
         settlementIds,
+        method,
         amount,
         allocations,
-        ownerAdminId: ownerQuery,
-      });
-      const request = payRequestFromPreview(live);
-      const result = await leasingApi.itgelPay({
-        ...request,
-        method,
         ownerAdminId: ownerQuery,
         bankRef: method === "BANK_TRANSFER" ? bankRef : undefined,
         bankDate: method === "BANK_TRANSFER" ? bankDate : undefined,
@@ -341,19 +333,27 @@ export function ItgelWorkspace({
       });
       if (method === "QPAY") {
         showInvoice(result);
-        if (result.invoicePending) toast.error("QPay нэхэмжлэл тодорхойгүй. Үргэлжлүүлж хайна; шинээр үүсгэхгүй.");
-        else toast.success("QPay нэхэмжлэл бэлэн.");
+        if (result.invoice?.qrText || result.invoice?.qrImage || result.invoice?.invoiceId) {
+          toast.success(result.resumed ? "Хадгалсан нэхэмжлэлийг үргэлжлүүллээ." : "QPay нэхэмжлэл бэлэн.");
+        } else if (result.invoicePending) {
+          toast.error("QPay нэхэмжлэл тодорхойгүй. Үргэлжлүүлж хайна; шинээр үүсгэхгүй.");
+        } else {
+          toast.error("QPay хариу ирээгүй. Амжилттай гэж үзэхгүй.");
+        }
       } else {
         toast.success("Шилжүүлэг бүртгэгдлээ. Үндсэн админ батална.");
         setBankOpen(false);
       }
       setCustomOpen(false);
       setPreview(null);
+      setInvoiceCreating(false);
+      setBusy(false);
       await load();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Төлбөр үүсгэж чадсангүй.");
     } finally {
       setBusy(false);
+      setInvoiceCreating(false);
     }
   };
 
@@ -406,8 +406,12 @@ export function ItgelWorkspace({
     try {
       const result = await leasingApi.itgelResume(id);
       showInvoice(result);
-      if (result.invoice) toast.success("Нэхэмжлэлийг үргэлжлүүллээ.");
-      else toast.error("QPay нэхэмжлэл тодорхойгүй. Жагсаалтаас олдохгүй бол цуцална уу.");
+      if (result.invoice) {
+        toast.success(result.resumed ? "Нэхэмжлэлийг хадгалсан QR-оос сэргээлээ." : "Нэхэмжлэлийг үргэлжлүүллээ.");
+      } else {
+        toast.error("QPay нэхэмжлэл тодорхойгүй. Жагсаалтаас олдохгүй бол цуцална уу.");
+      }
+      setBusy(false);
       await load();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Үргэлжлүүлж чадсангүй.");
@@ -581,13 +585,20 @@ export function ItgelWorkspace({
         </div>
       )}
 
-      {(activeInvoice || activeInvoicePending) && activePaymentId && (
+      {(invoiceCreating || activeInvoice || activeInvoicePending) && (
         <Card className="mb-4 flex flex-col items-center gap-3 p-4">
           <div className="text-[15px] font-medium">
-            {activeInvoicePending
-              ? "QPay нэхэмжлэл тодорхойгүй. Үргэлжлүүлэх нь хайна, шинээр үүсгэхгүй."
-              : `Итгэлд төлөх QPay · ${money(activeInvoice?.amount ?? 0)}`}
+            {invoiceCreating
+              ? "Нэхэмжлэл үүсгэж байна"
+              : activeInvoicePending
+                ? "QPay нэхэмжлэл тодорхойгүй. Үргэлжлүүлэх нь хайна, шинээр үүсгэхгүй."
+                : `Итгэлд төлөх QPay · ${money(activeInvoice?.amount ?? 0)}`}
           </div>
+          {invoiceCreating ? (
+            <p className="mb-0 mt-0 text-center text-[13px] text-ink-2">
+              QPay хариу иртэл хүлээнэ. Хариу ирээгүй байхад амжилттай гэж үзэхгүй.
+            </p>
+          ) : null}
           {activeInvoice?.qrImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -600,6 +611,7 @@ export function ItgelWorkspace({
           ) : activeInvoice?.qrText ? (
             <Qr value={activeInvoice.qrText} size={160} />
           ) : null}
+          {activePaymentId && !invoiceCreating ? (
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
             <Button variant="outline" loading={busy} onClick={() => void resume(activePaymentId)}>
               Үргэлжлүүлэх
@@ -611,6 +623,7 @@ export function ItgelWorkspace({
               Нэхэмжлэл цуцлах
             </Button>
           </div>
+          ) : null}
         </Card>
       )}
 

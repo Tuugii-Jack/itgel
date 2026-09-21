@@ -41,6 +41,7 @@ export function corsMiddlewareOptions(origin: CorsOptions['origin']): CorsOption
       'Cache-Control',
       'Pragma',
     ],
+    exposedHeaders: ['Server-Timing'],
     maxAge: CORS_PREFLIGHT_MAX_AGE_SEC,
     optionsSuccessStatus: 204,
   };

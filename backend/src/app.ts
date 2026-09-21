@@ -4,6 +4,7 @@ import express from 'express';
 import helmet from 'helmet';
 import { env } from './env.js';
 import { API_HELMET_OPTIONS, corsMiddlewareOptions, setPrivateApiCache } from './lib/cors.js';
+import { requestTimingMiddleware } from './lib/requestTiming.js';
 import { errorHandler, notFoundHandler } from './middleware/error.js';
 import { apiRouter } from './routes/index.js';
 import { allowedWebOrigins } from './lib/sessionCookies.js';
@@ -25,6 +26,8 @@ export function createApp() {
   // OPTIONS-ийг no-store-оор бүү дар — preflight cache (maxAge) ажиллах ёстой.
   app.use(setPrivateApiCache);
   app.use(cors(corsMiddlewareOptions(corsOrigin())));
+  // compression-ийн дараа — Server-Timing header илгээгдэхээс өмнө бичигдэнэ.
+  app.use(requestTimingMiddleware);
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/health', (_req, res) => {

@@ -75,6 +75,17 @@ export default function LeasingReadyPage() {
     return { open, hidden, total: rows.length };
   }, [rows]);
 
+  const openEdit = async (product: AdminProduct) => {
+    setBusyId(`edit:${product.id}`);
+    try {
+      setEditing(await leasingApi.product(product.id));
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : "Барааг ачаалж чадсангүй.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const setStatus = async (row: { product: AdminProduct; round: AdminRound }, status: ProductStatus) => {
     setBusyId(row.round.id);
     try {
@@ -180,7 +191,7 @@ export default function LeasingReadyPage() {
                   </Td>
                   <Td>
                     <div className="flex flex-wrap justify-end gap-2">
-                      <Button size="sm" variant="outline" onClick={() => setEditing(product)}>
+                      <Button size="sm" variant="outline" loading={busyId === `edit:${product.id}`} onClick={() => void openEdit(product)}>
                         Засах
                       </Button>
                       {round.status === "HIDDEN" ? (

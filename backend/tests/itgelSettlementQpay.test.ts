@@ -225,6 +225,8 @@ describe('attachQpayInvoice', () => {
     const result = await attachQpayInvoice('pay-1', 'admin:lease-a');
     expect(result.invoice?.invoiceId).toBe('inv-keep');
     expect(state.createInvoice).not.toHaveBeenCalled();
+    expect(state.getInvoice).not.toHaveBeenCalled();
+    expect(state.listInvoices).not.toHaveBeenCalled();
   });
 
   it('хуучин INVOICED, payload байхгүй бол GET-ээр QR сэргээнэ, create хийхгүй', async () => {

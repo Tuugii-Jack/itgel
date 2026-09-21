@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { badRequest } from '../lib/errors.js';
@@ -371,108 +371,89 @@ async function ownerNameMap(ids: string[]): Promise<Map<string, string>> {
   return new Map(rows.map((row) => [row.id, row.name]));
 }
 
+function metricNum(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export async function daySummary(input: {
   ownerAdminId?: string;
   day: Date;
 }) {
   const from = startOfUbDay(input.day);
   const to = endOfUbDay(input.day);
-  const owner = input.ownerAdminId ? { ownerAdminId: input.ownerAdminId } : {};
-  const notVoid: Prisma.ItgelSettlementWhereInput = { status: { not: 'VOID' }, ...owner };
-  const [
-    createdRows,
-    unpaidAgg,
-    priorUnpaid,
-    paidOnDay,
-    paidUnknown,
-    pendingBank,
-    pendingQpay,
-    unassigned,
-  ] = await Promise.all([
-    prisma.itgelSettlement.findMany({
-      where: { ...notVoid, confirmedAt: { gte: from, lte: to } },
-      include: SETTLEMENT_LIVE_INCLUDE,
-      orderBy: { confirmedAt: 'asc' },
-    }),
-    prisma.itgelSettlement.aggregate({
-      where: { ...notVoid, status: { in: ['OPEN', 'INVOICED', 'PENDING_BANK'] } },
-      _sum: { remainingAmount: true },
-      _count: true,
-    }),
-    prisma.itgelSettlement.aggregate({
-      where: {
-        ...notVoid,
-        status: { in: ['OPEN', 'INVOICED', 'PENDING_BANK'] },
-        confirmedAt: { lt: from },
-      },
-      _sum: { remainingAmount: true },
-      _count: true,
-    }),
-    prisma.itgelSettlementPayment.aggregate({
-      where: {
-        ...owner,
-        status: 'CONFIRMED',
-        confirmedAt: { gte: from, lte: to },
-      },
-      _sum: { amount: true },
-      _count: true,
-    }),
-    prisma.itgelSettlementPayment.aggregate({
-      where: {
-        ...owner,
-        status: 'CONFIRMED',
-        confirmedAt: null,
-      },
-      _sum: { amount: true },
-      _count: true,
-    }),
-    prisma.itgelSettlementPayment.aggregate({
-      where: { ...owner, status: 'PENDING', method: 'BANK_TRANSFER' },
-      _sum: { amount: true },
-      _count: true,
-    }),
-    prisma.itgelSettlementPayment.aggregate({
-      where: { ...owner, status: 'PENDING', method: 'QPAY' },
-      _sum: { amount: true },
-      _count: true,
-    }),
-    listMissingSettlementOrders(),
+  const ownerSql = input.ownerAdminId
+    ? Prisma.sql`AND "ownerAdminId" = ${input.ownerAdminId}`
+    : Prisma.sql``;
+  const [settlementRows, paymentRows] = await Promise.all([
+    prisma.$queryRaw<Array<Record<string, unknown>>>`
+      SELECT
+        coalesce(sum("remainingAmount") FILTER (WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK')), 0)::int AS "totalUnpaidRemaining",
+        count(*) FILTER (WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK'))::int AS "totalUnpaidCount",
+        coalesce(sum(amount) FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}), 0)::int AS "createdOnDayAmount",
+        count(*) FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to})::int AS "createdOnDayCount",
+        count(DISTINCT "sourceOrderId") FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to})::int AS "createdOnDayOrders",
+        coalesce(sum("remainingAmount") FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}), 0)::int AS "remainingAmount",
+        coalesce(sum("remainingAmount") FILTER (
+          WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK') AND "confirmedAt" < ${from}
+        ), 0)::int AS "priorUnpaidAmount",
+        count(*) FILTER (
+          WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK') AND "confirmedAt" < ${from}
+        )::int AS "priorUnpaidCount"
+      FROM "ItgelSettlement"
+      WHERE status <> 'VOID' ${ownerSql}
+    `,
+    prisma.$queryRaw<Array<Record<string, unknown>>>`
+      SELECT
+        coalesce(sum(amount) FILTER (
+          WHERE status = 'CONFIRMED' AND "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}
+        ), 0)::int AS "paidOnDayAmount",
+        count(*) FILTER (
+          WHERE status = 'CONFIRMED' AND "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}
+        )::int AS "paidOnDayCount",
+        coalesce(sum(amount) FILTER (WHERE status = 'CONFIRMED' AND "confirmedAt" IS NULL), 0)::int AS "paidUnknownAmount",
+        count(*) FILTER (WHERE status = 'CONFIRMED' AND "confirmedAt" IS NULL)::int AS "paidUnknownCount",
+        coalesce(sum(amount) FILTER (WHERE status = 'PENDING' AND method = 'BANK_TRANSFER'), 0)::int AS "pendingBankAmount",
+        count(*) FILTER (WHERE status = 'PENDING' AND method = 'BANK_TRANSFER')::int AS "pendingBankCount",
+        coalesce(sum(amount) FILTER (WHERE status = 'PENDING' AND method = 'QPAY'), 0)::int AS "pendingQpayAmount",
+        count(*) FILTER (WHERE status = 'PENDING' AND method = 'QPAY')::int AS "pendingQpayCount"
+      FROM "ItgelSettlementPayment"
+      WHERE TRUE ${ownerSql}
+    `,
   ]);
-
-  const names = await ownerNameMap(createdRows.map((row) => row.ownerAdminId));
-  const lines = createdRows.map((row) =>
-    serializeSettlement({ ...row, ownerName: names.get(row.ownerAdminId) ?? null }),
-  );
-  const createdOnDayAmount = createdRows.reduce((sum, row) => sum + row.amount, 0);
-  const remainingAmount = createdRows.reduce((sum, row) => sum + row.remainingAmount, 0);
-  const unassignedAmount = unassigned.reduce((sum, row) => sum + row.amount, 0);
+  const settlements = settlementRows[0] ?? {};
+  const payments = paymentRows[0] ?? {};
+  const createdOnDayAmount = metricNum(settlements.createdOnDayAmount);
+  const createdOnDayCount = metricNum(settlements.createdOnDayCount);
+  const createdOnDayOrders = metricNum(settlements.createdOnDayOrders);
+  const paidOnDayAmount = metricNum(payments.paidOnDayAmount);
 
   return {
     day: ubDateString(from),
-    totalUnpaidRemaining: unpaidAgg._sum.remainingAmount ?? 0,
-    totalUnpaidCount: unpaidAgg._count,
+    totalUnpaidRemaining: metricNum(settlements.totalUnpaidRemaining),
+    totalUnpaidCount: metricNum(settlements.totalUnpaidCount),
     createdOnDayAmount,
-    createdOnDayCount: createdRows.length,
-    createdOnDayOrders: new Set(createdRows.map((row) => row.sourceOrderId)).size,
-    paidOnDayAmount: paidOnDay._sum.amount ?? 0,
-    paidOnDayCount: paidOnDay._count,
-    paidUnknownAmount: paidUnknown._sum.amount ?? 0,
-    paidUnknownCount: paidUnknown._count,
-    pendingBankAmount: pendingBank._sum.amount ?? 0,
-    pendingBankCount: pendingBank._count,
-    pendingQpayAmount: pendingQpay._sum.amount ?? 0,
-    pendingQpayCount: pendingQpay._count,
-    orderCount: new Set(createdRows.map((row) => row.sourceOrderId)).size,
-    lineCount: createdRows.length,
+    createdOnDayCount,
+    createdOnDayOrders,
+    paidOnDayAmount,
+    paidOnDayCount: metricNum(payments.paidOnDayCount),
+    paidUnknownAmount: metricNum(payments.paidUnknownAmount),
+    paidUnknownCount: metricNum(payments.paidUnknownCount),
+    pendingBankAmount: metricNum(payments.pendingBankAmount),
+    pendingBankCount: metricNum(payments.pendingBankCount),
+    pendingQpayAmount: metricNum(payments.pendingQpayAmount),
+    pendingQpayCount: metricNum(payments.pendingQpayCount),
+    orderCount: createdOnDayOrders,
+    lineCount: createdOnDayCount,
     amount: createdOnDayAmount,
-    paidAmount: paidOnDay._sum.amount ?? 0,
-    remainingAmount,
-    priorUnpaidAmount: priorUnpaid._sum.remainingAmount ?? 0,
-    priorUnpaidCount: priorUnpaid._count,
-    unassignedOrderCount: unassigned.length,
-    unassignedAmount,
-    lines,
-    unpaidTodayIds: createdRows.filter((row) => row.status === 'OPEN').map((row) => row.id),
+    paidAmount: paidOnDayAmount,
+    remainingAmount: metricNum(settlements.remainingAmount),
+    priorUnpaidAmount: metricNum(settlements.priorUnpaidAmount),
+    priorUnpaidCount: metricNum(settlements.priorUnpaidCount),
+    unassignedOrderCount: 0,
+    unassignedAmount: 0,
+    lines: [],
+    unpaidTodayIds: [],
   };
 }
 
@@ -489,19 +470,22 @@ export async function listSettlements(input: {
   const search = input.q?.trim();
   const take = Math.min(Math.max(input.take ?? 50, 1), 100);
   const where: Prisma.ItgelSettlementWhereInput = {
-      status: { not: 'VOID' },
-      ...(input.ownerAdminId ? { ownerAdminId: input.ownerAdminId } : {}),
-      ...(input.remainingOnly ? { remainingAmount: { gt: 0 } } : {}),
-      ...(displayStatusWhere(input.status) ?? {}),
-      ...(input.from || input.to
+    AND: [
+      { status: { not: 'VOID' } },
+      input.ownerAdminId ? { ownerAdminId: input.ownerAdminId } : {},
+      input.remainingOnly
+        ? { remainingAmount: { gt: 0 }, status: { in: ['OPEN', 'INVOICED', 'PENDING_BANK'] } }
+        : {},
+      displayStatusWhere(input.status) ?? {},
+      input.from || input.to
         ? {
             confirmedAt: {
               gte: input.from,
               lte: input.to,
             },
           }
-        : {}),
-      ...(search
+        : {},
+      search
         ? {
             OR: [
               { sourceOrderCode: { contains: search, mode: 'insensitive' } },
@@ -511,7 +495,8 @@ export async function listSettlements(input: {
               { sourceOrder: { customer: { name: { contains: search, mode: 'insensitive' } } } },
             ],
           }
-        : {}),
+        : {},
+    ],
   };
   const cursor = decodeTimeIdCursor(input.cursor);
   const cursorWhere: Prisma.ItgelSettlementWhereInput | undefined = cursor

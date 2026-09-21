@@ -195,6 +195,7 @@ leasingFinanceRouter.post(
         },
         invoice: result.invoice,
         invoicePending: result.invoicePending,
+        resumed: result.resumed,
       },
     });
   }),
@@ -233,6 +234,7 @@ leasingFinanceRouter.post(
         },
         invoice: result.invoice,
         invoicePending: result.invoicePending,
+        resumed: result.resumed,
       },
     });
   }),

@@ -74,34 +74,12 @@ export default function LeasingOrdersPage() {
 
   const fetchOrders = useCallback(
     async (page: number) => {
-      const sms = smsKindOf(goods) !== null;
-      const first = await leasingApi.orders({
+      return leasingApi.orders({
         goods,
         q: query || undefined,
         page,
         pageSize: PAGE_SIZE,
       });
-      if (!sms || page !== 1) return first;
-      const pages = first.meta?.pages ?? 1;
-      const data = [...first.data];
-      for (let p = 2; p <= pages; p++) {
-        const next = await leasingApi.orders({
-          goods,
-          q: query || undefined,
-          page: p,
-          pageSize: PAGE_SIZE,
-        });
-        data.push(...next.data);
-      }
-      return {
-        data,
-        meta: {
-          page: 1,
-          pages: 1,
-          pageSize: data.length,
-          total: first.meta?.total ?? data.length,
-        },
-      };
     },
     [goods, query],
   );
@@ -268,14 +246,23 @@ export default function LeasingOrdersPage() {
       )}
 
       {smsKind ? (
-        <LeasingScheduleSms
-          key={`${goods}:${query}`}
-          kind={smsKind}
-          orders={loading ? [] : orders}
-          loading={loading}
-          emptyText={emptyText}
-          onOpenOrder={setOpenId}
-        />
+        <>
+          <LeasingScheduleSms
+            key={`${goods}:${query}`}
+            kind={smsKind}
+            orders={loading ? [] : orders}
+            loading={loading}
+            emptyText={emptyText}
+            onOpenOrder={setOpenId}
+          />
+          {pageMeta.page < pageMeta.pages && (
+            <div className="flex justify-center pt-4">
+              <Button variant="outline" onClick={() => void loadMore()} loading={moreLoading}>
+                Цааш үзэх
+              </Button>
+            </div>
+          )}
+        </>
       ) : loading && orders.length === 0 ? (
         <div className="flex flex-col gap-3">
           {Array.from({ length: 6 }).map((_, i) => (

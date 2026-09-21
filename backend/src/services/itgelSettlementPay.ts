@@ -281,7 +281,7 @@ async function storedInvoiceOf(payment: {
   amount: number;
 }): Promise<QpayInvoice | null> {
   const existing = invoiceFromPayload(payment.invoicePayload);
-  if (existing?.qrText && payment.qpayInvoiceId) return existing;
+  if (existing?.qrText) return existing;
   if (payment.qpayInvoiceId && isQpayReady('shop')) {
     try {
       return await getQpayInvoice(payment.qpayInvoiceId, 'shop', payment.amount || existing?.amount || 0);
@@ -289,7 +289,7 @@ async function storedInvoiceOf(payment: {
       /* GET батлагдаагүй/авахгүй бол хадгалсан stub */
     }
   }
-  if (existing && payment.qpayInvoiceId) return existing;
+  if (existing && (payment.qpayInvoiceId || existing.invoiceId)) return existing;
   if (!payment.qpayInvoiceId) return existing;
   return {
     invoiceId: payment.qpayInvoiceId,
@@ -406,10 +406,19 @@ export async function attachQpayInvoice(paymentId: string, actor: string) {
   }
 
   const existing = await storedInvoiceOf(payment);
-  if (existing && payment.qpayInvoiceId) {
-    if (!payment.invoicePayload && existing.qrText) {
-      await persistSettlementInvoice(payment.id, existing);
+  if (existing?.qrText) {
+    const invoiceId = payment.qpayInvoiceId || existing.invoiceId;
+    if (invoiceId && (!payment.qpayInvoiceId || !payment.invoicePayload)) {
+      await persistSettlementInvoice(payment.id, { ...existing, invoiceId });
     }
+    return {
+      payment: invoiceId ? { ...payment, qpayInvoiceId: invoiceId, invoicePayload: existing } : payment,
+      invoice: existing,
+      invoicePending: false,
+      resumed: true,
+    };
+  }
+  if (existing && payment.qpayInvoiceId) {
     return { payment, invoice: existing, invoicePending: false, resumed: true };
   }
 
