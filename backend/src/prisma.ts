@@ -39,28 +39,67 @@ function connectionLimitOf(url: string | undefined): number | null {
   }
 }
 
+function withQueryTiming(client: PrismaClient): PrismaClient {
+  const timed = client.$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ args, query }) {
+          const started = Date.now();
+          try {
+            return await query(args);
+          } finally {
+            addDbQuery(Date.now() - started);
+          }
+        },
+      },
+      async $queryRaw({ args, query }) {
+        const started = Date.now();
+        try {
+          return await query(args);
+        } finally {
+          addDbQuery(Date.now() - started);
+        }
+      },
+      async $executeRaw({ args, query }) {
+        const started = Date.now();
+        try {
+          return await query(args);
+        } finally {
+          addDbQuery(Date.now() - started);
+        }
+      },
+    },
+  });
+  return timed as unknown as PrismaClient;
+}
+
 const createdPrisma = !globalForPrisma.prisma;
 
 export const prisma =
   globalForPrisma.prisma ??
-  new PrismaClient({
-    log: [
-      { emit: 'event', level: 'query' },
-      { emit: 'stdout', level: 'warn' },
-      { emit: 'stdout', level: 'error' },
-    ],
-    datasources: { db: { url: resolvedDatasourceUrl } },
-  });
+  withQueryTiming(
+    new PrismaClient({
+      log: queryTiming
+        ? [
+            { emit: 'event', level: 'query' },
+            { emit: 'stdout', level: 'warn' },
+            { emit: 'stdout', level: 'error' },
+          ]
+        : ['warn', 'error'],
+      datasources: { db: { url: resolvedDatasourceUrl } },
+    }),
+  );
 
 if (createdPrisma) {
-  (
-    prisma as unknown as {
-      $on: (event: 'query', cb: (e: { duration: number }) => void) => void;
-    }
-  ).$on('query', (event) => {
-    addDbQuery(event.duration);
-    if (queryTiming) console.info(`[prisma] ${event.duration}ms`);
-  });
+  if (queryTiming) {
+    (
+      prisma as unknown as {
+        $on: (event: 'query', cb: (e: { duration: number }) => void) => void;
+      }
+    ).$on('query', (event) => {
+      console.info(`[prisma] ${event.duration}ms`);
+    });
+  }
   console.info(`[prisma] connection_limit=${connectionLimitOf(resolvedDatasourceUrl) ?? 'default'}`);
 }
 
