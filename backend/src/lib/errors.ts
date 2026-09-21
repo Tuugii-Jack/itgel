@@ -55,3 +55,19 @@ export const conflict = (message: string, details?: unknown) =>
 
 export const tooManyRequests = (message: string, details?: unknown) =>
   new AppError(429, 'TOO_MANY_REQUESTS', message, details);
+
+export const qpayTimeout = (message: string, details?: unknown) =>
+  new AppError(504, 'QPAY_TIMEOUT', message, details);
+
+export function isQpayTimeoutError(error: unknown): boolean {
+  if (error instanceof AppError && error.code === 'QPAY_TIMEOUT') return true;
+  if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'QPAY_TIMEOUT') {
+    return true;
+  }
+  if (typeof error === 'object' && error !== null && 'name' in error) {
+    const name = String((error as { name?: string }).name);
+    if (name === 'TimeoutError' || name === 'AbortError') return true;
+  }
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /timeout|aborted|ETIMEDOUT|UND_ERR_CONNECT_TIMEOUT/i.test(message);
+}

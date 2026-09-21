@@ -845,8 +845,16 @@ model ItgelSettlementPayment {
   receiptUrl    String?
   claimedBy     String
   confirmedBy   String?
+  /// Анх баталгаажсан агшин. Callback давтахад өөрчлөхгүй.
+  confirmedAt   DateTime?
+  /// EVENT = баталгаажуулалтын үед бичсэн. AUDIT = AuditLog-оос нөхсөн. null = огноо тодорхойгүй.
+  confirmedAtSource String?
   rejectedReason String?
   note          String?
+  /// QPay QR/deeplink — refresh/relogin-д дахин үүсгэхгүй.
+  invoicePayload Json?
+  senderInvoiceNo String? @unique
+  invoiceAttemptAt DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -856,6 +864,7 @@ model ItgelSettlementPayment {
 
   @@index([ownerAdminId, createdAt])
   @@index([status, createdAt])
+  @@index([status, confirmedAt])
 }
 
 model ItgelSettlementPaymentLine {
@@ -874,11 +883,13 @@ model ItgelSettlementPaymentLine {
 /// Хоцорсон төлбөр, илүү мөнгө, зөрсөн дүн — чимээгүй алдахгүй.
 model MoneyException {
   id                   String   @id @default(cuid())
-  /// LATE_AFTER_CANCEL | STOCK_SHORTFALL | SETTLEMENT_OVERPAY | SETTLEMENT_MISMATCH | SETTLEMENT_OWNER_MISSING
+  /// LATE_AFTER_CANCEL | STOCK_SHORTFALL | SETTLEMENT_OVERPAY | SETTLEMENT_MISMATCH | SETTLEMENT_OWNER_MISSING | SETTLEMENT_UNMATCHED
   kind                 String
   orderId              String?
   settlementPaymentId  String?
   qpayInvoiceId        String?
+  /// QPay payment_id эсвэл sender_invoice_no — давтан callback-ийг ялгана.
+  reference            String?
   amount               Int
   /// OPEN | RESOLVED
   status               String   @default("OPEN")
@@ -894,6 +905,7 @@ model MoneyException {
   @@index([status, createdAt])
   @@index([orderId])
   @@index([kind, status])
+  @@index([qpayInvoiceId, status])
 }
 
 /// Админ буцаалтын мөнгийг хэрэглэгчийн данс руу шилжүүлсний баталгаа (10/20/30).

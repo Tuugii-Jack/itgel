@@ -21,6 +21,7 @@ import {
   type QpayAccountKind,
   type QpayInvoice,
 } from '../../services/qpay.js';
+import { reconcileUncertainSettlementInvoice } from '../../services/itgelSettlementPay.js';
 import { buildLeasingPayPlan, leasingView, resolveInvoiceAmount } from '../../lib/leasing.js';
 import { currentLeasingPayGaps } from '../../services/settings.js';
 import { shopDueAmount, unpaidCargoFee } from '../../services/money.js';
@@ -417,10 +418,15 @@ async function qpayCallbackHandler(req: {
     return;
   }
 
-  const order = await findOrderByQpayInvoice(resolvedInvoiceId);
+  let order = await findOrderByQpayInvoice(resolvedInvoiceId);
+  if (!order) {
+    await reconcileUncertainSettlementInvoice(resolvedInvoiceId);
+    order = await findOrderByQpayInvoice(resolvedInvoiceId);
+  }
 
   if (!order) {
-    // The callback can arrive before the invoice-creation transaction commits.
+    // Захиалгын invoice хадгалагдахаас өмнөх callback, эсвэл тооцооны timeout.
+    // QPay дахин оролдоно. Тооцооны мөнгө lookup/resume/cancel дээр бүртгэгдэнэ.
     req.res.status(503).send('RETRY');
     return;
   }

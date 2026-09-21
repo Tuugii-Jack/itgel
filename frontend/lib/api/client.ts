@@ -1,4 +1,13 @@
 import type { PageMeta } from "@/types";
+import {
+  ADMIN_SESSION_COOKIE,
+  TOKEN_KEYS,
+  clearStoredTokens,
+  readToken,
+  writeToken,
+} from "./tokens";
+
+export { ADMIN_SESSION_COOKIE, TOKEN_KEYS, readToken, writeToken };
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
@@ -30,44 +39,6 @@ function qs(query?: Query): string {
   }
   const s = params.toString();
   return s ? `?${s}` : "";
-}
-
-export const TOKEN_KEYS = {
-  customer: "itgel.customer.token",
-  admin: "itgel.admin.token",
-} as const;
-
-/** Middleware-д унших cookie — JWT биш, зөвхөн «нэвтэрсэн эсэх» тэмдэг. */
-export const ADMIN_SESSION_COOKIE = "itgel_admin_session";
-
-export function readToken(kind: keyof typeof TOKEN_KEYS): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEYS[kind]);
-}
-
-function syncAdminSessionCookie(token: string | null): void {
-  if (typeof document === "undefined") return;
-  const secure =
-    typeof window !== "undefined" && window.location.protocol === "https:"
-      ? "; Secure"
-      : "";
-  if (token) {
-    // 30 хоног — JWT-ийн хугацаатай ойролцоо; гарахад cookie арилна.
-    document.cookie = `${ADMIN_SESSION_COOKIE}=1; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax${secure}`;
-  } else {
-    // Max-Age=0 + Expires — бүх browser дээр найдвартай арилгана.
-    document.cookie = `${ADMIN_SESSION_COOKIE}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax${secure}`;
-  }
-}
-
-export function writeToken(
-  kind: keyof typeof TOKEN_KEYS,
-  token: string | null,
-): void {
-  if (typeof window === "undefined") return;
-  if (token) window.localStorage.setItem(TOKEN_KEYS[kind], token);
-  else window.localStorage.removeItem(TOKEN_KEYS[kind]);
-  if (kind === "admin") syncAdminSessionCookie(token);
 }
 
 export interface RequestOptions {
@@ -128,6 +99,11 @@ const memoGets = new Map<string, { at: number; value: Envelope<unknown> }>();
 export function clearRequestCache(): void {
   inflightGets.clear();
   memoGets.clear();
+}
+
+export function clearSessionClientState(): void {
+  clearStoredTokens();
+  clearRequestCache();
 }
 
 async function fetchEnvelope<T>(

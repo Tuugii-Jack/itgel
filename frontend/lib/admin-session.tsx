@@ -10,8 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { adminApi, api, readToken, writeToken } from "./api";
-import { clearRequestCache } from "./api/client";
+import { adminApi, api, clearSessionClientState, readToken, writeToken } from "./api";
 import { deferEffect } from "./deferEffect";
 import { clearCheckoutDraft } from "./checkoutDraft";
 import { clearCheckoutIdempotencyKey } from "./checkoutIdempotency";
@@ -95,9 +94,7 @@ export function AdminSessionProvider({
   const signOut = useCallback(() => {
     void adminApi.logout().catch(() => undefined);
     void api.logout().catch(() => undefined);
-    writeToken("admin", null);
-    writeToken("customer", null);
-    clearRequestCache();
+    clearSessionClientState();
     clearCheckoutDraft();
     clearCheckoutIdempotencyKey();
     setUser(null);

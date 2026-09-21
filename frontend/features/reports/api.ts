@@ -71,62 +71,56 @@ export const adminReportsApi = {
       adminAuth,
     ).then((r) => r.data),
 
-  leasingSettlements: (query?: { day?: string; ownerAdminId?: string; status?: string; q?: string }) =>
-    request<
-      {
-        id: string;
-        ownerAdminId: string | null;
-        orderCode: string;
-        customerName: string;
-        productName: string;
-        qty: number;
-        amount: number;
-        paidAmount: number;
-        remainingAmount: number;
-        status: string;
-        statusLabel: string;
-        confirmedAt: string;
-      }[]
-    >("/admin/leasing-settlements/settlements", { ...adminAuth, query }).then((r) => r.data),
+  leasingSettlements: (query?: {
+    day?: string;
+    from?: string;
+    to?: string;
+    ownerAdminId?: string;
+    status?: string;
+    q?: string;
+    remaining?: string;
+    cursor?: string;
+    take?: number;
+  }) =>
+    request<import("@/features/leasing/settlements/types").SettlementLine[]>(
+      "/admin/leasing-settlements/settlements",
+      { ...adminAuth, query },
+    ).then((r) => ({
+      rows: r.data,
+      nextCursor: (r.meta?.nextCursor as string | null | undefined) ?? null,
+      totals: (r.meta?.totals as import("@/features/leasing/settlements/types").SettlementListPage["totals"]) ?? {
+        count: r.data.length,
+        remainingAmount: 0,
+        amount: 0,
+        paidAmount: 0,
+      },
+    })),
 
   leasingSettlementSummary: (query?: { day?: string; ownerAdminId?: string }) =>
-    request<{
-      day: string;
-      orderCount: number;
-      amount: number;
-      paidAmount: number;
-      remainingAmount: number;
-      priorUnpaidAmount: number;
-      unassignedOrderCount: number;
-      unassignedAmount: number;
-      lines: {
-        id: string;
-        orderCode: string;
-        customerName: string;
-        productName: string;
-        qty: number;
-        amount: number;
-        status: string;
-        statusLabel: string;
-        remainingAmount: number;
-      }[];
-    }>("/admin/leasing-settlements/summary", { ...adminAuth, query }).then((r) => r.data),
+    request<import("@/features/leasing/settlements/types").SettlementSummary>(
+      "/admin/leasing-settlements/summary",
+      { ...adminAuth, query },
+    ).then((r) => r.data),
 
-  leasingSettlementPayments: (query?: { status?: string; ownerAdminId?: string }) =>
-    request<
-      {
-        id: string;
-        method: string;
-        amount: number;
-        status: string;
-        bankRef: string | null;
-        bankDate: string | null;
-        receiptUrl: string | null;
-        createdAt: string;
-        rejectedReason: string | null;
-        lines: { amount: number; settlement: { orderCode: string; productName: string } }[];
-      }[]
-    >("/admin/leasing-settlements/payments", { ...adminAuth, query }).then((r) => r.data),
+  leasingSettlementPayments: (query?: {
+    status?: string;
+    ownerAdminId?: string;
+    from?: string;
+    to?: string;
+    cursor?: string;
+    take?: number;
+  }) =>
+    request<import("@/features/leasing/settlements/types").SettlementPayment[]>(
+      "/admin/leasing-settlements/payments",
+      { ...adminAuth, query },
+    ).then((r) => ({
+      rows: r.data,
+      nextCursor: (r.meta?.nextCursor as string | null | undefined) ?? null,
+      totals: (r.meta?.totals as import("@/features/leasing/settlements/types").SettlementPaymentPage["totals"]) ?? {
+        count: r.data.length,
+        amount: 0,
+      },
+    })),
 
   confirmLeasingBankPayment: (id: string) =>
     request<{ ok: boolean }>(`/admin/leasing-settlements/payments/${id}/confirm`, {
@@ -151,7 +145,17 @@ export const adminReportsApi = {
     }>("/admin/leasing-settlements/unpaid-ready-holds", adminAuth).then((r) => r.data),
 
   moneyExceptions: () =>
-    request<{ id: string; kind: string; amount: number; note: string | null; createdAt: string }[]>(
+    request<{
+      id: string;
+      kind: string;
+      orderId: string | null;
+      settlementPaymentId: string | null;
+      qpayInvoiceId: string | null;
+      reference: string | null;
+      amount: number;
+      note: string | null;
+      createdAt: string;
+    }[]>(
       "/admin/leasing-settlements/exceptions",
       adminAuth,
     ).then((r) => r.data),

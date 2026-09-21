@@ -3,7 +3,7 @@ import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { lockOrder } from '../../lib/orderLock.js';
 import { prisma } from '../../prisma.js';
 import { confirmLeasingIfFeePaid, recordPayment, recordPaymentWithTotals } from '../../services/payments.js';
-import { applySettlementQpayPayment } from '../../services/itgelSettlement.js';
+import { applySettlementQpayPayment } from '../../services/itgelSettlementPay.js';
 import {
   cancelQpayInvoice,
   cancelQpayPayment,
@@ -53,7 +53,7 @@ export async function applyQpayPayment(
   if (!Number.isSafeInteger(amount) || amount <= 0) return false;
   const invoiceMeta = await prisma.qpayInvoice.findUnique({ where: { id: invoiceId } });
   if (invoiceMeta?.purpose === 'ITGEL_SETTLEMENT') {
-    return applySettlementQpayPayment(invoiceId, amount, actor);
+    return applySettlementQpayPayment(invoiceId, amount, actor, paymentRef);
   }
   const recorded = await prisma.$transaction(async (tx) => {
     await lockOrder(tx, orderId);

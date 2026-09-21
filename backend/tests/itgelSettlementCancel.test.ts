@@ -17,7 +17,8 @@ const state = vi.hoisted(() => ({
     amount: 10_000,
     ownerAdminId: 'lease-a',
   } as PaymentRow,
-  settlements: [{ id: 's1', lockPaymentId: 'pay-1', status: 'INVOICED', remainingAmount: 10_000 }],
+  settlements: [{ id: 's1', lockPaymentId: 'pay-1', status: 'INVOICED', remainingAmount: 10_000, paidAmount: 0 }],
+  exceptions: [] as { kind: string; qpayInvoiceId?: string | null; settlementPaymentId?: string | null; reference?: string | null }[],
   cancelInvoice: vi.fn(async (..._args: unknown[]) => {}),
   audit: vi.fn(async (..._args: unknown[]) => {}),
 }));
@@ -57,10 +58,15 @@ vi.mock('../src/prisma.js', () => {
       }),
     },
     itgelSettlement: {
-      updateMany: vi.fn(async ({ where, data }: { where: { lockPaymentId: string; status?: { in?: string[] } }; data: Record<string, unknown> }) => {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+        state.settlements.find((row) => row.id === where.id) ?? null,
+      ),
+      updateMany: vi.fn(async ({ where, data }: { where: { lockPaymentId: string; status?: { in?: string[] }; remainingAmount?: number; id?: string }; data: Record<string, unknown> }) => {
         let count = 0;
         for (const row of state.settlements) {
-          if (row.lockPaymentId !== where.lockPaymentId) continue;
+          if (where.id && row.id !== where.id) continue;
+          if (where.lockPaymentId && row.lockPaymentId !== where.lockPaymentId) continue;
+          if (where.remainingAmount !== undefined && row.remainingAmount !== where.remainingAmount) continue;
           if (where.status && 'in' in where.status && !where.status.in?.includes(row.status)) continue;
           Object.assign(row, data);
           if ('lockPaymentId' in data) row.lockPaymentId = data.lockPaymentId as string;
@@ -69,7 +75,20 @@ vi.mock('../src/prisma.js', () => {
         return { count };
       }),
     },
-    moneyException: { create: vi.fn(async () => ({ id: 'ex-1' })) },
+    moneyException: {
+      findFirst: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+        state.exceptions.find((row) =>
+          row.kind === where.kind &&
+          (where.qpayInvoiceId === undefined || row.qpayInvoiceId === where.qpayInvoiceId) &&
+          (where.settlementPaymentId === undefined || row.settlementPaymentId === where.settlementPaymentId) &&
+          (where.reference === undefined || row.reference === where.reference),
+        ) ?? null,
+      ),
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        state.exceptions.push(data as { kind: string; qpayInvoiceId?: string | null; settlementPaymentId?: string | null; reference?: string | null });
+        return { id: `ex-${state.exceptions.length}` };
+      }),
+    },
     $transaction: async (work: (tx: unknown) => Promise<unknown>) => {
       const previous = tail;
       let release: (() => void) | undefined;
@@ -91,8 +110,10 @@ vi.mock('../src/lib/audit.js', () => ({
 }));
 vi.mock('../src/services/qpay.js', () => ({
   cancelQpayInvoice: (invoiceId: string, opts?: unknown) => state.cancelInvoice(invoiceId, opts),
-  checkQpayInvoice: vi.fn(),
+  checkQpayInvoice: vi.fn(async () => ({ paid: false, paidAmount: 0, paymentIds: [] })),
   createQpayInvoice: vi.fn(),
+  listQpayInvoices: vi.fn(async () => []),
+  getQpayInvoice: vi.fn(),
   isQpayReady: () => true,
 }));
 
@@ -102,10 +123,11 @@ describe('cancelOpenSettlementInvoice vs callback', () => {
   beforeEach(() => {
     state.payment.status = 'PENDING';
     state.payment.qpayInvoiceId = 'inv-1';
-    state.settlements[0] = { id: 's1', lockPaymentId: 'pay-1', status: 'INVOICED', remainingAmount: 10_000 };
+    state.settlements[0] = { id: 's1', lockPaymentId: 'pay-1', status: 'INVOICED', remainingAmount: 10_000, paidAmount: 0 };
     state.cancelInvoice.mockReset();
     state.cancelInvoice.mockResolvedValue(undefined);
     state.audit.mockClear();
+    state.exceptions = [];
   });
 
   it('callback түрүүлбэл CONFIRMED-ийг SUPERSEDED болгохгүй', async () => {
@@ -122,9 +144,13 @@ describe('cancelOpenSettlementInvoice vs callback', () => {
   it('цуцлалт түрүүлбэл callback CONFIRMED болгохгүй', async () => {
     await cancelOpenSettlementInvoice('pay-1', 'admin:lease-a');
     expect(state.payment.status).toBe('SUPERSEDED');
-    const recorded = await applySettlementQpayPayment('inv-1', 10_000, 'system:qpay');
+    const recorded = await applySettlementQpayPayment('inv-1', 10_000, 'system:qpay', 'pay_ref_1');
     expect(recorded).toBe(false);
     expect(state.payment.status).toBe('SUPERSEDED');
+    expect(state.exceptions).toHaveLength(1);
+    const again = await applySettlementQpayPayment('inv-1', 10_000, 'system:qpay', 'pay_ref_1');
+    expect(again).toBe(false);
+    expect(state.exceptions).toHaveLength(1);
   });
 
   it('зэрэг цуцлалт болон callback-ийн аль нь түрүүлсэн ч нэг төлөв үлдээнэ', async () => {

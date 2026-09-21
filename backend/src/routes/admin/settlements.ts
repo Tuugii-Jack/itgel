@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { parseUbDay, startOfUbDay } from '../../lib/date.js';
+import { parseUbDay, startOfUbDay, endOfUbDay } from '../../lib/date.js';
 import { requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { unpaidAutoDeleteWhere } from '../../lib/unpaidCancel.js';
@@ -12,9 +12,9 @@ import {
   daySummary,
   listMissingSettlementOrders,
   listSettlementPayments,
+  listSettlements,
   rejectBankSettlementPayment,
-  serializeSettlement,
-  serializeSettlementPayment,
+  serializePayments,
 } from '../../services/itgelSettlement.js';
 
 export const adminSettlementsRouter = Router();
@@ -74,38 +74,46 @@ adminSettlementsRouter.get(
   validate({
     query: z.object({
       day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       ownerAdminId: z.string().min(1).optional(),
       status: z.string().optional(),
       q: z.string().trim().min(1).max(40).optional(),
+      remaining: z.enum(['1', 'true']).optional(),
+      cursor: z.string().min(1).optional(),
+      take: z.coerce.number().int().min(1).max(100).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const q = query<{ day?: string; ownerAdminId?: string; status?: string; q?: string }>(req);
-    const dayRange = q.day
-      ? {
-          gte: startOfUbDay(parseUbDay(q.day)),
-          lt: new Date(startOfUbDay(parseUbDay(q.day)).getTime() + 24 * 60 * 60 * 1000),
-        }
-      : undefined;
-    const rows = await prisma.itgelSettlement.findMany({
-      where: {
-        ...(q.ownerAdminId ? { ownerAdminId: q.ownerAdminId } : {}),
-        ...(q.status ? { status: q.status } : {}),
-        ...(dayRange ? { confirmedAt: dayRange } : {}),
-        ...(q.q
-          ? {
-              OR: [
-                { sourceOrderCode: { contains: q.q, mode: 'insensitive' } },
-                { productName: { contains: q.q, mode: 'insensitive' } },
-                { customerName: { contains: q.q, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { confirmedAt: 'desc' },
-      take: 400,
+    const q = query<{
+      day?: string;
+      from?: string;
+      to?: string;
+      ownerAdminId?: string;
+      status?: string;
+      q?: string;
+      remaining?: string;
+      cursor?: string;
+      take?: number;
+    }>(req);
+    const from = q.from ?? q.day;
+    const to = q.to ?? q.day;
+    const cursor = q.cursor;
+    const take = q.take;
+    const page = await listSettlements({
+      ownerAdminId: q.ownerAdminId,
+      from: from ? startOfUbDay(parseUbDay(from)) : undefined,
+      to: to ? endOfUbDay(parseUbDay(to)) : undefined,
+      status: q.status,
+      q: q.q,
+      remainingOnly: Boolean(q.remaining),
+      cursor,
+      take,
     });
-    res.json({ data: rows.map(serializeSettlement) });
+    res.json({
+      data: page.rows,
+      meta: { nextCursor: page.nextCursor, totals: page.totals },
+    });
   }),
 );
 
@@ -115,15 +123,35 @@ adminSettlementsRouter.get(
     query: z.object({
       status: z.string().optional(),
       ownerAdminId: z.string().min(1).optional(),
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      cursor: z.string().min(1).optional(),
+      take: z.coerce.number().int().min(1).max(100).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const q = query<{ status?: string; ownerAdminId?: string }>(req);
-    const rows = await listSettlementPayments({
+    const q = query<{
+      status?: string;
+      ownerAdminId?: string;
+      from?: string;
+      to?: string;
+      cursor?: string;
+      take?: number;
+    }>(req);
+    const confirmed = q.status === 'CONFIRMED';
+    const page = await listSettlementPayments({
       ownerAdminId: q.ownerAdminId,
       status: q.status,
+      from: q.from ? startOfUbDay(parseUbDay(q.from)) : undefined,
+      to: q.to ? endOfUbDay(parseUbDay(q.to)) : undefined,
+      confirmedDay: confirmed,
+      cursor: q.cursor,
+      take: q.take,
     });
-    res.json({ data: rows.map(serializeSettlementPayment) });
+    res.json({
+      data: await serializePayments(page.rows),
+      meta: { nextCursor: page.nextCursor, totals: page.totals },
+    });
   }),
 );
 
@@ -168,6 +196,9 @@ adminSettlementsRouter.get(
         id: row.id,
         kind: row.kind,
         orderId: row.orderId,
+        settlementPaymentId: row.settlementPaymentId,
+        qpayInvoiceId: row.qpayInvoiceId,
+        reference: row.reference,
         amount: row.amount,
         note: row.note,
         createdAt: row.createdAt.toISOString(),

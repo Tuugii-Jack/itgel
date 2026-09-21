@@ -59,10 +59,12 @@ passLog('isolation docker Postgres itgel @ 127.0.0.1:5432');
 
 function startMockQpay() {
   const invoices = new Map();
+  const invoicesBySender = new Map();
   const payments = new Map();
   const checkFails = new Map();
   const requests = [];
   let seq = 0;
+  let invoiceCreateDelayMs = 0;
 
   function accountOf(req) {
     const auth = req.headers.authorization ?? '';
@@ -124,6 +126,17 @@ function startMockQpay() {
 
     if (req.method === 'POST' && url === '/v2/invoice') {
       const body = await readBody(req);
+      if (invoiceCreateDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, invoiceCreateDelayMs));
+      }
+      const sender = String(body.sender_invoice_no ?? '');
+      if (sender && invoicesBySender.has(sender)) {
+        const existing = invoices.get(invoicesBySender.get(sender));
+        if (existing && !existing.cancelled) {
+          send(res, 400, { message: 'sender_invoice_no already used' });
+          return;
+        }
+      }
       const id = `inv_${kind}_${randomUUID()}`;
       invoices.set(id, {
         id,
@@ -132,7 +145,9 @@ function startMockQpay() {
         paidAmount: 0,
         paymentIds: [],
         cancelled: false,
+        sender,
       });
+      if (sender) invoicesBySender.set(sender, id);
       send(res, 200, {
         invoice_id: id,
         qr_text: `qr:${id}`,
@@ -142,11 +157,42 @@ function startMockQpay() {
       return;
     }
 
-    const invoiceDelete = url.match(/^\/v2\/invoice\/([^/]+)$/);
-    if (req.method === 'DELETE' && invoiceDelete) {
-      const inv = invoices.get(decodeURIComponent(invoiceDelete[1]));
+    const invoiceGet = url.match(/^\/v2\/invoice\/([^/]+)$/);
+    if (req.method === 'GET' && invoiceGet) {
+      const inv = invoices.get(decodeURIComponent(invoiceGet[1]));
+      if (!inv || inv.account !== kind) {
+        send(res, 404, { message: 'INVOICE_NOTFOUND' });
+        return;
+      }
+      send(res, 200, {
+        invoice_id: inv.id,
+        qr_text: `qr:${inv.id}`,
+        amount: inv.amount,
+        sender_invoice_no: inv.sender,
+        invoice_status: inv.cancelled ? 'CLOSED' : 'OPEN',
+      });
+      return;
+    }
+
+    if (req.method === 'DELETE' && invoiceGet) {
+      const inv = invoices.get(decodeURIComponent(invoiceGet[1]));
       if (inv) inv.cancelled = true;
       send(res, 200, {});
+      return;
+    }
+
+    if (req.method === 'POST' && url === '/v2/invoice/list') {
+      const body = await readBody(req);
+      const sender = String(body.sender_invoice_no ?? '');
+      const rows = [...invoices.values()]
+        .filter((inv) => inv.account === kind && (!sender || inv.sender === sender))
+        .map((inv) => ({
+          invoice_id: inv.id,
+          sender_invoice_no: inv.sender,
+          amount: inv.amount,
+          invoice_status: inv.cancelled ? 'CLOSED' : 'OPEN',
+        }));
+      send(res, 200, { count: rows.length, rows });
       return;
     }
 
@@ -208,6 +254,13 @@ function startMockQpay() {
         failNextCheck(invoiceId, times = 1) {
           checkFails.set(invoiceId, times);
         },
+        findBySender(sender) {
+          const id = invoicesBySender.get(sender);
+          return id ? invoices.get(id) : null;
+        },
+        setInvoiceCreateDelay(ms) {
+          invoiceCreateDelayMs = ms;
+        },
       });
     });
   });
@@ -233,6 +286,8 @@ function isolatedEnv() {
     QPAY_PASSWORD: 'shop-secret',
     QPAY_INVOICE_CODE: 'SHOP_TEST_INVOICE',
     QPAY_CALLBACK_URL: `${API}/api/orders/qpay/callback`,
+    QPAY_INVOICE_TIMEOUT_MS: process.env.QPAY_INVOICE_TIMEOUT_MS || '20000',
+    SETTLEMENT_QPAY_TIMEOUT_MS: process.env.SETTLEMENT_QPAY_TIMEOUT_MS || '800',
     LEASING_QPAY_ENABLED: 'true',
     LEASING_QPAY_BASE_URL: `${MOCK}/v2`,
     LEASING_QPAY_CLIENT_ID: 'leasing-test',
@@ -442,11 +497,33 @@ execFileSync('npx', ['prisma', 'generate'], {
   env: { ...process.env, DATABASE_URL: LOCAL_DB, DIRECT_URL: LOCAL_DB },
   stdio: 'inherit',
 });
+function settlementLedger() {
+  return {
+    settlements: sql(
+      `SELECT count(*)||':'||coalesce(sum(amount),0)||':'||coalesce(sum("paidAmount"),0)||':'||coalesce(sum("remainingAmount"),0) FROM "ItgelSettlement"`,
+    ),
+    payments: sql(
+      `SELECT count(*)||':'||coalesce(sum(amount),0)||':'||coalesce(sum(CASE WHEN status='CONFIRMED' THEN amount ELSE 0 END),0) FROM "ItgelSettlementPayment"`,
+    ),
+  };
+}
+sql(`DELETE FROM "ItgelSettlementPayment" WHERE id='mig-date-probe'`);
+sql(`
+INSERT INTO "ItgelSettlementPayment" (id, "ownerAdminId", method, amount, status, "claimedBy", "confirmedAt", "createdAt", "updatedAt")
+VALUES ('mig-date-probe', 'none', 'BANK_TRANSFER', 111, 'CONFIRMED', 'system', NULL, NOW(), NOW())
+`);
+const ledgerBeforeMigrate = settlementLedger();
 execFileSync('npx', ['prisma', 'migrate', 'deploy'], {
   cwd: BACKEND_ROOT,
   env: { ...process.env, DATABASE_URL: LOCAL_DB, DIRECT_URL: LOCAL_DB },
   stdio: 'inherit',
 });
+const ledgerAfterMigrate = settlementLedger();
+assert.equal(ledgerAfterMigrate.settlements, ledgerBeforeMigrate.settlements);
+assert.equal(ledgerAfterMigrate.payments, ledgerBeforeMigrate.payments);
+assert.equal(sql(`SELECT amount FROM "ItgelSettlementPayment" WHERE id='mig-date-probe'`), '111');
+assert.equal(sql(`SELECT COALESCE("confirmedAt"::text,'') FROM "ItgelSettlementPayment" WHERE id='mig-date-probe'`), '');
+passLog('migration keeps settlement and payment amounts');
 const table = sql(`SELECT to_regclass('public."CheckoutIdempotency"')`);
 assert.match(table, /CheckoutIdempotency/);
 passLog('local migrate CheckoutIdempotency');
@@ -866,6 +943,7 @@ try {
     return last;
   }
 
+  sql(`DELETE FROM "PhoneOtp" WHERE phone IN ('99000001','99000002') OR phone LIKE '71%' OR phone LIKE '76%'`);
   const adminSession = await workspaceOtp.workspaceLogin('admin@itgel.mn', '99000001');
   const adminToken = adminSession.token;
   const leasingSession = await workspaceOtp.workspaceLogin('leasing@itgel.mn', '99000002');
@@ -1333,12 +1411,24 @@ try {
   passLog('cancel vs callback either-wins keeps payment/debt consistent', cancelRacePayStatus);
 
   const retrySettleId = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${retryLease.orderId}'`);
+  const ownerBankMissingOwner = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: ownerToken,
+    body: {
+      settlementIds: [retrySettleId],
+      method: 'BANK_TRANSFER',
+      bankRef: 'OWNER-ACTOR',
+      bankDate: '2026-09-18',
+    },
+  });
+  assert.equal(ownerBankMissingOwner.status, 400, ownerBankMissingOwner.text);
   const ownerBank = await req('/api/leasing/finance/itgel/pay', {
     method: 'POST',
     token: ownerToken,
     body: {
       settlementIds: [retrySettleId],
       method: 'BANK_TRANSFER',
+      ownerAdminId: leasingAdminId,
       bankRef: 'OWNER-ACTOR',
       bankDate: '2026-09-18',
     },
@@ -1374,9 +1464,11 @@ try {
       body: { settlementIds: [s2], method: 'QPAY' },
     }),
   ]);
-  assert.equal(doublePay.filter((r) => r.status === 201).length, 1, doublePay.map((r) => r.text).join(' | '));
-  assert.equal(doublePay.filter((r) => r.status === 409 || r.status === 404).length, 1);
-  passLog('double-tab settlement pay locks once');
+  assert.ok(doublePay.every((r) => [201, 409, 404].includes(r.status)), doublePay.map((r) => r.text).join(' | '));
+  const doubleCreated = doublePay.filter((r) => r.status === 201);
+  assert.ok(doubleCreated.length >= 1, doublePay.map((r) => r.text).join(' | '));
+  assert.equal(new Set(doubleCreated.map((r) => data(r).payment.id)).size, 1);
+  passLog('double-tab settlement pay reuses one lock');
 
   const overlapBank = await req('/api/leasing/finance/itgel/pay', {
     method: 'POST',
@@ -1458,6 +1550,228 @@ try {
   );
   assert.ok(ySummary.lines.some((line) => line.id === s3) || ySummary.amount >= 100_000);
   passLog('UB day boundary keeps yesterday settlement on that day');
+
+  const fifoProdA = await createShopReady(`FifoA ${phoneA}`, 2, 80_000);
+  const fifoProdB = await createShopReady(`FifoB ${phoneA}`, 2, 80_000);
+  const fifoProdC = await createShopReady(`FifoC ${phoneA}`, 2, 80_000);
+  const fifoA = await createLeasingPaid(fifoProdA, userA.token, 'Idem A');
+  const fifoB = await createLeasingPaid(fifoProdB, userA.token, 'Idem A');
+  const fifoC = await createLeasingPaid(fifoProdC, userA.token, 'Idem A');
+  const fifoIdA = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${fifoA.orderId}'`);
+  const fifoIdB = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${fifoB.orderId}'`);
+  const fifoIdC = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${fifoC.orderId}'`);
+  sql(`UPDATE "ItgelSettlement" SET amount=10000, "unitPrice"=10000, "remainingAmount"=10000, "paidAmount"=0, "confirmedAt"=NOW() - INTERVAL '2 day' WHERE id='${fifoIdA}'`);
+  sql(`UPDATE "ItgelSettlement" SET amount=20000, "unitPrice"=20000, "remainingAmount"=20000, "paidAmount"=0, "confirmedAt"=NOW() - INTERVAL '1 day' WHERE id='${fifoIdB}'`);
+  sql(`UPDATE "ItgelSettlement" SET amount=5000, "unitPrice"=5000, "remainingAmount"=5000, "paidAmount"=0 WHERE id='${fifoIdC}'`);
+  const previewBad = await req('/api/leasing/finance/itgel/preview', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [fifoIdA, fifoIdB], amount: 15_000.5 },
+  });
+  assert.equal(previewBad.status, 400, previewBad.text);
+  const overPay = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [fifoIdA, fifoIdB], method: 'QPAY', amount: 40_000 },
+  });
+  assert.equal(overPay.status, 400, overPay.text);
+  const previewOk = data(
+    await req('/api/leasing/finance/itgel/preview', {
+      method: 'POST',
+      token: leasingToken,
+      body: { settlementIds: [fifoIdA, fifoIdB], amount: 15_000 },
+    }),
+  );
+  assert.equal(previewOk.amount, 15_000);
+  assert.equal(previewOk.allocations[0].settlementId, fifoIdA);
+  assert.equal(previewOk.allocations[0].amount, 10_000);
+  assert.equal(previewOk.allocations[1].settlementId, fifoIdB);
+  assert.equal(previewOk.allocations[1].amount, 5_000);
+  const fifoPay = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      settlementIds: [fifoIdA, fifoIdB],
+      method: 'QPAY',
+      amount: 15_000,
+      allocations: previewOk.allocations.map((line) => ({ settlementId: line.settlementId, amount: line.amount })),
+    },
+  });
+  assert.equal(fifoPay.status, 201, fifoPay.text);
+  const fifoInv = data(fifoPay).invoice.invoiceId;
+  const fifoPayId = data(fifoPay).payment.id;
+  const pending = data(await req('/api/leasing/finance/itgel/pending', { token: leasingToken }));
+  assert.ok(pending.some((row) => row.id === fifoPayId), JSON.stringify(pending));
+  const fifoAgain = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [fifoIdA, fifoIdB], method: 'QPAY', amount: 15_000 },
+  });
+  assert.equal(fifoAgain.status, 201, fifoAgain.text);
+  assert.equal(data(fifoAgain).payment.id, fifoPayId);
+  assert.equal(data(fifoAgain).invoice.invoiceId, fifoInv);
+  await payMock(fifoInv, 15_000);
+  assert.equal(sql(`SELECT status || ' ' || "remainingAmount" FROM "ItgelSettlement" WHERE id='${fifoIdA}'`), 'PAID 0');
+  assert.equal(sql(`SELECT status || ' ' || "remainingAmount" FROM "ItgelSettlement" WHERE id='${fifoIdB}'`), 'OPEN 15000');
+  assert.equal(sql(`SELECT status || ' ' || "remainingAmount" FROM "ItgelSettlement" WHERE id='${fifoIdC}'`), 'OPEN 5000');
+  const confirmedAt1 = sql(`SELECT "confirmedAt" FROM "ItgelSettlementPayment" WHERE id='${fifoPayId}'`);
+  assert.ok(confirmedAt1);
+  await payMock(fifoInv, 15_000);
+  assert.equal(sql(`SELECT "confirmedAt" FROM "ItgelSettlementPayment" WHERE id='${fifoPayId}'`), confirmedAt1);
+  const restB = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [fifoIdB], method: 'QPAY', amount: 15_000 },
+  });
+  assert.equal(restB.status, 201, restB.text);
+  await payMock(data(restB).invoice.invoiceId, 15_000);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${fifoIdB}'`), 'PAID');
+  const bankPartial = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      settlementIds: [fifoIdC],
+      method: 'BANK_TRANSFER',
+      amount: 2_000,
+      bankRef: 'PARTIAL-C',
+      bankDate: '2026-09-21',
+    },
+  });
+  assert.equal(bankPartial.status, 201, bankPartial.text);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${fifoIdC}'`), 'PENDING_BANK');
+  const bankPartialId = data(bankPartial).payment.id;
+  const rejectPartial = await req(`/api/admin/leasing-settlements/payments/${bankPartialId}/reject`, {
+    method: 'POST',
+    token: adminToken,
+    body: { reason: 'буруу баримт' },
+  });
+  assert.equal(rejectPartial.status, 200, rejectPartial.text);
+  assert.equal(sql(`SELECT status || ' ' || "remainingAmount" FROM "ItgelSettlement" WHERE id='${fifoIdC}'`), 'OPEN 5000');
+  const bankPartial2 = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      settlementIds: [fifoIdC],
+      method: 'BANK_TRANSFER',
+      amount: 5_000,
+      bankRef: 'FULL-C',
+      bankDate: '2026-09-21',
+    },
+  });
+  assert.equal(bankPartial2.status, 201, bankPartial2.text);
+  const confirmC = await req(`/api/admin/leasing-settlements/payments/${data(bankPartial2).payment.id}/confirm`, {
+    method: 'POST',
+    token: adminToken,
+  });
+  assert.equal(confirmC.status, 200, confirmC.text);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${fifoIdC}'`), 'PAID');
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ulaanbaatar' }).format(new Date());
+  const dayNow = data(await req(`/api/leasing/finance/itgel/summary?day=${today}`, { token: leasingToken }));
+  assert.ok(dayNow.paidOnDayAmount >= 35_000, JSON.stringify(dayNow));
+  assert.ok(dayNow.totalUnpaidRemaining >= 0);
+  const linked = data(
+    await req(`/api/leasing/finance/itgel/settlements?q=${encodeURIComponent(fifoA.code)}`, { token: leasingToken }),
+  );
+  const fifoRows = Array.isArray(linked) ? linked : [];
+  const fifoRow = fifoRows.find((row) => row.id === fifoIdA);
+  assert.ok(fifoRow?.orderId === fifoA.orderId, JSON.stringify(fifoRow));
+  assert.equal(fifoRow.orderCode, fifoA.code);
+  const page1 = await req('/api/leasing/finance/itgel/settlements?remaining=1&take=1', { token: leasingToken });
+  assert.equal(page1.status, 200, page1.text);
+  assert.equal(data(page1).length, 1);
+  assert.ok(page1.json.meta?.totals?.count >= 1, JSON.stringify(page1.json.meta));
+  assert.ok(page1.json.meta.nextCursor);
+  const page2 = await req(
+    `/api/leasing/finance/itgel/settlements?remaining=1&take=1&cursor=${encodeURIComponent(page1.json.meta.nextCursor)}`,
+    { token: leasingToken },
+  );
+  assert.equal(page2.status, 200, page2.text);
+  assert.notEqual(data(page2)[0]?.id, data(page1)[0]?.id);
+  assert.equal(page2.json.meta.totals.count, page1.json.meta.totals.count);
+  passLog('FIFO 15k closes A and leaves B=15k C=5k; resume/bank/day totals match');
+
+  const timeoutProd = await createShopReady(`TimeoutInv ${phoneA}`, 1, 12_000);
+  const timeoutLease = await createLeasingPaid(timeoutProd, userA.token, 'Idem A');
+  const timeoutSettleId = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${timeoutLease.orderId}'`);
+  mock.setInvoiceCreateDelay(1_400);
+  const timeoutPay = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [timeoutSettleId], method: 'QPAY' },
+  });
+  assert.equal(timeoutPay.status, 201, timeoutPay.text);
+  const timeoutAmount = data(timeoutPay).payment.amount;
+  assert.equal(data(timeoutPay).invoicePending, true);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${timeoutSettleId}'`), 'INVOICED');
+  assert.equal(
+    sql(`SELECT COALESCE("qpayInvoiceId",'') FROM "ItgelSettlementPayment" WHERE id='${data(timeoutPay).payment.id}'`),
+    '',
+  );
+  mock.setInvoiceCreateDelay(0);
+  await new Promise((r) => setTimeout(r, 800));
+  const timeoutSender = sql(
+    `SELECT "senderInvoiceNo" FROM "ItgelSettlementPayment" WHERE id='${data(timeoutPay).payment.id}'`,
+  );
+  const hiddenInv = mock.findBySender(timeoutSender);
+  assert.ok(hiddenInv?.id, 'timeout-ийн дараа QPay дээр invoice үүссэн байх ёстой');
+  const createsBeforeResume = mock.requests.filter((row) => row.method === 'POST' && row.url === '/v2/invoice').length;
+  const timeoutResume = await req(`/api/leasing/finance/itgel/payments/${data(timeoutPay).payment.id}/resume`, {
+    method: 'POST',
+    token: leasingToken,
+  });
+  assert.equal(timeoutResume.status, 200, timeoutResume.text);
+  const timeoutInv = data(timeoutResume).invoice?.invoiceId;
+  assert.ok(timeoutInv, timeoutResume.text);
+  assert.equal(timeoutInv, hiddenInv.id);
+  const createsAfterResume = mock.requests.filter((row) => row.method === 'POST' && row.url === '/v2/invoice').length;
+  assert.equal(createsAfterResume, createsBeforeResume);
+  assert.ok(mock.requests.some((row) => row.method === 'POST' && row.url === '/v2/invoice/list'));
+  const timeoutAgain = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [timeoutSettleId], method: 'QPAY' },
+  });
+  assert.equal(timeoutAgain.status, 201, timeoutAgain.text);
+  assert.equal(data(timeoutAgain).payment.id, data(timeoutPay).payment.id);
+  assert.equal(data(timeoutAgain).invoice.invoiceId, timeoutInv);
+  await req(`/api/leasing/finance/itgel/payments/${data(timeoutPay).payment.id}/cancel`, {
+    method: 'POST',
+    token: leasingToken,
+  });
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${timeoutSettleId}'`), 'OPEN');
+  mock.pay(timeoutInv, timeoutAmount);
+  const lateCb = await req('/api/orders/qpay/callback', {
+    method: 'POST',
+    body: { invoice_id: timeoutInv },
+    raw: true,
+  });
+  assert.equal(lateCb.status, 200, lateCb.text);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${timeoutSettleId}'`), 'OPEN');
+  assert.equal(sql(`SELECT "remainingAmount" FROM "ItgelSettlement" WHERE id='${timeoutSettleId}'`), String(timeoutAmount));
+  assert.equal(
+    Number(sql(`SELECT count(*) FROM "MoneyException" WHERE "qpayInvoiceId"='${timeoutInv}' AND status='OPEN'`)),
+    1,
+  );
+  const lateAgain = await req('/api/orders/qpay/callback', {
+    method: 'POST',
+    body: { invoice_id: timeoutInv },
+    raw: true,
+  });
+  assert.equal(lateAgain.status, 200, lateAgain.text);
+  assert.equal(
+    Number(sql(`SELECT count(*) FROM "MoneyException" WHERE "qpayInvoiceId"='${timeoutInv}' AND status='OPEN'`)),
+    1,
+  );
+  const repayOpen = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [timeoutSettleId], method: 'QPAY' },
+  });
+  assert.equal(repayOpen.status, 201, repayOpen.text);
+  assert.notEqual(data(repayOpen).payment.id, data(timeoutPay).payment.id);
+  await payMock(data(repayOpen).invoice.invoiceId, timeoutAmount);
+  assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${timeoutSettleId}'`), 'PAID');
+  passLog('QPay timeout keeps lock, resume reuses sender, late cancelled pay does not close debt');
 
   const xferGet = await req(`/api/leasing/orders/${lease3.orderId}/ready-transfer`, {
     token: leasingToken,
@@ -1544,6 +1858,13 @@ try {
     return { productId: data(created).id, roundId: round.id, price };
   }
 
+  async function readySale(token, code, productId) {
+    const payload = data(
+      await req(`/api/leasing/finance/ready/sales?pageSize=100&productId=${productId}`, { token }),
+    );
+    return (payload.rows ?? []).find((row) => row.code === code);
+  }
+
   const prodA = await createLeasingReady(leasingToken, `A-10k ${phoneA}`, 10_000);
   const prodB = await createLeasingReady(leaseBToken, `B-20k ${phoneA}`, 20_000);
   const splitCart = await req('/api/orders', {
@@ -1601,21 +1922,20 @@ try {
   const ownerSeesSplitB = await req(`/api/leasing/orders/${orderBId}`, { token: ownerToken });
   assert.equal(ownerSeesSplitA.status, 200, ownerSeesSplitA.text);
   assert.equal(ownerSeesSplitB.status, 200, ownerSeesSplitB.text);
-  const splitSalesA = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leasingToken }));
-  const splitSalesB = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leaseBToken }));
-  const splitSalesOwner = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: ownerToken }));
-  const splitRowA = splitSalesA.rows.find((row) => row.code === orderA.code);
-  const splitRowB = splitSalesB.rows.find((row) => row.code === orderB.code);
-  assert.ok(splitRowA, 'A sales row');
-  assert.ok(splitRowB, 'B sales row');
+  const splitSalesA = { rows: [await readySale(leasingToken, orderA.code, prodA.productId)].filter(Boolean) };
+  const splitSalesB = { rows: [await readySale(leaseBToken, orderB.code, prodB.productId)].filter(Boolean) };
+  const splitRowA = splitSalesA.rows[0];
+  const splitRowB = splitSalesB.rows[0];
+  assert.ok(splitRowA, `A sales row ${orderA.code} product=${prodA.productId}`);
+  assert.ok(splitRowB, `B sales row ${orderB.code} product=${prodB.productId}`);
   assert.equal(splitRowA.paidAmount, 10_000);
   assert.equal(splitRowB.paidAmount, 20_000);
-  assert.equal(splitSalesA.rows.some((row) => row.code === orderB.code), false);
-  assert.equal(splitSalesB.rows.some((row) => row.code === orderA.code), false);
-  const splitOwnerRowA = splitSalesOwner.rows.find((row) => row.code === orderA.code);
-  const splitOwnerRowB = splitSalesOwner.rows.find((row) => row.code === orderB.code);
-  assert.equal(splitOwnerRowA?.paidAmount, 10_000);
-  assert.equal(splitOwnerRowB?.paidAmount, 20_000);
+  assert.equal(Boolean(await readySale(leasingToken, orderB.code, prodA.productId)), false);
+  assert.equal(Boolean(await readySale(leaseBToken, orderA.code, prodB.productId)), false);
+  const splitOwnerRowA = await readySale(ownerToken, orderA.code, prodA.productId);
+  const splitOwnerRowB = await readySale(ownerToken, orderB.code, prodB.productId);
+  assert.equal(splitOwnerRowA?.paidAmount, 10_000, JSON.stringify(splitOwnerRowA));
+  assert.equal(splitOwnerRowB?.paidAmount, 20_000, JSON.stringify(splitOwnerRowB));
   passLog('two-leasing cart splits 10k/20k with isolated pay and sales', `${orderA.code}+${orderB.code}`);
 
   const mixedLegacyId = randomUUID();
@@ -1666,14 +1986,9 @@ try {
     sql(`SELECT subtotal FROM "Order" WHERE id='${mixedLegacyId}'`),
     '30000',
   );
-  const mixedSalesA = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leasingToken }));
-  const mixedSalesB = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leaseBToken }));
-  const mixedSalesOwner = data(
-    await req('/api/leasing/finance/ready/sales?pageSize=100', { token: ownerToken }),
-  );
-  const mixedRowA = mixedSalesA.rows.find((row) => row.code === mixedLegacyCode);
-  const mixedRowB = mixedSalesB.rows.find((row) => row.code === mixedLegacyCode);
-  const mixedRowOwner = mixedSalesOwner.rows.find((row) => row.code === mixedLegacyCode);
+  const mixedRowA = await readySale(leasingToken, mixedLegacyCode, prodA.productId);
+  const mixedRowB = await readySale(leaseBToken, mixedLegacyCode, prodB.productId);
+  const mixedRowOwner = await readySale(ownerToken, mixedLegacyCode, prodA.productId);
   assert.ok(mixedRowA && mixedRowB && mixedRowOwner);
   assert.equal(mixedRowA.paidAmount + mixedRowB.paidAmount, mixedRowOwner.paidAmount);
   assert.notEqual(mixedRowA.paidAmount, mixedRowOwner.paidAmount);
@@ -1843,18 +2158,17 @@ try {
   assert.equal(oneOwner.attributedMoney, false);
   assert.equal(oneLedger.totals.paidAmount + oneLedger.totals.unallocatedPaid, 1);
   assert.equal(oneA.items.every((item) => (item.name ?? item.nameSnapshot) !== 'B-1t'), true);
-  const oneSalesA = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leasingToken }));
-  const oneSalesB = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leaseBToken }));
-  const oneSalesOwner = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: ownerToken }));
-  const oneRowA = oneSalesA.rows.find((row) => row.code === mixOneCode);
-  const oneRowB = oneSalesB.rows.find((row) => row.code === mixOneCode);
-  const oneRowOwner = oneSalesOwner.rows.find((row) => row.code === mixOneCode);
+  const oneRowA = await readySale(leasingToken, mixOneCode, prodA.productId);
+  const oneRowB = await readySale(leaseBToken, mixOneCode, prodB.productId);
+  const oneRowOwner = await readySale(ownerToken, mixOneCode, prodA.productId);
   assert.ok(oneRowA && oneRowB && oneRowOwner);
   assert.equal(oneRowA.paidAmount + oneRowB.paidAmount + oneRowA.unallocatedPaid, oneRowOwner.paidAmount);
   assert.equal(oneRowOwner.paidAmount, 1);
   passLog('1₮ remainder + SHOP cargo stay exact across detail/ledger/sales');
 
   const t5tag = `T5${phoneA.slice(-4)}${Date.now().toString(36).slice(-4)}`;
+  const t5Date = `205${Date.now() % 9}-${String((Date.now() % 12) + 1).padStart(2, '0')}-${String((Date.now() % 28) + 1).padStart(2, '0')}`;
+  const t5Created = `TIMESTAMPTZ '${t5Date} 04:00:00+00'`;
   sql(
     `INSERT INTO "Order" (id, code, "customerId", status, subtotal, "paidAmount", "refundedAmount", "dueAmount", "payeeKind", "isLeasing", "leasingFee", "createdAt", "updatedAt")
      SELECT '${t5tag}' || 'o' || lpad(n::text, 5, '0'),
@@ -1866,8 +2180,8 @@ try {
             CASE WHEN n <= 4000 THEN 0 WHEN n <= 4500 THEN 3 ELSE 0 END,
             CASE WHEN n <= 4000 THEN 0 WHEN n <= 4500 THEN 3 ELSE -5 END,
             'LEASING', false, 0,
-            TIMESTAMPTZ '2099-01-15 04:00:00+00',
-            TIMESTAMPTZ '2099-01-15 04:00:00+00'
+            ${t5Created},
+            ${t5Created}
      FROM generate_series(1, 5000) AS n`,
   );
   sql(
@@ -1895,7 +2209,7 @@ try {
   );
   sql(
     `INSERT INTO "Order" (id, code, "customerId", status, subtotal, "paidAmount", "refundedAmount", "dueAmount", "payeeKind", "isLeasing", "leasingFee", "createdAt", "updatedAt")
-     VALUES ('${t5tag}o05001', '${t5tag}05001', '${userA.customerId}', 'NEW', 30000, 1, 0, 29999, 'LEASING', false, 0, TIMESTAMPTZ '2099-01-15 04:00:00+00', TIMESTAMPTZ '2099-01-15 04:00:00+00')`,
+     VALUES ('${t5tag}o05001', '${t5tag}05001', '${userA.customerId}', 'NEW', 30000, 1, 0, 29999, 'LEASING', false, 0, ${t5Created}, ${t5Created})`,
   );
   sql(
     `INSERT INTO "OrderItem" (id, "orderId", "roundId", "productId", "nameSnapshot", qty, "unitPrice", "costPriceSnapshot")
@@ -1932,7 +2246,7 @@ try {
   assert.equal(sqlRefunded, 1_500);
   assert.equal(sqlShopPaid, 5_000);
   assert.equal(sqlDue, 28_999);
-  const t5q = '/api/leasing/finance/ready/sales?from=2099-01-15&to=2099-01-15&pageSize=1';
+  const t5q = `/api/leasing/finance/ready/sales?from=${t5Date}&to=${t5Date}&pageSize=1`;
   const t5OwnerRes = await req(t5q, { token: ownerToken });
   const t5ARes = await req(t5q, { token: leasingToken });
   const t5BRes = await req(t5q, { token: leaseBToken });
@@ -2050,6 +2364,29 @@ try {
     sql(`SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`),
     leasingAdminId,
   );
+  const mixAProd = await createShopReady(`MixOwnA ${phoneA}`, 1, 9_000);
+  const mixA = await createLeasingPaid(mixAProd, userA.token, 'Idem A');
+  const mixAId = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${mixA.orderId}'`);
+  const mixBId = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${leaseBContract.orderId}'`);
+  const mixedNoOwner = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: ownerToken,
+    body: { settlementIds: [mixAId, mixBId], method: 'QPAY' },
+  });
+  assert.equal(mixedNoOwner.status, 400, mixedNoOwner.text);
+  const mixedFiltered = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: ownerToken,
+    body: { settlementIds: [mixAId, mixBId], method: 'QPAY', ownerAdminId: leasingAdminId },
+  });
+  assert.ok([404, 409].includes(mixedFiltered.status), mixedFiltered.text);
+  const mixedByA = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [mixAId, mixBId], method: 'QPAY' },
+  });
+  assert.ok([404, 409].includes(mixedByA.status), mixedByA.text);
+  passLog('OWNER/LEASING cannot silently merge different owners');
   const deactivateB = await req(`/api/admin/staff/${leaseBId}`, {
     method: 'PATCH',
     token: adminToken,

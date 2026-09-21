@@ -24,6 +24,10 @@ vi.mock('../src/services/qpay.js', () => ({
       ? (order ? 'leasing' : 'shop')
       : (order.payeeKind === 'LEASING' || order.isLeasing ? 'leasing' : 'shop'),
 }));
+vi.mock('../src/services/itgelSettlementPay.js', () => ({
+  reconcileUncertainSettlementInvoice: vi.fn(async () => false),
+  recordUnmatchedSettlementPayment: vi.fn(async () => {}),
+}));
 import { publicQpayRouter } from '../src/routes/public/qpay.js';
 import { adminQpayRouter } from '../src/routes/admin/qpay.js';
 

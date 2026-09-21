@@ -21,6 +21,7 @@ export {
   TOKEN_KEYS,
   adminAuth,
   clearRequestCache,
+  clearSessionClientState,
   isAuthError,
   readToken,
   request,

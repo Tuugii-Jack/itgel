@@ -432,55 +432,80 @@ export const leasingApi = {
       }[];
     }>("/leasing/finance/ready/sales", { ...adminAuth, query }).then((r) => r.data),
 
-  itgelSummary: (day?: string) =>
-    request<{
-      day: string;
-      orderCount: number;
-      lineCount: number;
-      amount: number;
-      paidAmount: number;
-      remainingAmount: number;
-      priorUnpaidAmount: number;
-      priorUnpaidCount: number;
-      unpaidTodayIds: string[];
-      lines: {
-        id: string;
-        orderCode: string;
-        customerName: string;
-        productName: string;
-        qty: number;
-        amount: number;
-        paidAmount: number;
-        remainingAmount: number;
-        status: string;
-        statusLabel: string;
-      }[];
-    }>("/leasing/finance/itgel/summary", {
+  itgelSummary: (query?: { day?: string; ownerAdminId?: string }) =>
+    request<import("./settlements/types").SettlementSummary>("/leasing/finance/itgel/summary", {
       ...adminAuth,
-      query: day ? { day } : undefined,
+      query,
+    }).then((r) => r.data),
+
+  itgelOperators: () =>
+    request<import("./settlements/types").SettlementOperator[]>("/leasing/finance/itgel/operators", adminAuth).then(
+      (r) => r.data,
+    ),
+
+  itgelSettlements: (query?: {
+    from?: string;
+    to?: string;
+    status?: string;
+    q?: string;
+    remaining?: string;
+    ownerAdminId?: string;
+    cursor?: string;
+    take?: number;
+  }) =>
+    request<import("./settlements/types").SettlementLine[]>("/leasing/finance/itgel/settlements", {
+      ...adminAuth,
+      query,
+    }).then((r) => ({
+      rows: r.data,
+      nextCursor: (r.meta?.nextCursor as string | null | undefined) ?? null,
+      totals: (r.meta?.totals as import("./settlements/types").SettlementListPage["totals"]) ?? {
+        count: r.data.length,
+        remainingAmount: 0,
+        amount: 0,
+        paidAmount: 0,
+      },
+    })),
+
+  itgelPreview: (body: {
+    settlementIds: string[];
+    amount?: number;
+    allocations?: { settlementId: string; amount: number }[];
+    ownerAdminId?: string;
+  }) =>
+    request<import("./settlements/types").SettlementPreview>("/leasing/finance/itgel/preview", {
+      ...adminAuth,
+      method: "POST",
+      body,
     }).then((r) => r.data),
 
   itgelPay: (body: {
     settlementIds: string[];
     method: "QPAY" | "BANK_TRANSFER";
+    amount?: number;
+    allocations?: { settlementId: string; amount: number }[];
+    ownerAdminId?: string;
     bankRef?: string;
     bankDate?: string;
     receiptUrl?: string;
     note?: string;
   }) =>
-    request<{
-      payment: { id: string; amount: number; status: string; method: string; qpayInvoiceId: string | null };
-      invoice: {
-        invoiceId: string;
-        qrText: string;
-        qrImage: string | null;
-        urls: { name: string; description: string; logo: string | null; link: string }[];
-        amount: number;
-      } | null;
-    }>("/leasing/finance/itgel/pay", {
+    request<import("./settlements/types").SettlementPayResult>("/leasing/finance/itgel/pay", {
       ...adminAuth,
       method: "POST",
       body,
+    }).then((r) => r.data),
+
+  itgelPending: (ownerAdminId?: string) =>
+    request<import("./settlements/types").SettlementPayment[]>("/leasing/finance/itgel/pending", {
+      ...adminAuth,
+      query: ownerAdminId ? { ownerAdminId } : undefined,
+    }).then((r) => r.data),
+
+  itgelResume: (id: string) =>
+    request<import("./settlements/types").SettlementPayResult>(`/leasing/finance/itgel/payments/${id}/resume`, {
+      ...adminAuth,
+      method: "POST",
     }).then((r) => r.data),
 
   itgelVerify: (id: string) =>
@@ -495,24 +520,23 @@ export const leasingApi = {
       method: "POST",
     }).then((r) => r.data),
 
-  itgelPayments: () =>
-    request<
-      {
-        id: string;
-        method: string;
-        amount: number;
-        status: string;
-        qpayInvoiceId: string | null;
-        bankRef: string | null;
-        bankDate: string | null;
-        receiptUrl: string | null;
-        createdAt: string;
-        rejectedReason: string | null;
-        note: string | null;
-        lines: {
-          amount: number;
-          settlement: { id: string; orderCode: string; productName: string; statusLabel: string };
-        }[];
-      }[]
-    >("/leasing/finance/itgel/payments", adminAuth).then((r) => r.data),
+  itgelPayments: (query?: {
+    status?: string;
+    from?: string;
+    to?: string;
+    ownerAdminId?: string;
+    cursor?: string;
+    take?: number;
+  }) =>
+    request<import("./settlements/types").SettlementPayment[]>("/leasing/finance/itgel/payments", {
+      ...adminAuth,
+      query,
+    }).then((r) => ({
+      rows: r.data,
+      nextCursor: (r.meta?.nextCursor as string | null | undefined) ?? null,
+      totals: (r.meta?.totals as import("./settlements/types").SettlementPaymentPage["totals"]) ?? {
+        count: r.data.length,
+        amount: 0,
+      },
+    })),
 };

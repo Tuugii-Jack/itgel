@@ -4,9 +4,9 @@ import { pickSettlementOwnerId, resolveAutoSettlementOwner } from '../src/lib/se
 
 describe('Итгэлд төлөх тооцоо', () => {
   it('төлөвийн шошгыг хэрэглэгчийн төлбөрөөс тусад нь гаргана', () => {
-    expect(settlementStatusLabel('OPEN')).toBe('Итгэлд төлөөгүй');
-    expect(settlementStatusLabel('PAID')).toBe('Итгэлд төлсөн');
-    expect(settlementStatusLabel('PENDING_BANK')).toBe('Баталгаажуулалт хүлээж байна');
+    expect(settlementStatusLabel('OPEN')).toBe('Төлөөгүй');
+    expect(settlementStatusLabel('PAID')).toBe('Төлсөн');
+    expect(settlementStatusLabel('PENDING_BANK')).toBe('Дансны баталгаа хүлээж байна');
     expect(settlementStatusLabel('INVOICED')).toBe('QPay хүлээгдэж байна');
   });
 
@@ -32,7 +32,7 @@ describe('Итгэлд төлөх тооцоо', () => {
     expect(row.amount).toBe(80_000);
     expect(row.qty).toBe(2);
     expect(row.orderCode).toBe('PH-1');
-    expect(row.statusLabel).toBe('Итгэлд төлөөгүй');
+    expect(row.statusLabel).toBe('Төлөөгүй');
   });
 
   it('эзнийг snapshot-оор авч, эхний идэвхтэй админ руу буцахгүй', () => {

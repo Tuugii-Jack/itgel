@@ -10,8 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { adminApi, api, isAuthError, readToken, writeToken } from "./api";
-import { clearRequestCache } from "./api/client";
+import { adminApi, api, clearRequestCache, clearSessionClientState, isAuthError, readToken, writeToken } from "./api";
 import { clearCheckoutDraft } from "./checkoutDraft";
 import { clearCheckoutIdempotencyKey } from "./checkoutIdempotency";
 import type { Me } from "./types";
@@ -101,11 +100,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     refreshVersion.current += 1;
     void adminApi.logout().catch(() => undefined);
     void api.logout().catch(() => undefined);
-    writeToken("customer", null);
-    writeToken("admin", null);
+    clearSessionClientState();
     clearCheckoutDraft();
     clearCheckoutIdempotencyKey();
-    clearRequestCache();
     setMe(null);
     setWorkspace(null);
     setLoading(false);

@@ -11,10 +11,11 @@
  *   DELETE /v2/payment/refund/{payment_id}
  *
  * Токеныг хугацаа дуусахаас өмнө дахин дахин авахгүй (refresh ашиглана).
- * sender_invoice_no давтахгүй. payment/check-ийг callback/гараар шалгахад л дуудна.
+ * sender_invoice_no-г идемпотент create гэж үзэхгүй — timeout-ийн дараа POST /invoice дахин явуулахгүй,
+ * POST /invoice/list-ээр хайна. payment/check-ийг callback/гараар шалгахад л дуудна.
  */
 import { env } from '../../env.js';
-import { conflict } from '../../lib/errors.js';
+import { conflict, isQpayTimeoutError, qpayTimeout } from '../../lib/errors.js';
 
 export interface QpayBankLink {
   name: string;
@@ -255,25 +256,41 @@ async function qpayFetch<T>(
   path: string,
   init: RequestInit = {},
   kind: QpayAccountKind = 'shop',
+  opts?: { timeoutMs?: number },
 ): Promise<T> {
   const token = await getAccessToken(kind);
   const creds = accountCreds(kind);
-  const res = await fetch(`${creds.baseUrl}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(init.headers ?? {}),
-    },
-  });
+  const timeoutMs = opts?.timeoutMs;
+  const ac = timeoutMs ? new AbortController() : null;
+  const timer = timeoutMs
+    ? setTimeout(() => ac!.abort(), timeoutMs)
+    : null;
+  try {
+    const res = await fetch(`${creds.baseUrl}${path}`, {
+      ...init,
+      signal: ac?.signal ?? init.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init.headers ?? {}),
+      },
+    });
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    console.error(`[qpay:${kind}]`, path, res.status, body);
-    throw conflict(qpayErrorMessage(res.status, body));
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      console.error(`[qpay:${kind}]`, path, res.status, body);
+      throw conflict(qpayErrorMessage(res.status, body), { qpayStatus: res.status });
+    }
+
+    return await readJson<T>(res, path);
+  } catch (error) {
+    if (isQpayTimeoutError(error) || (ac?.signal.aborted ?? false)) {
+      throw qpayTimeout('QPay хариу өгсөнгүй. Нэхэмжлэл үүссэн байж болно.');
+    }
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-
-  return readJson<T>(res, path);
 }
 
 function mapInvoice(
@@ -303,12 +320,15 @@ function mapInvoice(
   };
 }
 
-/** POST /v2/invoice — QR + банкны deeplink эндээс ирнэ. sender_invoice_no давтахгүй. */
+/** POST /v2/invoice — QR + банкны deeplink эндээс ирнэ. Давхардал идемпотент гэж батлагдаагүй. */
 export async function createQpayInvoice(
   input: {
     orderCode: string;
     amount: number;
     description?: string;
+    /** Тогтвортой дугаар — timeout-оор давхар invoice үүсгэхгүй. */
+    senderInvoiceNo?: string;
+    timeoutMs?: number;
   },
   kind: QpayAccountKind = 'shop',
 ): Promise<QpayInvoice> {
@@ -316,9 +336,11 @@ export async function createQpayInvoice(
   if (input.amount <= 0) throw conflict('Төлөх дүн 0-ээс их байх ёстой.');
 
   const creds = accountCreds(kind);
-  const senderInvoiceNo = `${input.orderCode}-${Date.now().toString(36)}${Math.random()
-    .toString(36)
-    .slice(2, 6)}`;
+  const senderInvoiceNo =
+    input.senderInvoiceNo?.trim() ||
+    `${input.orderCode}-${Date.now().toString(36)}${Math.random()
+      .toString(36)
+      .slice(2, 6)}`;
 
   const data = await qpayFetch<{
     invoice_id: string;
@@ -342,9 +364,83 @@ export async function createQpayInvoice(
       }),
     },
     kind,
+    input.timeoutMs ? { timeoutMs: input.timeoutMs } : undefined,
   );
 
   return mapInvoice(data, input.amount);
+}
+
+export type QpayInvoiceListRow = {
+  invoiceId: string;
+  senderInvoiceNo: string | null;
+  amount: number;
+  status: string | null;
+};
+
+/** POST /v2/invoice/list — sender_invoice_no-оор нэхэмжлэл хайна. Create-ийг орлохгүй. */
+export async function listQpayInvoices(
+  input: { senderInvoiceNo: string; page?: number; pageLimit?: number },
+  kind: QpayAccountKind = 'shop',
+): Promise<QpayInvoiceListRow[]> {
+  assertReady(kind);
+  const sender = input.senderInvoiceNo.trim();
+  if (!sender) return [];
+  const creds = accountCreds(kind);
+  const data = await qpayFetch<{ count?: number; rows?: Record<string, unknown>[] }>(
+    '/invoice/list',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        invoice_code: creds.invoiceCode,
+        sender_invoice_no: sender,
+        offset: {
+          page_number: input.page ?? 1,
+          page_limit: Math.min(input.pageLimit ?? 20, 100),
+        },
+      }),
+    },
+    kind,
+  );
+  return (data.rows ?? [])
+    .map((row) => {
+      const invoiceId = String(row.invoice_id ?? row.invoiceId ?? '').trim();
+      const amount = Number(row.amount ?? 0);
+      return {
+        invoiceId,
+        senderInvoiceNo: typeof row.sender_invoice_no === 'string' ? row.sender_invoice_no : sender,
+        amount: Number.isFinite(amount) ? Math.round(amount) : 0,
+        status: typeof row.invoice_status === 'string' ? row.invoice_status : null,
+      };
+    })
+    .filter((row) => row.invoiceId);
+}
+
+/** GET /v2/invoice/{id} */
+export async function getQpayInvoice(
+  invoiceId: string,
+  kind: QpayAccountKind = 'shop',
+  fallbackAmount = 0,
+): Promise<QpayInvoice> {
+  assertReady(kind);
+  const data = await qpayFetch<Record<string, unknown>>(
+    `/invoice/${encodeURIComponent(invoiceId)}`,
+    { method: 'GET' },
+    kind,
+  );
+  return mapInvoice(
+    {
+      invoice_id: String(data.invoice_id ?? data.invoiceId ?? invoiceId),
+      qr_text: typeof data.qr_text === 'string' ? data.qr_text : undefined,
+      qr_image: typeof data.qr_image === 'string' ? data.qr_image : undefined,
+      qPay_shortUrl: typeof data.qPay_shortUrl === 'string' ? data.qPay_shortUrl : undefined,
+      qpay_short_url: typeof data.qpay_short_url === 'string' ? data.qpay_short_url : undefined,
+      urls: Array.isArray(data.urls)
+        ? (data.urls as { name?: string; description?: string; logo?: string; link?: string }[])
+        : undefined,
+      amount: Number(data.amount ?? fallbackAmount),
+    },
+    fallbackAmount,
+  );
 }
 
 /** DELETE /v2/invoice/{invoice_id} */
