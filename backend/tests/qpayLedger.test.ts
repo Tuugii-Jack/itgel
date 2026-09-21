@@ -1,9 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { client } = vi.hoisted(() => ({ client: {} as Record<string, any> }));
+const { client, confirmLeasingIfFeePaid } = vi.hoisted(() => ({
+  client: {} as Record<string, any>,
+  confirmLeasingIfFeePaid: vi.fn(async (..._args: unknown[]) => {}),
+}));
 vi.mock('../src/prisma.js', () => ({ prisma: client }));
 vi.mock('../src/lib/audit.js', () => ({ audit: vi.fn(async () => {}) }));
 vi.mock('../src/services/orders.js', () => ({ changeOrderStatus: vi.fn(async () => {}) }));
+vi.mock('../src/services/payments.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/services/payments.js')>();
+  return {
+    ...actual,
+    confirmLeasingIfFeePaid: (orderId: string, actor: string) => confirmLeasingIfFeePaid(orderId, actor),
+  };
+});
 import { applyQpayPayment, findOrderByQpayInvoice, rememberQpayInvoice } from '../src/services/qpay.js';
 import { recordPayment } from '../src/services/payments.js';
 
@@ -14,6 +24,8 @@ let invoices: Map<string, Record<string, any>>;
 let tail: Promise<void>;
 
 beforeEach(() => {
+  confirmLeasingIfFeePaid.mockReset();
+  confirmLeasingIfFeePaid.mockResolvedValue(undefined);
   order = { id: 'o1', code: 'TEST', status: 'NEW', isLeasing: false, payeeKind: 'SHOP', subtotal: 100000,
     storageFee: 0, cargoFee: 0, leasingFee: 0, paidAmount: 0, refundedAmount: 0,
     writtenOffAmount: 0, debtClosedAt: null, dueAmount: 100000, deletedAt: null, qpayInvoiceId: 'i1' };
@@ -163,5 +175,18 @@ describe('QPay ledger reconciliation', () => {
     })));
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     expect(order.refundedAmount).toBe(80000);
+  });
+
+  it('төлбөр хадгалагдсан ч баталгаажуулалт алдахад retry нөхнө, мөнгө давхардахгүй', async () => {
+    confirmLeasingIfFeePaid.mockRejectedValueOnce(new Error('confirm failed'));
+    await expect(applyQpayPayment('o1', 'i1', 100000, 'p1')).rejects.toThrow('confirm failed');
+    expect(payments).toHaveLength(1);
+    expect(order.paidAmount).toBe(100000);
+    confirmLeasingIfFeePaid.mockClear();
+    confirmLeasingIfFeePaid.mockResolvedValue(undefined);
+    expect(await applyQpayPayment('o1', 'i1', 100000, 'p1')).toBe(false);
+    expect(payments).toHaveLength(1);
+    expect(order.paidAmount).toBe(100000);
+    expect(confirmLeasingIfFeePaid).toHaveBeenCalledOnce();
   });
 });

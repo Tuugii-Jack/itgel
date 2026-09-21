@@ -1,7 +1,7 @@
 import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../lib/errors.js';
-import { canManageOtherAdminPhones } from '../lib/adminRoles.js';
+import { canManageTargetAdminPhones } from '../lib/adminRoles.js';
 import { issuePhoneOtp, normalizeLoginPhone, PHONE_OTP_ADMIN_PHONE } from './phoneOtp.js';
 import { consumeOtpWithStore, prismaOtpWhere, throwOtpClaim, type OtpClaimStore } from '../lib/otpClaim.js';
 
@@ -31,9 +31,23 @@ function adminPhoneStore(phone: string, adminUserId: string): OtpClaimStore {
   };
 }
 
-function assertCanSetPhone(actorRole: string, actorAdminId: string, targetId: string) {
-  if (!canManageOtherAdminPhones(actorRole) && actorAdminId !== targetId) {
-    throw forbidden('Энэ дугаарыг нэмэх эрхгүй.');
+function assertCanSetPhone(
+  actorRole: string,
+  actorAdminId: string,
+  target: { id: string; role: string },
+) {
+  if (actorAdminId === target.id) {
+    if (target.role === 'OWNER' && actorRole !== 'OWNER') {
+      throw forbidden('OWNER-ийн нэвтрэх дугаарыг зөвхөн эзэмшигч удирдана.');
+    }
+    return;
+  }
+  if (!canManageTargetAdminPhones(actorRole, target.role)) {
+    throw forbidden(
+      target.role === 'OWNER'
+        ? 'OWNER-ийн нэвтрэх дугаарыг зөвхөн эзэмшигч удирдана.'
+        : 'Энэ дугаарыг нэмэх эрхгүй.',
+    );
   }
 }
 
@@ -64,7 +78,7 @@ export async function issueAdminLoginPhoneOtp(input: {
 }) {
   const target = await prisma.adminUser.findUnique({ where: { id: input.targetAdminId } });
   if (!target) throw notFound('Админ олдсонгүй.');
-  assertCanSetPhone(input.actorRole, input.actorAdminId, target.id);
+  assertCanSetPhone(input.actorRole, input.actorAdminId, target);
   const phone = normalizeLoginPhone(input.phone);
   await assertPhoneAvailable(phone, target.id);
 
@@ -89,7 +103,7 @@ export async function verifyAdminLoginPhone(input: {
     include: { loginPhones: { select: { phone: true } } },
   });
   if (!target) throw notFound('Админ олдсонгүй.');
-  assertCanSetPhone(input.actorRole, input.actorAdminId, target.id);
+  assertCanSetPhone(input.actorRole, input.actorAdminId, target);
   if (!/^\d{6}$/.test(input.code)) throw badRequest('Код 6 оронтой байна.');
   const phone = normalizeLoginPhone(input.phone);
   const now = new Date();

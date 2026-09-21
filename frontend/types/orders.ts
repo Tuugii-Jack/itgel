@@ -212,6 +212,7 @@ export interface AdminOrderRow {
   writtenOffAmount?: number;
   debtClosedAt?: string | null;
   debtCloseReason?: string | null;
+  mixedOwnership?: boolean;
   isResale?: boolean;
   paymentClaimedAt: string | null;
   profit: number;

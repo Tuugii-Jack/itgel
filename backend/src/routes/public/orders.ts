@@ -46,7 +46,7 @@ import {
   publicLeasingContactOf,
   serializeOrderContact,
 } from '../../lib/leasingContact.js';
-import { checkoutFlagsForGroup, splitItemsByPayee } from '../../lib/inventoryOwner.js';
+import { checkoutFlagsForGroup, splitCheckoutGroups } from '../../lib/inventoryOwner.js';
 import { cancelQpayInvoice, qpayAccountForOrder, rememberQpayInvoice } from '../../services/qpay.js';
 
 export const publicOrdersRouter = Router();
@@ -175,14 +175,21 @@ publicOrdersRouter.post(
     }
 
     const items = snapshotOrderLines(body.items, byId);
-
-    const { shop: shopItems, leasing: leasingOwnedItems } = splitItemsByPayee(items, byId);
-
-    const shopSubtotal = subtotalOf(shopItems);
-    const leasingSubtotal = subtotalOf(leasingOwnedItems);
-    const shopFlags = checkoutFlagsForGroup('SHOP', shopItems.length > 0 && Boolean(body.leasing));
-    const leasingFlags = checkoutFlagsForGroup('LEASING', false);
-    const shopLeasingFee = shopFlags.isLeasing ? await leasingFeeFromSettings(shopSubtotal) : 0;
+    const checkoutGroups = await Promise.all(
+      splitCheckoutGroups(items, byId).map(async (group) => {
+        const flags = checkoutFlagsForGroup(
+          group.ownerKind,
+          group.ownerKind === 'SHOP' && Boolean(body.leasing),
+        );
+        const subtotal = subtotalOf(group.items);
+        return {
+          ...group,
+          flags,
+          subtotal,
+          leasingFee: flags.isLeasing ? await leasingFeeFromSettings(subtotal) : 0,
+        };
+      }),
+    );
 
     const persistOrders = async (tx: Prisma.TransactionClient) => {
       await releaseExpiredReadyHoldsForRounds(tx, readyIds, holdCutoff);
@@ -194,16 +201,16 @@ publicOrdersRouter.post(
       }
 
       const created: Order[] = [];
-      if (shopItems.length > 0) {
+      for (const group of checkoutGroups) {
         const order = await createOrderWithUniqueCode(tx, {
           customerId,
-          subtotal: shopSubtotal,
-          isLeasing: shopFlags.isLeasing,
-          leasingFee: shopLeasingFee,
-          payeeKind: shopFlags.payeeKind,
-          leasingOperatorAdminId: await snapshotLeasingOperatorAdminId(tx, shopFlags.isLeasing),
+          subtotal: group.subtotal,
+          isLeasing: group.flags.isLeasing,
+          leasingFee: group.leasingFee,
+          payeeKind: group.flags.payeeKind,
+          leasingOperatorAdminId: await snapshotLeasingOperatorAdminId(tx, group.flags.isLeasing),
           note: body.note ?? null,
-          items: shopItems,
+          items: group.items,
         });
         await audit(
           {
@@ -213,39 +220,11 @@ publicOrdersRouter.post(
             entityId: order.id,
             after: {
               code: order.code,
-              subtotal: shopSubtotal,
-              isLeasing: shopFlags.isLeasing,
-              leasingFee: shopLeasingFee,
+              subtotal: group.subtotal,
+              isLeasing: group.flags.isLeasing,
+              leasingFee: group.leasingFee,
               payeeKind: order.payeeKind,
-            },
-          },
-          tx,
-        );
-        created.push(order);
-      }
-      if (leasingOwnedItems.length > 0) {
-        const order = await createOrderWithUniqueCode(tx, {
-          customerId,
-          subtotal: leasingSubtotal,
-          isLeasing: leasingFlags.isLeasing,
-          leasingFee: 0,
-          payeeKind: leasingFlags.payeeKind,
-          leasingOperatorAdminId: await snapshotLeasingOperatorAdminId(tx, leasingFlags.isLeasing),
-          note: body.note ?? null,
-          items: leasingOwnedItems,
-        });
-        await audit(
-          {
-            actor: actorOf(req),
-            action: 'CREATE',
-            entity: 'Order',
-            entityId: order.id,
-            after: {
-              code: order.code,
-              subtotal: leasingSubtotal,
-              isLeasing: false,
-              leasingFee: 0,
-              payeeKind: 'LEASING',
+              ownerAdminId: group.ownerAdminId,
             },
           },
           tx,

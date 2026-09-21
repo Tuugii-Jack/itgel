@@ -4,7 +4,13 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
-import { leasingOwnedProductWhere, leasingOwnedRoundWhere } from '../../lib/inventoryOwner.js';
+import { isOwnerRole } from '../../lib/adminRoles.js';
+import {
+  leasingCatalogProductWhere,
+  leasingCatalogRoundWhere,
+  resolveLeasingCatalogOwnerId,
+  type LeasingAuth,
+} from '../../lib/leasingAccess.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
@@ -38,6 +44,7 @@ const readyRoundFields = {
 const createBody = z.object({
   ...templateFields,
   ...readyRoundFields,
+  ownerAdminId: z.string().min(1).optional(),
 });
 
 const updateProductBody = z.object(templateFields).partial();
@@ -76,18 +83,18 @@ function resolveOptions(body: {
   return options;
 }
 
-async function ownedProduct(id: string, adminId: string) {
+async function ownedProduct(id: string, auth: LeasingAuth) {
   const product = await prisma.product.findFirst({
-    where: { id, ...leasingOwnedProductWhere(adminId) },
+    where: { id, ...leasingCatalogProductWhere(auth) },
     include: roundInclude,
   });
   if (!product) throw notFound('Бараа олдсонгүй.');
   return product;
 }
 
-async function ownedRound(id: string, adminId: string) {
+async function ownedRound(id: string, auth: LeasingAuth) {
   const round = await prisma.productRound.findFirst({
-    where: { id, ...leasingOwnedRoundWhere(adminId), closeAt: null },
+    where: { id, ...leasingCatalogRoundWhere(auth), closeAt: null },
     include: {
       product: {
         include: {
@@ -123,20 +130,38 @@ leasingProductsRouter.get(
 );
 
 leasingProductsRouter.get(
+  '/owners',
+  asyncHandler(async (req, res) => {
+    if (isOwnerRole(req.auth!.role)) {
+      const owners = await prisma.adminUser.findMany({
+        where: { role: 'LEASING', isActive: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, email: true },
+      });
+      res.json({ data: owners });
+      return;
+    }
+    const self = await prisma.adminUser.findUnique({
+      where: { id: req.auth!.sub },
+      select: { id: true, name: true, email: true },
+    });
+    res.json({ data: self ? [self] : [] });
+  }),
+);
+
+leasingProductsRouter.get(
   '/',
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
-    const adminId = req.auth!.sub;
+    const catalog = leasingCatalogProductWhere(req.auth!);
     const roundFilter: Prisma.ProductRoundWhereInput = {
-      deletedAt: null,
+      ...leasingCatalogRoundWhere(req.auth!),
       closeAt: null,
-      ownerKind: 'LEASING',
-      ownerAdminId: adminId,
       ...(q.status ? { status: q.status } : {}),
     };
     const where: Prisma.ProductWhereInput = {
-      ...leasingOwnedProductWhere(adminId),
+      ...catalog,
       ...(q.category ? { categoryId: q.category } : {}),
       ...(q.q ? { name: { contains: q.q, mode: 'insensitive' } } : {}),
       rounds: { some: roundFilter },
@@ -163,7 +188,7 @@ leasingProductsRouter.get(
   '/:id',
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
-    const product = await ownedProduct(param(req, 'id'), req.auth!.sub);
+    const product = await ownedProduct(param(req, 'id'), req.auth!);
     const stats = await roundStats(product.rounds.map((r) => r.id));
     res.json({ data: adminProduct(product, new Date(), stats) });
   }),
@@ -174,7 +199,13 @@ leasingProductsRouter.post(
   validate({ body: createBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof createBody>;
-    const adminId = req.auth!.sub;
+    const target = body.ownerAdminId
+      ? await prisma.adminUser.findUnique({
+          where: { id: body.ownerAdminId },
+          select: { role: true, isActive: true },
+        })
+      : null;
+    const adminId = resolveLeasingCatalogOwnerId(req.auth!, body.ownerAdminId, target);
     const category = await prisma.category.findFirst({
       where: { id: body.categoryId, deletedAt: null },
     });
@@ -217,7 +248,7 @@ leasingProductsRouter.post(
       return created;
     });
 
-    const full = await ownedProduct(product.id, adminId);
+    const full = await ownedProduct(product.id, req.auth!);
     await audit({
       actor: actorOf(req),
       action: 'CREATE',
@@ -234,8 +265,7 @@ leasingProductsRouter.patch(
   validate({ params: idParams, body: updateProductBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof updateProductBody>;
-    const adminId = req.auth!.sub;
-    const before = await ownedProduct(param(req, 'id'), adminId);
+    const before = await ownedProduct(param(req, 'id'), req.auth!);
     if (body.categoryId) {
       const category = await prisma.category.findFirst({
         where: { id: body.categoryId, deletedAt: null },
@@ -288,8 +318,7 @@ leasingProductsRouter.patch(
   validate({ params: idParams, body: updateRoundBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof updateRoundBody>;
-    const adminId = req.auth!.sub;
-    const before = await ownedRound(param(req, 'id'), adminId);
+    const before = await ownedRound(param(req, 'id'), req.auth!);
     const skuRows = body.skuStocks;
     const after = await prisma.$transaction(async (tx) => {
       const updated = await tx.productRound.update({
@@ -355,7 +384,7 @@ leasingProductsRouter.post(
   imageUploadBody,
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
-    const product = await ownedProduct(param(req, 'id'), req.auth!.sub);
+    const product = await ownedProduct(param(req, 'id'), req.auth!);
     if (product.images.length >= 12) throw conflict('Нэг бараанд дээд тал нь 12 зураг.');
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
       throw badRequest('Зураг файл илгээнэ үү.');
@@ -373,7 +402,7 @@ leasingProductsRouter.post(
     body: z.object({ contentType: z.string().min(1).max(80) }),
   }),
   asyncHandler(async (req, res) => {
-    const product = await ownedProduct(param(req, 'id'), req.auth!.sub);
+    const product = await ownedProduct(param(req, 'id'), req.auth!);
     if (product.images.length >= 12) throw conflict('Нэг бараанд дээд тал нь 12 зураг.');
     const presigned = await presignProductImage(product.id, req.body.contentType);
     res.json({ data: presigned });
@@ -387,7 +416,7 @@ leasingProductsRouter.patch(
     body: z.object({ images: z.array(z.string().url()).max(12) }),
   }),
   asyncHandler(async (req, res) => {
-    const product = await ownedProduct(param(req, 'id'), req.auth!.sub);
+    const product = await ownedProduct(param(req, 'id'), req.auth!);
     const updated = await prisma.product.update({
       where: { id: product.id },
       data: { images: req.body.images },

@@ -273,6 +273,11 @@ export const leasingApi = {
   product: (id: string) =>
     request<AdminProduct>(`/leasing/products/${id}`, adminAuth).then((r) => r.data),
 
+  productOwners: () =>
+    request<{ id: string; name: string; email: string }[]>("/leasing/products/owners", adminAuth).then(
+      (r) => r.data,
+    ),
+
   createProduct: (body: unknown) =>
     request<AdminProduct>("/leasing/products", {
       ...adminAuth,

@@ -2,7 +2,7 @@
 
 import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
-import { use, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useSearchParams } from "next/navigation";
 import { PhoneAuthForm } from "@/components/PhoneAuthForm";
 import { PaymentPanel } from "@/components/PaymentPanel";
@@ -36,10 +36,18 @@ import type { PollStopReason } from "@/lib/poller";
  */
 export default function SuccessPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
-  const also = useSearchParams().get("also");
+  const alsoParam = useSearchParams().get("also") ?? "";
+  const alsoCodes = useMemo(
+    () =>
+      alsoParam
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+    [alsoParam],
+  );
   const session = useSession();
   const [order, setOrder] = useState<PublicOrder | null>(null);
-  const [alsoOrder, setAlsoOrder] = useState<PublicOrder | null>(null);
+  const [extraOrders, setExtraOrders] = useState<PublicOrder[]>([]);
   const [store, setStore] = useState<Store | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pollStopped, setPollStopped] = useState<PollStopReason | null>(null);
@@ -63,33 +71,33 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
   const load = useCallback(async () => {
     if (!session.me) return;
     try {
-      const [o, extra] = await Promise.all([
-        api.order(code),
-        also ? api.order(also).catch(() => null) : Promise.resolve(null),
-      ]);
+      const extras = alsoCodes.length
+        ? (await Promise.all(alsoCodes.map((row) => api.order(row).catch(() => null)))).filter(
+            (row): row is PublicOrder => row != null,
+          )
+        : [];
+      const o = await api.order(code);
       hasOrder.current = true;
       setOrder(o);
-      setAlsoOrder(extra);
+      setExtraOrders(extras);
       setError(null);
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Ачаалж чадсангүй.";
       if (!hasOrder.current) setError(message);
       throw e;
     }
-  }, [code, also, session.me]);
+  }, [code, alsoCodes, session.me]);
 
   useEffect(() => deferEffect(() => { void loadStore(); }), [loadStore]);
   useEffect(() => deferEffect(() => { void load().catch(() => {}); }), [load]);
 
   const feeHold = Boolean(order && leasingFeeHold(order));
-  const extraHold = Boolean(alsoOrder && leasingFeeHold(alsoOrder));
-  const extraPending =
-    !!alsoOrder &&
-    alsoOrder.status !== "CANCELLED" &&
-    (extraHold ||
-      (!alsoOrder.isLeasing &&
-        awaitingPayment(alsoOrder.paymentState) &&
-        alsoOrder.dueAmount > 0));
+  const extraPending = extraOrders.some(
+    (row) =>
+      row.status !== "CANCELLED" &&
+      (leasingFeeHold(row) ||
+        (!row.isLeasing && awaitingPayment(row.paymentState) && row.dueAmount > 0)),
+  );
   const pending =
     !!order &&
     order.status !== "CANCELLED" &&
@@ -98,7 +106,7 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
         awaitingPayment(order.paymentState) &&
         order.dueAmount > 0) ||
       extraPending);
-  const polling = shouldPollSuccess(order, alsoOrder);
+  const polling = shouldPollSuccess(order, extraOrders);
 
   // Админ төлбөрийг бүртгэмэгц хуудас өөрөө «Баталгаажлаа» болно —
   // хэрэглэгч refresh дарах шаардлагагүй.
@@ -165,13 +173,13 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
       {pending ? (
         <Pending
           order={order}
-          extraOrder={alsoOrder}
+          extraOrders={extraOrders}
           store={store}
           onClaimed={() => { void load().catch(() => {}); }}
           feeHold={feeHold}
         />
       ) : (
-        <Confirmed order={order} extraOrder={alsoOrder} store={store} trackUrl={trackUrl} />
+        <Confirmed order={order} extraOrders={extraOrders} store={store} trackUrl={trackUrl} />
       )}
     </div>
   );
@@ -181,13 +189,13 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
 
 function Pending({
   order,
-  extraOrder,
+  extraOrders = [],
   store,
   onClaimed,
   feeHold,
 }: {
   order: PublicOrder;
-  extraOrder?: PublicOrder | null;
+  extraOrders?: PublicOrder[];
   store: Store | null;
   onClaimed: () => void;
   feeHold?: boolean;
@@ -195,11 +203,15 @@ function Pending({
   return (
     <div className="px-4 pt-8 lg:mx-auto lg:max-w-[1000px] lg:px-10">
       <div className="text-[20px] font-medium lg:text-[24px]">
-        {feeHold ? "Шимтгэл төлнө үү" : extraOrder ? "Хоёр захиалгын төлбөр" : "Төлбөр хүлээгдэж байна"}
+        {feeHold
+          ? "Шимтгэл төлнө үү"
+          : extraOrders.length > 0
+            ? "Тусдаа захиалгын төлбөр"
+            : "Төлбөр хүлээгдэж байна"}
       </div>
       <p className="mt-1 mb-0 max-w-[560px] text-[14px] leading-[1.6] text-ink-2">
-        {extraOrder
-          ? "Дэлгүүрийн болон лизингийн бараа хоёр захиалга болсон. Төлбөрийг тус тусад нь төлнө үү."
+        {extraOrders.length > 0
+          ? "Захиалгыг эзэмшигчээр тусгаарласан. Төлбөрийг тус тусад нь төлнө үү."
           : feeHold
           ? "Лизингийн шимтгэлийг QPay-ээр төлнө. Төлсний дараа захиалга үүснэ."
           : "Төлбөрийн хураангуй, QPay энд байна. Төлсний дараа захиалга баталгаажна."}
@@ -210,13 +222,14 @@ function Pending({
           {store ? (
             <>
               <PaymentPanel order={order} store={store} onClaimed={onClaimed} feeHold={feeHold} />
-              {extraOrder && (
+              {extraOrders.map((extra) => (
                 <PaymentPanel
-                  order={extraOrder}
+                  key={extra.code}
+                  order={extra}
                   store={store}
                   onClaimed={onClaimed}
                 />
-              )}
+              ))}
             </>
           ) : (
             <Skeleton className="h-56 w-full rounded-[12px]" />
@@ -240,8 +253,10 @@ function Pending({
             {order.contact && (
               <OrderContactCard order={order} shopHours={store?.workHours} />
             )}
-            {extraOrder?.contact && extraOrder.contact.kind !== order.contact?.kind && (
-              <OrderContactCard order={extraOrder} shopHours={store?.workHours} />
+            {extraOrders.map((extra) =>
+              extra.contact && extra.contact.kind !== order.contact?.kind ? (
+                <OrderContactCard key={extra.code} order={extra} shopHours={store?.workHours} />
+              ) : null,
             )}
           </div>
         </div>
@@ -358,12 +373,12 @@ function OrderSummary({ order }: { order: PublicOrder }) {
 
 function Confirmed({
   order,
-  extraOrder,
+  extraOrders = [],
   store,
   trackUrl,
 }: {
   order: PublicOrder;
-  extraOrder?: PublicOrder | null;
+  extraOrders?: PublicOrder[];
   store: Store | null;
   trackUrl: string;
 }) {
@@ -515,10 +530,12 @@ function Confirmed({
             <OrderContactCard order={order} shopHours={store?.workHours} />
           </div>
         )}
-        {extraOrder?.contact && extraOrder.contact.kind !== order.contact?.kind && (
-          <div className="w-full">
-            <OrderContactCard order={extraOrder} shopHours={store?.workHours} />
-          </div>
+        {extraOrders.map((extra) =>
+          extra.contact && extra.contact.kind !== order.contact?.kind ? (
+            <div key={extra.code} className="w-full">
+              <OrderContactCard order={extra} shopHours={store?.workHours} />
+            </div>
+          ) : null,
         )}
       </div>
         </div>

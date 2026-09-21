@@ -22,6 +22,10 @@ export function canAccessLeasingPortal(role?: string | null): boolean {
   return role === "LEASING" || role === "OWNER";
 }
 
+export function canWriteLeasingMoney(role?: string | null): boolean {
+  return role === "LEASING" || role === "OWNER";
+}
+
 /** Туслах админ хандаж болох хуудсууд. */
 export function helperAdminCanAccess(pathname: string): boolean {
   if (

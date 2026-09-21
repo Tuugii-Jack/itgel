@@ -5,7 +5,9 @@ import { useCallback, useEffect, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { LeasingBadge, LeasingGoodsBadge, PageHead, Table, Td, Th } from "@/components/admin/shared";
 import { Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
+import { canWriteLeasingMoney } from "@/lib/admin-role";
 import { leasingApi, ApiError } from "@/lib/api";
+import { useAdminSession } from "@/lib/admin-session";
 import { dayLabel, money, phoneLabel } from "@/lib/format";
 import { leasingArrivalUnpaid } from "@/lib/leasing";
 import { useDeferredReload } from "@/lib/useDeferredReload";
@@ -29,6 +31,8 @@ type CustomerDetail = AdminCustomer & {
 };
 
 export default function LeasingCustomersPage() {
+  const { user } = useAdminSession();
+  const canWrite = canWriteLeasingMoney(user?.role);
   const [rows, setRows] = useState<CustomerRow[]>([]);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -79,7 +83,7 @@ export default function LeasingCustomersPage() {
       <OrderDetail
         orderId={openOrderId}
         api={leasingApi}
-        canWrite
+        canWrite={canWrite}
         workspace="leasing"
         onClose={() => setOpenOrderId(null)}
         onChanged={markChanged}

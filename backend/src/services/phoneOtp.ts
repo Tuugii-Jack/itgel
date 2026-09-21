@@ -21,8 +21,6 @@ const RESEND_COOLDOWN_MS = 60 * 1000;
 const OTP_PHONE_HOUR_LIMIT = 5;
 const OTP_IP_HOUR_LIMIT = 60;
 
-type Db = Prisma.TransactionClient | typeof prisma;
-
 export function publicPhoneOtp(
   phone: string,
   otp: { expiresAt: Date; createdAt: Date },
@@ -60,6 +58,8 @@ export function staffPhoneFields(phone: string | null | undefined): {
   return { phone, phoneVerifiedAt: new Date() };
 }
 
+type Db = Prisma.TransactionClient | typeof prisma;
+
 function phoneOtpStore(
   db: Db,
   phone: string,
@@ -96,8 +96,15 @@ async function lockPhone(tx: Prisma.TransactionClient, phone: string, purpose: s
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`phone-otp:${purpose}:${phone}`}))`;
 }
 
+async function lockOtpIssue(tx: Prisma.TransactionClient, phone: string, purpose: string, ip?: string | null) {
+  if (ip) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`phone-otp-ip:${purpose}:${ip}`}))`;
+  }
+  await lockPhone(tx, phone, purpose);
+}
+
 async function persistPhoneOtp(
-  db: Db,
+  tx: Prisma.TransactionClient,
   data: {
     phone: string;
     code: string;
@@ -111,38 +118,30 @@ async function persistPhoneOtp(
     usedAtStamp: Date;
   },
 ): Promise<PhoneOtp> {
-  const write = async (tx: Prisma.TransactionClient) => {
-    await lockPhone(tx, data.phone, data.purpose);
-    await tx.phoneOtp.updateMany({
-      where: {
-        usedAt: null,
-        ...(data.purpose === PHONE_OTP_CHANGE && data.customerId
-          ? { customerId: data.customerId, purpose: data.purpose }
-          : data.purpose === PHONE_OTP_ADMIN_PHONE && data.adminUserId
-            ? { adminUserId: data.adminUserId, purpose: data.purpose }
-            : { phone: data.phone, purpose: data.purpose }),
-      },
-      data: { usedAt: data.usedAtStamp },
-    });
-    return tx.phoneOtp.create({
-      data: {
-        phone: data.phone,
-        code: data.code,
-        purpose: data.purpose,
-        name: data.name ?? null,
-        customerId: data.customerId ?? null,
-        adminUserId: data.adminUserId ?? null,
-        previousPhone: data.previousPhone ?? null,
-        ip: data.ip ?? null,
-        expiresAt: data.expiresAt,
-      },
-    });
-  };
-
-  if ('$transaction' in db && typeof db.$transaction === 'function') {
-    return db.$transaction((tx) => write(tx));
-  }
-  return write(db as Prisma.TransactionClient);
+  await tx.phoneOtp.updateMany({
+    where: {
+      usedAt: null,
+      ...(data.purpose === PHONE_OTP_CHANGE && data.customerId
+        ? { customerId: data.customerId, purpose: data.purpose }
+        : data.purpose === PHONE_OTP_ADMIN_PHONE && data.adminUserId
+          ? { adminUserId: data.adminUserId, purpose: data.purpose }
+          : { phone: data.phone, purpose: data.purpose }),
+    },
+    data: { usedAt: data.usedAtStamp },
+  });
+  return tx.phoneOtp.create({
+    data: {
+      phone: data.phone,
+      code: data.code,
+      purpose: data.purpose,
+      name: data.name ?? null,
+      customerId: data.customerId ?? null,
+      adminUserId: data.adminUserId ?? null,
+      previousPhone: data.previousPhone ?? null,
+      ip: data.ip ?? null,
+      expiresAt: data.expiresAt,
+    },
+  });
 }
 
 export async function issuePhoneOtp(input: {
@@ -160,69 +159,78 @@ export async function issuePhoneOtp(input: {
   const name = input.name?.trim() || undefined;
   const ip = input.ip?.trim() || null;
 
-  const last = await prisma.phoneOtp.findFirst({
-    where: {
-      phone,
-      purpose,
-      usedAt: null,
-      expiresAt: { gt: now },
-      ...(input.customerId ? { customerId: input.customerId } : {}),
-      ...(input.adminUserId ? { adminUserId: input.adminUserId } : {}),
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const issued = await prisma.$transaction(async (tx) => {
+    await lockOtpIssue(tx, phone, purpose, ip);
 
-  const remainingCooldown = last
-    ? Math.ceil((RESEND_COOLDOWN_MS - (now.getTime() - last.createdAt.getTime())) / 1000)
-    : 0;
-
-  if (last && remainingCooldown > 0) {
-    return publicPhoneOtp(phone, last, remainingCooldown);
-  }
-
-  const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
-  const phoneHour = await prisma.phoneOtp.count({
-    where: { phone, purpose, createdAt: { gte: hourAgo } },
-  });
-  if (phoneHour >= OTP_PHONE_HOUR_LIMIT) {
-    if (last) return publicPhoneOtp(phone, last, RESEND_COOLDOWN_MS / 1000);
-    throw tooManyRequests('Хэт олон код хүслээ. 1 цагийн дараа оролдоно уу.', {
-      retryAfterSec: 3600,
+    const last = await tx.phoneOtp.findFirst({
+      where: {
+        phone,
+        purpose,
+        usedAt: null,
+        expiresAt: { gt: now },
+        ...(input.customerId ? { customerId: input.customerId } : {}),
+        ...(input.adminUserId ? { adminUserId: input.adminUserId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
     });
-  }
 
-  if (ip) {
-    const ipHour = await prisma.phoneOtp.count({
-      where: { ip, purpose, createdAt: { gte: hourAgo } },
+    const remainingCooldown = last
+      ? Math.ceil((RESEND_COOLDOWN_MS - (now.getTime() - last.createdAt.getTime())) / 1000)
+      : 0;
+
+    if (last && remainingCooldown > 0) {
+      return { kind: 'reuse' as const, otp: last, resendAfterSec: remainingCooldown };
+    }
+
+    const hourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+    const phoneHour = await tx.phoneOtp.count({
+      where: { phone, purpose, createdAt: { gte: hourAgo } },
     });
-    if (ipHour >= OTP_IP_HOUR_LIMIT) {
-      throw tooManyRequests('Хэт олон код хүслээ. Дараа дахин оролдоно уу.', {
+    if (phoneHour >= OTP_PHONE_HOUR_LIMIT) {
+      if (last) return { kind: 'reuse' as const, otp: last, resendAfterSec: RESEND_COOLDOWN_MS / 1000 };
+      throw tooManyRequests('Хэт олон код хүслээ. 1 цагийн дараа оролдоно уу.', {
         retryAfterSec: 3600,
       });
     }
-  }
 
-  const code = generateOtp();
-  const otp = await persistPhoneOtp(prisma, {
-    phone,
-    code,
-    purpose,
-    name: name ?? last?.name ?? null,
-    customerId: input.customerId ?? null,
-    adminUserId: input.adminUserId ?? null,
-    previousPhone: input.previousPhone ?? null,
-    ip,
-    expiresAt: new Date(now.getTime() + OTP_TTL_MS),
-    usedAtStamp: now,
+    if (ip) {
+      const ipHour = await tx.phoneOtp.count({
+        where: { ip, purpose, createdAt: { gte: hourAgo } },
+      });
+      if (ipHour >= OTP_IP_HOUR_LIMIT) {
+        throw tooManyRequests('Хэт олон код хүслээ. Дараа дахин оролдоно уу.', {
+          retryAfterSec: 3600,
+        });
+      }
+    }
+
+    const code = generateOtp();
+    const otp = await persistPhoneOtp(tx, {
+      phone,
+      code,
+      purpose,
+      name: name ?? last?.name ?? null,
+      customerId: input.customerId ?? null,
+      adminUserId: input.adminUserId ?? null,
+      previousPhone: input.previousPhone ?? null,
+      ip,
+      expiresAt: new Date(now.getTime() + OTP_TTL_MS),
+      usedAtStamp: now,
+    });
+    return { kind: 'created' as const, otp };
   });
+
+  if (issued.kind === 'reuse') {
+    return publicPhoneOtp(phone, issued.otp, issued.resendAfterSec);
+  }
 
   const { send } = await dispatchSms({
     channel: 'shop',
     purpose: purpose === PHONE_OTP_CHANGE ? 'otp_change' : 'otp_login',
     phone,
-    text: smsTemplates.otp(code),
+    text: smsTemplates.otp(issued.otp.code),
     relatedType: 'phone_otp',
-    relatedId: otp.id,
+    relatedId: issued.otp.id,
   });
 
   if (send.status === 'failed' && !send.accepted) {
@@ -230,7 +238,7 @@ export async function issuePhoneOtp(input: {
   }
 
   return {
-    ...publicPhoneOtp(phone, otp, RESEND_COOLDOWN_MS / 1000, send.status),
+    ...publicPhoneOtp(phone, issued.otp, RESEND_COOLDOWN_MS / 1000, send.status),
   };
 }
 

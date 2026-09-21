@@ -142,15 +142,16 @@ export async function confirmLeasingIfFeePaid(orderId: string, actor: string): P
   if (!leasingView(order).feePaid) return;
 
   if (order.status === 'NEW') {
-    try {
-      await changeOrderStatus(order.id, 'CONFIRMED', {
-        actor,
-        reason: 'Лизингийн шимтгэл төлөгдсөн',
-      });
-    } catch (error) {
-      console.warn('[leasing] шимтгэлээр баталгаажуулж чадсангүй:', error);
-    }
+    await changeOrderStatus(order.id, 'CONFIRMED', {
+      actor,
+      reason: 'Лизингийн шимтгэл төлөгдсөн',
+    });
   }
+  const latest = await prisma.order.findFirst({
+    where: { id: orderId, deletedAt: null },
+    select: { status: true },
+  });
+  if (!latest || latest.status === 'NEW' || latest.status === 'CANCELLED') return;
   await createItgelSettlementsForOrder(order.id);
 }
 

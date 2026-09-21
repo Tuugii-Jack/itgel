@@ -485,6 +485,29 @@ try {
   const userB = await loginCustomer(phoneB, 'Idem B');
   passLog('two customers');
 
+  const burstPhone = `7${String(Date.now()).slice(-7)}`;
+  const burst = await Promise.all(
+    Array.from({ length: 5 }, () =>
+      req('/api/auth/otp', { method: 'POST', body: { phone: burstPhone, name: 'Burst' } }),
+    ),
+  );
+  assert.equal(
+    burst.every((r) => r.status === 200),
+    true,
+    burst.map((r) => `${r.status}:${r.text}`).join(' | '),
+  );
+  assert.equal(
+    Number(sql(`SELECT count(*) FROM "PhoneOtp" WHERE phone='${burstPhone}' AND purpose='LOGIN' AND "usedAt" IS NULL`)),
+    1,
+    'concurrent OTP must keep one unused code',
+  );
+  assert.equal(
+    Number(sql(`SELECT count(*) FROM "SmsDispatch" WHERE phone='${burstPhone}' AND purpose='otp_login'`)),
+    1,
+    'concurrent OTP must send one SMS',
+  );
+  passLog('concurrent OTP one code one SMS');
+
   const products = data(await req('/api/products?type=ready&pageSize=50'));
   const shopReady = products.find((p) => p.ownerKind !== 'LEASING' && p.stock >= 0);
   const shopSku = products.find(
@@ -847,6 +870,12 @@ try {
   const adminToken = adminSession.token;
   const leasingSession = await workspaceOtp.workspaceLogin('leasing@itgel.mn', '99000002');
   const leasingToken = leasingSession.token;
+  const ownerPhone = `71${phoneA.slice(-6)}`;
+  const ownerSession = await workspaceOtp.workspaceLogin('owner@itgel.mn', ownerPhone);
+  const ownerToken = ownerSession.token;
+  assert.equal(ownerSession.user?.role, 'OWNER', JSON.stringify(ownerSession.user));
+  const ownerAdminId = sql(`SELECT id FROM "AdminUser" WHERE email='owner@itgel.mn'`);
+  assert.ok(ownerAdminId, 'OWNER seed required on isolated db');
   const leasingAdminId = sql(`SELECT id FROM "AdminUser" WHERE email='leasing@itgel.mn'`);
   const ownerPatch = await req('/api/admin/settings', {
     method: 'PATCH',
@@ -1243,6 +1272,93 @@ try {
   assert.equal(confirmAgain, 1);
   passLog('leasing cargo pays Itgel shop QPay without closing product debt');
 
+  const retryProd = await createShopReady(`RetrySettle ${phoneA}`, 2, 90_000);
+  const retryLease = await createLeasingPaid(retryProd, userA.token, 'Idem A');
+  const retryPayCount = Number(
+    sql(`SELECT count(*) FROM "Payment" WHERE "orderId"='${retryLease.orderId}' AND kind='PAYMENT'`),
+  );
+  sql(`DELETE FROM "ItgelSettlement" WHERE "sourceOrderId"='${retryLease.orderId}'`);
+  const retryInv = sql(
+    `SELECT "qpayInvoiceId" FROM "Payment" WHERE "orderId"='${retryLease.orderId}' AND kind='PAYMENT' AND "qpayInvoiceId" IS NOT NULL LIMIT 1`,
+  );
+  await payMock(retryInv, retryLease.fee, '/api/orders/leasing-qpay/callback');
+  assert.equal(
+    Number(sql(`SELECT count(*) FROM "Payment" WHERE "orderId"='${retryLease.orderId}' AND kind='PAYMENT'`)),
+    retryPayCount,
+  );
+  assert.equal(Number(sql(`SELECT count(*) FROM "ItgelSettlement" WHERE "sourceOrderId"='${retryLease.orderId}'`)), 1);
+  assert.ok(['CONFIRMED', 'ARRIVED'].includes(sql(`SELECT status FROM "Order" WHERE id='${retryLease.orderId}'`)));
+  passLog('QPay retry confirms order and fills missing Itgel debt without double payment');
+
+  const cancelRaceProd = await createShopReady(`RaceCancel ${phoneA}`, 2, 80_000);
+  const cancelRaceLease = await createLeasingPaid(cancelRaceProd, userA.token, 'Idem A');
+  const cancelSettleId = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${cancelRaceLease.orderId}'`);
+  const cancelRaceOpen = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: leasingToken,
+    body: { settlementIds: [cancelSettleId], method: 'QPAY' },
+  });
+  assert.equal(cancelRaceOpen.status, 201, cancelRaceOpen.text);
+  const cancelRacePayId = data(cancelRaceOpen).payment.id;
+  const cancelRaceInv = data(cancelRaceOpen).invoice.invoiceId;
+  const cancelRaceAmt = data(cancelRaceOpen).payment.amount;
+  const [cancelRaceCancel, cancelRaceCb] = await Promise.all([
+    req(`/api/leasing/finance/itgel/payments/${cancelRacePayId}/cancel`, {
+      method: 'POST',
+      token: leasingToken,
+    }),
+    (async () => {
+      mock.pay(cancelRaceInv, cancelRaceAmt);
+      return req('/api/orders/qpay/callback', {
+        method: 'POST',
+        body: { invoice_id: cancelRaceInv },
+        raw: true,
+      });
+    })(),
+  ]);
+  assert.ok([200, 404, 409].includes(cancelRaceCancel.status), cancelRaceCancel.text);
+  assert.equal(cancelRaceCb.status, 200, cancelRaceCb.text);
+  const cancelRacePayStatus = sql(`SELECT status FROM "ItgelSettlementPayment" WHERE id='${cancelRacePayId}'`);
+  assert.ok(['CONFIRMED', 'SUPERSEDED'].includes(cancelRacePayStatus), cancelRacePayStatus);
+  const cancelRaceSettle = sql(
+    `SELECT status || ' ' || COALESCE("lockPaymentId",'') || ' ' || "remainingAmount" FROM "ItgelSettlement" WHERE id='${cancelSettleId}'`,
+  );
+  if (cancelRacePayStatus === 'CONFIRMED') {
+    assert.match(cancelRaceSettle, /^PAID /);
+    assert.equal(sql(`SELECT "remainingAmount" FROM "ItgelSettlement" WHERE id='${cancelSettleId}'`), '0');
+  } else {
+    assert.equal(sql(`SELECT status FROM "ItgelSettlement" WHERE id='${cancelSettleId}'`), 'OPEN');
+    assert.equal(sql(`SELECT COALESCE("lockPaymentId",'') FROM "ItgelSettlement" WHERE id='${cancelSettleId}'`), '');
+  }
+  passLog('cancel vs callback either-wins keeps payment/debt consistent', cancelRacePayStatus);
+
+  const retrySettleId = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${retryLease.orderId}'`);
+  const ownerBank = await req('/api/leasing/finance/itgel/pay', {
+    method: 'POST',
+    token: ownerToken,
+    body: {
+      settlementIds: [retrySettleId],
+      method: 'BANK_TRANSFER',
+      bankRef: 'OWNER-ACTOR',
+      bankDate: '2026-09-18',
+    },
+  });
+  assert.equal(ownerBank.status, 201, ownerBank.text);
+  const ownerPaymentId = data(ownerBank).payment.id;
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ItgelSettlementPayment" WHERE id='${ownerPaymentId}'`),
+    leasingAdminId,
+  );
+  assert.equal(
+    sql(`SELECT "claimedBy" FROM "ItgelSettlementPayment" WHERE id='${ownerPaymentId}'`),
+    `admin:${ownerAdminId}`,
+  );
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ItgelSettlement" WHERE id='${retrySettleId}'`),
+    leasingAdminId,
+  );
+  passLog('OWNER pays leasing debt without taking ownership; audit stores OWNER actor');
+
   const lease2 = await createLeasingPaid(cargoProd, userA.token, 'Idem A');
   const s1 = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease1.orderId}'`);
   const s2 = sql(`SELECT id FROM "ItgelSettlement" WHERE "sourceOrderId"='${lease2.orderId}'`);
@@ -1383,6 +1499,7 @@ try {
     body: { email: leaseBEmail, name: 'Leasing Two', password: 'leasing123', role: 'LEASING' },
   });
   assert.ok([200, 201].includes(leaseBCreate.status), leaseBCreate.text);
+  const leaseBId = data(leaseBCreate).id;
   const leaseBPhone = `76${phoneA.slice(-6)}`;
   const leaseBSession = await workspaceOtp.workspaceLogin(leaseBEmail, leaseBPhone);
   const leaseBToken = leaseBSession.token;
@@ -1404,6 +1521,232 @@ try {
   assert.equal(aProducts.some((p) => (p.rounds ?? []).some((r) => r.id === leaseBRoundId) || p.id === data(leaseBProduct).id), false);
   const bProducts = data(await req('/api/leasing/products?pageSize=50', { token: leaseBToken }));
   assert.ok(bProducts.some((p) => p.id === data(leaseBProduct).id));
+
+  async function createLeasingReady(token, name, price, stock = 4) {
+    const created = await req('/api/leasing/products', {
+      method: 'POST',
+      token,
+      body: {
+        name,
+        categoryId,
+        images: [],
+        sellPrice: price,
+        stock,
+        status: 'ACTIVE',
+      },
+    });
+    assert.equal(created.status, 201, created.text);
+    const round = (data(created).rounds ?? [])[0];
+    assert.ok(round?.id, created.text);
+    sql(
+      `UPDATE "ProductRound" SET stock=${stock}, reserved=0, available=${stock}, status='ACTIVE' WHERE id='${round.id}'`,
+    );
+    return { productId: data(created).id, roundId: round.id, price };
+  }
+
+  const prodA = await createLeasingReady(leasingToken, `A-10k ${phoneA}`, 10_000);
+  const prodB = await createLeasingReady(leaseBToken, `B-20k ${phoneA}`, 20_000);
+  const splitCart = await req('/api/orders', {
+    method: 'POST',
+    token: userA.token,
+    idempotencyKey: randomUUID(),
+    body: {
+      name: 'Idem A',
+      items: [
+        { productId: prodA.roundId, qty: 1 },
+        { productId: prodB.roundId, qty: 1 },
+      ],
+    },
+  });
+  assert.equal(splitCart.status, 201, splitCart.text);
+  const splitMain = data(splitCart);
+  const splitExtra = splitMain.splitOrders ?? [];
+  assert.equal(splitExtra.length, 1, `expected 2 leasing orders, got ${JSON.stringify(splitCart.json)}`);
+  const splitCreated = [splitMain, splitExtra[0]];
+  const orderA = splitCreated.find((row) => row.subtotal === 10_000);
+  const orderB = splitCreated.find((row) => row.subtotal === 20_000);
+  assert.ok(orderA && orderB, JSON.stringify(splitCreated));
+  assert.equal(orderA.payeeKind, 'LEASING');
+  assert.equal(orderA.isLeasing, false);
+  assert.equal(orderB.payeeKind, 'LEASING');
+  assert.equal(orderB.isLeasing, false);
+  const orderAId = sql(`SELECT id FROM "Order" WHERE code='${orderA.code}'`);
+  const orderBId = sql(`SELECT id FROM "Order" WHERE code='${orderB.code}'`);
+  assert.notEqual(orderAId, orderBId);
+  const payA = await req(`/api/leasing/orders/${orderAId}/payments`, {
+    method: 'POST',
+    token: leasingToken,
+    body: { amount: 10_000, method: 'CASH', reference: 'A-10k' },
+  });
+  assert.equal(payA.status, 201, payA.text);
+  assert.equal(data(payA).totals.dueAmount, 0);
+  const payBByA = await req(`/api/leasing/orders/${orderBId}/payments`, {
+    method: 'POST',
+    token: leasingToken,
+    body: { amount: 20_000, method: 'CASH', reference: 'cross' },
+  });
+  assert.equal(payBByA.status, 404, payBByA.text);
+  const payB = await req(`/api/leasing/orders/${orderBId}/payments`, {
+    method: 'POST',
+    token: leaseBToken,
+    body: { amount: 20_000, method: 'CASH', reference: 'B-20k' },
+  });
+  assert.equal(payB.status, 201, payB.text);
+  assert.equal(data(payB).totals.dueAmount, 0);
+  const aSeesB = await req(`/api/leasing/orders/${orderBId}`, { token: leasingToken });
+  assert.equal(aSeesB.status, 404, aSeesB.text);
+  const bSeesA = await req(`/api/leasing/orders/${orderAId}`, { token: leaseBToken });
+  assert.equal(bSeesA.status, 404, bSeesA.text);
+  const ownerSeesSplitA = await req(`/api/leasing/orders/${orderAId}`, { token: ownerToken });
+  const ownerSeesSplitB = await req(`/api/leasing/orders/${orderBId}`, { token: ownerToken });
+  assert.equal(ownerSeesSplitA.status, 200, ownerSeesSplitA.text);
+  assert.equal(ownerSeesSplitB.status, 200, ownerSeesSplitB.text);
+  const splitSalesA = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leasingToken }));
+  const splitSalesB = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leaseBToken }));
+  const splitSalesOwner = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: ownerToken }));
+  const splitRowA = splitSalesA.rows.find((row) => row.code === orderA.code);
+  const splitRowB = splitSalesB.rows.find((row) => row.code === orderB.code);
+  assert.ok(splitRowA, 'A sales row');
+  assert.ok(splitRowB, 'B sales row');
+  assert.equal(splitRowA.paidAmount, 10_000);
+  assert.equal(splitRowB.paidAmount, 20_000);
+  assert.equal(splitSalesA.rows.some((row) => row.code === orderB.code), false);
+  assert.equal(splitSalesB.rows.some((row) => row.code === orderA.code), false);
+  const splitOwnerRowA = splitSalesOwner.rows.find((row) => row.code === orderA.code);
+  const splitOwnerRowB = splitSalesOwner.rows.find((row) => row.code === orderB.code);
+  assert.equal(splitOwnerRowA?.paidAmount, 10_000);
+  assert.equal(splitOwnerRowB?.paidAmount, 20_000);
+  passLog('two-leasing cart splits 10k/20k with isolated pay and sales', `${orderA.code}+${orderB.code}`);
+
+  const mixedLegacyId = randomUUID();
+  const mixedLegacyCode = `PHMX${phoneA.slice(-4)}`;
+  const mixedItemA = randomUUID();
+  const mixedItemB = randomUUID();
+  const mixedPayId = randomUUID();
+  sql(
+    `INSERT INTO "Order" (id, code, "customerId", status, subtotal, "paidAmount", "dueAmount", "payeeKind", "isLeasing", "leasingFee", "createdAt", "updatedAt") VALUES ('${mixedLegacyId}', '${mixedLegacyCode}', '${userA.customerId}', 'NEW', 30000, 30000, 0, 'LEASING', false, 0, NOW(), NOW())`,
+  );
+  sql(
+    `INSERT INTO "OrderItem" (id, "orderId", "roundId", "productId", "nameSnapshot", qty, "unitPrice", "costPriceSnapshot") VALUES ('${mixedItemA}', '${mixedLegacyId}', '${prodA.roundId}', '${prodA.productId}', 'A-legacy', 1, 10000, 0), ('${mixedItemB}', '${mixedLegacyId}', '${prodB.roundId}', '${prodB.productId}', 'B-legacy', 1, 20000, 0)`,
+  );
+  sql(
+    `INSERT INTO "Payment" (id, "orderId", kind, amount, method, actor, "payeeKind") VALUES ('${mixedPayId}', '${mixedLegacyId}', 'PAYMENT', 30000, 'CASH', 'system', 'LEASING')`,
+  );
+  const storedMixed = sql(
+    `SELECT subtotal || ',' || "paidAmount" || ',' || "dueAmount" FROM "Order" WHERE id='${mixedLegacyId}'`,
+  );
+  assert.equal(storedMixed, '30000,30000,0');
+  const aMixedGet = await req(`/api/leasing/orders/${mixedLegacyId}`, { token: leasingToken });
+  const bMixedGet = await req(`/api/leasing/orders/${mixedLegacyId}`, { token: leaseBToken });
+  assert.equal(aMixedGet.status, 200, aMixedGet.text);
+  assert.equal(bMixedGet.status, 200, bMixedGet.text);
+  assert.equal(data(aMixedGet).mixedOwnership, true);
+  assert.equal(data(aMixedGet).paidAmount, 10_000);
+  assert.equal(data(bMixedGet).paidAmount, 20_000);
+  assert.equal(data(aMixedGet).items.every((item) => item.name === 'A-legacy' || item.nameSnapshot === 'A-legacy'), true);
+  const aMixedPay = await req(`/api/leasing/orders/${mixedLegacyId}/payments`, {
+    method: 'POST',
+    token: leasingToken,
+    body: { amount: 1, method: 'CASH', reference: 'mixed-block' },
+  });
+  assert.equal(aMixedPay.status, 409, aMixedPay.text);
+  const bMixedRefund = await req(`/api/leasing/orders/${mixedLegacyId}/payments/refunds`, {
+    method: 'POST',
+    token: leaseBToken,
+    body: { amount: 1, method: 'CASH', reference: 'mixed-block' },
+  });
+  assert.equal(bMixedRefund.status, 409, bMixedRefund.text);
+  const ownerMixedPay = await req(`/api/leasing/orders/${mixedLegacyId}/payments/refunds`, {
+    method: 'POST',
+    token: ownerToken,
+    body: { amount: 3_000, method: 'CASH', reference: 'owner-mixed' },
+  });
+  assert.equal(ownerMixedPay.status, 201, ownerMixedPay.text);
+  assert.equal(
+    sql(`SELECT subtotal FROM "Order" WHERE id='${mixedLegacyId}'`),
+    '30000',
+  );
+  const mixedSalesA = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leasingToken }));
+  const mixedSalesB = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leaseBToken }));
+  const mixedSalesOwner = data(
+    await req('/api/leasing/finance/ready/sales?pageSize=100', { token: ownerToken }),
+  );
+  const mixedRowA = mixedSalesA.rows.find((row) => row.code === mixedLegacyCode);
+  const mixedRowB = mixedSalesB.rows.find((row) => row.code === mixedLegacyCode);
+  const mixedRowOwner = mixedSalesOwner.rows.find((row) => row.code === mixedLegacyCode);
+  assert.ok(mixedRowA && mixedRowB && mixedRowOwner);
+  assert.equal(mixedRowA.paidAmount + mixedRowB.paidAmount, mixedRowOwner.paidAmount);
+  assert.notEqual(mixedRowA.paidAmount, mixedRowOwner.paidAmount);
+  passLog('legacy mixed order keeps stored money; LEASING cannot write; reports attributed');
+
+  const bPayAOrder = await req(`/api/leasing/orders/${lease1.orderId}`, { token: leaseBToken });
+  assert.equal(bPayAOrder.status, 404, bPayAOrder.text);
+  const bPayALedger = await req(`/api/leasing/orders/${lease1.orderId}/payments`, { token: leaseBToken });
+  assert.equal(bPayALedger.status, 404, bPayALedger.text);
+  const bQpayA = await req(`/api/leasing/orders/${lease1.orderId}/qpay`, { token: leaseBToken });
+  assert.equal(bQpayA.status, 404, bQpayA.text);
+  const bReadyA = await req(`/api/leasing/orders/${lease1.orderId}/ready-transfer`, { token: leaseBToken });
+  assert.equal(bReadyA.status, 404, bReadyA.text);
+  const ownerSeesA = await req(`/api/leasing/orders/${lease1.orderId}`, { token: ownerToken });
+  assert.equal(ownerSeesA.status, 200, ownerSeesA.text);
+  const ownerPayA = await req(`/api/leasing/orders/${lease1.orderId}/payments`, { token: ownerToken });
+  assert.equal(ownerPayA.status, 200, ownerPayA.text);
+  const ownerCreateMissing = await req('/api/leasing/products', {
+    method: 'POST',
+    token: ownerToken,
+    body: {
+      name: `Owner-block ${phoneA}`,
+      categoryId,
+      images: [],
+      sellPrice: 11_000,
+      stock: 1,
+      status: 'ACTIVE',
+    },
+  });
+  assert.equal(ownerCreateMissing.status, 400, ownerCreateMissing.text);
+  const ownerOwners = data(await req('/api/leasing/products/owners', { token: ownerToken }));
+  assert.ok(ownerOwners.some((row) => row.id === leasingAdminId));
+  assert.ok(ownerOwners.some((row) => row.id === leaseBId));
+  const ownerCreate = await req('/api/leasing/products', {
+    method: 'POST',
+    token: ownerToken,
+    body: {
+      name: `Owner-for-B ${phoneA}`,
+      categoryId,
+      images: [],
+      sellPrice: 11_000,
+      stock: 1,
+      status: 'ACTIVE',
+      ownerAdminId: leaseBId,
+    },
+  });
+  assert.equal(ownerCreate.status, 201, ownerCreate.text);
+  const ownerCreatedId = data(ownerCreate).id;
+  assert.equal(sql(`SELECT "ownerAdminId" FROM "Product" WHERE id='${ownerCreatedId}'`), leaseBId);
+  assert.equal(
+    sql(`SELECT "ownerAdminId" FROM "ProductRound" WHERE "productId"='${ownerCreatedId}' ORDER BY "roundNo" LIMIT 1`),
+    leaseBId,
+  );
+  assert.equal(
+    sql(
+      `SELECT actor FROM "AuditLog" WHERE entity='Product' AND "entityId"='${ownerCreatedId}' AND action='CREATE' ORDER BY "createdAt" DESC LIMIT 1`,
+    ),
+    `admin:${ownerAdminId}`,
+  );
+  const leaseAForB = await req('/api/leasing/products', {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      name: `A-for-B ${phoneA}`,
+      categoryId,
+      images: [],
+      sellPrice: 12_000,
+      stock: 1,
+      status: 'ACTIVE',
+      ownerAdminId: leaseBId,
+    },
+  });
+  assert.equal(leaseAForB.status, 403, leaseAForB.text);
   const bPayA = await req('/api/leasing/finance/itgel/pay', {
     method: 'POST',
     token: leaseBToken,
@@ -1414,7 +1757,6 @@ try {
   assert.ok([401, 403, 404].includes(aCustomer.status), aCustomer.text);
   passLog('two leasing admins and customer orders stay isolated');
 
-  const leaseBId = data(leaseBCreate).id;
   const switchOwner = await req('/api/admin/settings', {
     method: 'PATCH',
     token: adminToken,

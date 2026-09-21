@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Metric, PageHead, Table, Td, Th } from "@/components/admin/shared";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { leasingApi, ApiError } from "@/lib/api";
+import { isOwner } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { customerNameLabel, dayLabel, money, phoneLabel } from "@/lib/format";
 
 type SalesRow = Awaited<ReturnType<typeof leasingApi.readySales>>["rows"][number];
@@ -18,6 +20,7 @@ const PAY_LABEL: Record<string, string> = {
 };
 
 export default function LeasingSalesPage() {
+  const { user } = useAdminSession();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [status, setStatus] = useState("");
@@ -65,7 +68,11 @@ export default function LeasingSalesPage() {
     <div>
       <PageHead
         title="Бэлэн барааны борлуулалт"
-        hint="Зөвхөн өөрийн бэлэн бараа. Орлого нь бодит төлбөр, буцаалтаас гарна — ашиг биш."
+        hint={
+          isOwner(user?.role)
+            ? "Бүх эзний бэлэн барааны борлуулалт. Орлого давхар тооцогдохгүй."
+            : "Зөвхөн өөрийн бэлэн бараа. Орлого нь бодит төлбөр, буцаалтаас гарна — ашиг биш."
+        }
       />
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Metric label="Гарт" value={stock?.onHand ?? 0} />

@@ -78,8 +78,8 @@ export default function CheckoutPage() {
       cart.clear();
       clearCheckoutDraft();
       if (!leasing) toast.success("Захиалга үүслээ.");
-      const extra = order.splitOrders?.[0]?.code;
-      router.push(extra ? `/success/${order.code}?also=${extra}` : `/success/${order.code}`);
+      const extra = (order.splitOrders ?? []).map((row) => row.code).filter(Boolean);
+      router.push(extra.length ? `/success/${order.code}?also=${extra.join(",")}` : `/success/${order.code}`);
     } catch (e) {
       const reused =
         e instanceof ApiError &&
@@ -156,14 +156,14 @@ export default function CheckoutPage() {
                 <SumRow label="Дэлгүүрийн бараа" value={money(shopSubtotal)} />
                 <SumRow label="Лизингийн бэлэн бараа" value={money(leasingSubtotal)} />
                 <p className="m-0 text-[13px] font-normal leading-[1.5] text-ink-2">
-                  Төлбөр хоёр захиалгаар тус тусад нь төлнө. Лизингийн барааны мөнгө лизингийн дансанд орно.
+                  Төлбөрийг эзэмшигч бүрээр тусдаа захиалгаар төлнө. Лизингийн барааны мөнгө тухайн эзний дансанд орно.
                 </p>
                 <div className="h-px bg-line" />
               </>
             )}
             {!mixedOwners && leasingLines.length > 0 && (
               <p className="m-0 text-[13px] font-normal leading-[1.5] text-ink-2">
-                Энэ барааны төлбөр лизингийн дансанд орно. Лизингийн хуваарь нэмэгдэхгүй.
+                Эзэмшигч бүрээр тусдаа захиалга болно. Төлбөр тухайн эзний дансанд орно.
               </p>
             )}
             <div className="flex justify-between gap-3 text-[17px] font-medium lg:text-[20px]">

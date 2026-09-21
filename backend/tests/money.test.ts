@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { marginPercent, profitOf, subtotalOf } from '../src/lib/money.js';
+import { attributedShare, marginPercent, profitOf, subtotalOf } from '../src/lib/money.js';
 
 describe('Захиалгын дүн', () => {
   it('Σ(unitPrice × qty)', () => {
@@ -29,5 +29,20 @@ describe('Ашиг', () => {
     expect(marginPercent(100_000, 60_000)).toBe(40);
     expect(marginPercent(79_000, 42_000)).toBe(47);
     expect(marginPercent(0, 0)).toBe(0);
+  });
+});
+
+describe('Холимог эзэмшлийн хувь', () => {
+  it('А=10,000 Б=20,000 төлсөн 30,000-г давхар тоолохгүй', () => {
+    expect(attributedShare(30_000, 10_000, 30_000)).toBe(10_000);
+    expect(attributedShare(30_000, 20_000, 30_000)).toBe(20_000);
+    expect(attributedShare(30_000, 10_000, 30_000) + attributedShare(30_000, 20_000, 30_000)).toBe(
+      30_000,
+    );
+  });
+
+  it('шүүлтгүй/хоосон дүн 0', () => {
+    expect(attributedShare(30_000, 0, 30_000)).toBe(0);
+    expect(attributedShare(0, 10_000, 30_000)).toBe(0);
   });
 });

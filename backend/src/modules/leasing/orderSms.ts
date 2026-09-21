@@ -13,7 +13,8 @@ import {
 import { prisma } from '../../prisma.js';
 import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
 import { CUSTOM_SMS_MAX_CHARS, prepareCustomSms, smsTemplates, stripSmsUrls } from '../../services/sms.js';
-import { assertLeasingOrder } from './guards.js';
+import { assertLeasingOrderAccess } from './guards.js';
+import type { LeasingAuth } from '../../lib/leasingAccess.js';
 
 export function reminderTemplateOf(
   kind: LeasingSmsKind,
@@ -34,8 +35,8 @@ export function assertSendSmsText(raw: string): string {
   return text;
 }
 
-export async function payReminderPreview(orderId: string) {
-  await assertLeasingOrder(orderId);
+export async function payReminderPreview(orderId: string, auth: LeasingAuth) {
+  await assertLeasingOrderAccess(orderId, auth);
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: { customer: { select: { phone: true, name: true } } },

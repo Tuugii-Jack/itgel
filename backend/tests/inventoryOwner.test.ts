@@ -5,6 +5,7 @@ import {
   isLeasingResale,
   leasingOwnedProductWhere,
   shopOwnedProductWhere,
+  splitCheckoutGroups,
   splitItemsByPayee,
 } from '../src/lib/inventoryOwner.js';
 
@@ -24,6 +25,27 @@ describe('Эзэмшил ба төлбөр хүлээн авагч', () => {
     );
     expect(split.shop.map((i) => i.name)).toEqual(['A', 'C']);
     expect(split.leasing.map((i) => i.name)).toEqual(['B']);
+  });
+
+  it('хоёр LEASING эзний бэлэн барааг тусдаа захиалга болгоно', () => {
+    const rounds = new Map([
+      ['a', { ownerKind: 'LEASING', ownerAdminId: 'lease-a' }],
+      ['b', { ownerKind: 'LEASING', ownerAdminId: 'lease-b' }],
+      ['shop', { ownerKind: 'SHOP', ownerAdminId: null }],
+    ]);
+    const groups = splitCheckoutGroups(
+      [
+        { roundId: 'a', name: 'A-10k' },
+        { roundId: 'b', name: 'B-20k' },
+        { roundId: 'shop', name: 'Shop' },
+      ],
+      rounds,
+    );
+    expect(groups.map((g) => [g.ownerKind, g.ownerAdminId, g.items.map((i) => i.name)])).toEqual([
+      ['SHOP', null, ['Shop']],
+      ['LEASING', 'lease-a', ['A-10k']],
+      ['LEASING', 'lease-b', ['B-20k']],
+    ]);
   });
 
   it('холимог сагсанд дэлгүүрийн барааг л хуваарьт лизинг болгоно', () => {

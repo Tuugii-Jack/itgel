@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useOnKeyChange } from "@/lib/syncKey";
 import { PageHead, Select } from "@/components/admin/shared";
 import { SkuStockEditor, seedSkuStockDrafts } from "@/features/catalog/components/SkuStockEditor";
@@ -15,6 +15,8 @@ import {
 } from "@/components/ui";
 import { ProductBasicsCard } from "@/features/catalog/components/ProductBasicsCard";
 import { leasingApi, ApiError } from "@/lib/api";
+import { isOwner } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { IMAGE_SIZE_HINT, assertImageUnderLimit, prepareAdminImage } from "@/lib/imageUpload";
 import { OPTION_PRESETS, skuStockSum } from "@/lib/options";
 import { useToast } from "@/lib/toast";
@@ -59,7 +61,19 @@ export function LeasingReadyForm({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const toast = useToast();
+  const { user } = useAdminSession();
+  const ownerPicker = isOwner(user?.role);
+  const [owners, setOwners] = useState<{ id: string; name: string; email: string }[]>([]);
+  const [ownerAdminId, setOwnerAdminId] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!ownerPicker || product) return;
+    void leasingApi
+      .productOwners()
+      .then(setOwners)
+      .catch(() => setOwners([]));
+  }, [ownerPicker, product]);
 
   const skuSeedKey = `${JSON.stringify(options)}|${JSON.stringify(round?.skuStocks ?? null)}`;
   useOnKeyChange(skuSeedKey, () => {
@@ -87,6 +101,7 @@ export function LeasingReadyForm({
       sellPrice: Number(sellPrice) || 1,
       stock: 0,
       status: "DRAFT",
+      ...(ownerPicker && ownerAdminId ? { ownerAdminId } : {}),
     });
     setProductId(created.id);
     setRoundId(created.currentRound?.id ?? created.rounds[0]?.id ?? null);
@@ -102,6 +117,12 @@ export function LeasingReadyForm({
     }
     if (!categoryId) {
       const message = "Ангилал сонгоно уу.";
+      setError(message);
+      toast.error(message);
+      return;
+    }
+    if (ownerPicker && !product && !ownerAdminId) {
+      const message = "Лизингийн эзэмшигч сонгоно уу.";
       setError(message);
       toast.error(message);
       return;
@@ -126,6 +147,7 @@ export function LeasingReadyForm({
         stock: options.length ? skuStockSum(skuStocks) ?? 0 : Number(stock) || 0,
         skuStocks,
         status,
+        ...(ownerPicker && ownerAdminId ? { ownerAdminId } : {}),
       };
       if (productId) {
         await leasingApi.updateProduct(productId, template);
@@ -175,13 +197,21 @@ export function LeasingReadyForm({
     <div className="max-w-[760px]">
       <PageHead
         title={product ? "Бэлэн бараа засах" : "Бэлэн бараа нэмэх"}
-        hint="Өөрийн эзэмшлийн бэлэн бараа. Дэлгүүрт бусад бэлэн бараатай адил харагдана."
+        hint={
+          ownerPicker
+            ? "Барааны эзэн сонгосон лизингийн админ. Таны нэр бүртгэлд үлдэнэ."
+            : "Өөрийн эзэмшлийн бэлэн бараа. Дэлгүүрт бусад бэлэн бараатай адил харагдана."
+        }
         actions={
           <>
             <Button variant="ghost" onClick={onClose}>
               Болих
             </Button>
-            <Button onClick={() => void save()} loading={busy} disabled={!name.trim() || !categoryId}>
+            <Button
+              onClick={() => void save()}
+              loading={busy}
+              disabled={!name.trim() || !categoryId || (ownerPicker && !product && !ownerAdminId)}
+            >
               Хадгалах
             </Button>
           </>
@@ -199,6 +229,21 @@ export function LeasingReadyForm({
           categories={categories}
           descriptionRows={4}
         />
+        {ownerPicker && !product ? (
+          <Card className="flex flex-col gap-3 p-4">
+            <Field label="Лизингийн эзэмшигч" hint="Бараа энэ админы бүртгэлд үүснэ.">
+              <Select
+                value={ownerAdminId}
+                onChange={setOwnerAdminId}
+                placeholder="Эзэмшигч сонгох"
+                options={owners.map((row) => ({
+                  value: row.id,
+                  label: row.name || row.email,
+                }))}
+              />
+            </Field>
+          </Card>
+        ) : null}
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Зураг</div>
           <p className="m-0 text-[13px] text-muted">{IMAGE_SIZE_HINT}</p>

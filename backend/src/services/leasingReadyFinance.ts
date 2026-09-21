@@ -1,11 +1,80 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { startOfUbDay, endOfUbDay, parseUbDay } from '../lib/date.js';
-import { leasingOwnedRoundWhere } from '../lib/inventoryOwner.js';
+import { attributedShare, subtotalOf } from '../lib/money.js';
 
-export async function leasingReadyStockSummary(ownerAdminId: string) {
+/** OWNER (шүүлтгүй) бүх эзний бараа; LEASING зөвхөн өөрийн. `=== undefined` биш. */
+export function leasingReadyOwnItems<T extends {
+  cancelledAt: Date | null;
+  round: { ownerKind: string | null; ownerAdminId: string | null; closeAt: Date | null };
+}>(items: T[], ownerAdminId?: string): T[] {
+  return items.filter((item) => {
+    if (item.cancelledAt != null) return false;
+    if (item.round.ownerKind !== 'LEASING' || item.round.closeAt !== null) return false;
+    if (!ownerAdminId) return true;
+    return item.round.ownerAdminId === ownerAdminId;
+  });
+}
+
+export function leasingReadyMoney<
+  T extends {
+    cancelledAt: Date | null;
+    qty: number;
+    unitPrice: number;
+    round: { ownerKind: string | null; ownerAdminId: string | null; closeAt: Date | null };
+  },
+>(input: {
+  ownerAdminId?: string;
+  items: T[];
+  paidAmount: number;
+  refundedAmount: number;
+  dueAmount: number;
+}): {
+  ownItems: T[];
+  received: number;
+  refunded: number;
+  due: number;
+  mixed: boolean;
+} {
+  const all = leasingReadyOwnItems(input.items, undefined);
+  const ownItems = leasingReadyOwnItems(input.items, input.ownerAdminId);
+  const owners = [
+    ...new Set(all.map((item) => item.round.ownerAdminId).filter((id): id is string => Boolean(id))),
+  ];
+  const mixed = owners.length > 1;
+  const scoped = Boolean(input.ownerAdminId) && mixed;
+  const ownSub = subtotalOf(ownItems);
+  const allSub = subtotalOf(all);
+  const received = scoped ? attributedShare(input.paidAmount, ownSub, allSub) : input.paidAmount;
+  const refunded = scoped ? attributedShare(input.refundedAmount, ownSub, allSub) : input.refundedAmount;
+  return {
+    ownItems,
+    received,
+    refunded,
+    due: scoped ? Math.max(0, ownSub - (received - refunded)) : input.dueAmount,
+    mixed,
+  };
+}
+
+function leasingPaySums(payments: Array<{ kind: string; payeeKind: string | null; amount: number }>) {
+  let paid = 0;
+  let refunded = 0;
+  for (const payment of payments) {
+    if (payment.payeeKind === 'SHOP') continue;
+    if (payment.kind === 'PAYMENT') paid += payment.amount;
+    if (payment.kind === 'REFUND') refunded += payment.amount;
+  }
+  return { paid, refunded };
+}
+
+export async function leasingReadyStockSummary(ownerAdminId?: string) {
   const rounds = await prisma.productRound.findMany({
-    where: { ...leasingOwnedRoundWhere(ownerAdminId), closeAt: null },
+    where: {
+      ownerKind: 'LEASING',
+      deletedAt: null,
+      closeAt: null,
+      ...(ownerAdminId ? { ownerAdminId } : {}),
+    },
     select: { stock: true, reserved: true, available: true, status: true },
   });
   return {
@@ -17,7 +86,7 @@ export async function leasingReadyStockSummary(ownerAdminId: string) {
 }
 
 export async function leasingReadySales(input: {
-  ownerAdminId: string;
+  ownerAdminId?: string;
   from?: string;
   to?: string;
   productId?: string;
@@ -34,7 +103,11 @@ export async function leasingReadySales(input: {
     items: {
       some: {
         cancelledAt: null,
-        round: { ownerKind: 'LEASING', ownerAdminId: input.ownerAdminId, closeAt: null },
+        round: {
+          ownerKind: 'LEASING',
+          closeAt: null,
+          ...(input.ownerAdminId ? { ownerAdminId: input.ownerAdminId } : {}),
+        },
         ...(input.productId ? { productId: input.productId } : {}),
       },
     },
@@ -42,12 +115,13 @@ export async function leasingReadySales(input: {
     ...(input.status ? { status: input.status as Prisma.EnumOrderStatusFilter['equals'] } : {}),
   };
 
-  const paymentWhere: Prisma.PaymentWhereInput = {
-    order: where,
-    payeeKind: 'LEASING',
-  };
+  const itemInclude = {
+    include: {
+      round: { select: { id: true, ownerAdminId: true, closeAt: true, ownerKind: true } },
+    },
+  } as const;
 
-  const [total, orders, receivedAgg, refundedAgg, dueAgg] = await Promise.all([
+  const [total, orders, moneyOrders] = await Promise.all([
     prisma.order.count({ where }),
     prisma.order.findMany({
       where,
@@ -56,39 +130,42 @@ export async function leasingReadySales(input: {
       take: input.pageSize,
       include: {
         customer: { select: { id: true, name: true, phone: true } },
-        items: {
-          include: {
-            round: { select: { id: true, ownerAdminId: true, closeAt: true, ownerKind: true } },
-          },
-        },
+        items: itemInclude,
         payments: { orderBy: { createdAt: 'asc' } },
       },
     }),
-    prisma.payment.aggregate({
-      where: { ...paymentWhere, kind: 'PAYMENT' },
-      _sum: { amount: true },
-    }),
-    prisma.payment.aggregate({
-      where: { ...paymentWhere, kind: 'REFUND' },
-      _sum: { amount: true },
-    }),
-    prisma.order.aggregate({
+    prisma.order.findMany({
       where,
-      _sum: { dueAmount: true },
+      take: 5000,
+      select: {
+        dueAmount: true,
+        items: itemInclude,
+        payments: { select: { kind: true, payeeKind: true, amount: true } },
+      },
     }),
   ]);
+
+  let received = 0;
+  let refunded = 0;
+  let receivable = 0;
+  for (const order of moneyOrders) {
+    const sums = leasingPaySums(order.payments);
+    const slice = leasingReadyMoney({
+      ownerAdminId: input.ownerAdminId,
+      items: order.items,
+      paidAmount: sums.paid,
+      refundedAmount: sums.refunded,
+      dueAmount: order.dueAmount,
+    });
+    received += slice.received;
+    refunded += slice.refunded;
+    receivable += slice.due;
+  }
 
   const destRoundIds = [
     ...new Set(
       orders.flatMap((order) =>
-        order.items
-          .filter(
-            (item) =>
-              item.round.ownerKind === 'LEASING' &&
-              item.round.ownerAdminId === input.ownerAdminId &&
-              item.round.closeAt === null,
-          )
-          .map((item) => item.round.id),
+        leasingReadyOwnItems(order.items, input.ownerAdminId).map((item) => item.round.id),
       ),
     ),
   ];
@@ -104,33 +181,26 @@ export async function leasingReadySales(input: {
       : [];
   const transferByRound = new Map(transferLines.map((line) => [line.destRoundId, line.transfer]));
 
-  const received = receivedAgg._sum.amount ?? 0;
-  const refunded = refundedAgg._sum.amount ?? 0;
-
   return {
     meta: { total, page: input.page, pageSize: input.pageSize, pages: Math.ceil(total / input.pageSize) },
     totals: {
       received,
       refunded,
       net: received - refunded,
-      receivable: Math.max(0, dueAgg._sum.dueAmount ?? 0),
+      receivable: Math.max(0, receivable),
     },
     rows: orders.map((order) => {
-      const ownItems = order.items.filter(
-        (item) =>
-          item.round.ownerKind === 'LEASING' &&
-          item.round.ownerAdminId === input.ownerAdminId &&
-          item.round.closeAt === null,
-      );
-      const sourceTransfer = ownItems
+      const sums = leasingPaySums(order.payments);
+      const slice = leasingReadyMoney({
+        ownerAdminId: input.ownerAdminId,
+        items: order.items,
+        paidAmount: sums.paid,
+        refundedAmount: sums.refunded,
+        dueAmount: order.dueAmount,
+      });
+      const sourceTransfer = slice.ownItems
         .map((item) => transferByRound.get(item.round.id) ?? null)
         .find(Boolean);
-      const leasingPaid = order.payments
-        .filter((p) => p.kind === 'PAYMENT' && p.payeeKind === 'LEASING')
-        .reduce((sum, p) => sum + p.amount, 0);
-      const leasingRefunded = order.payments
-        .filter((p) => p.kind === 'REFUND' && p.payeeKind === 'LEASING')
-        .reduce((sum, p) => sum + p.amount, 0);
       return {
         id: order.id,
         code: order.code,
@@ -141,7 +211,7 @@ export async function leasingReadySales(input: {
           name: order.customer.name?.trim() || 'Нэргүй',
           phone: order.customer.phone,
         },
-        items: ownItems.map((item) => ({
+        items: slice.ownItems.map((item) => ({
           id: item.id,
           name: item.nameSnapshot,
           qty: item.qty,
@@ -150,15 +220,15 @@ export async function leasingReadySales(input: {
           cancelled: item.cancelledAt != null,
           transferredAt: item.transferredAt?.toISOString() ?? null,
         })),
-        paidAmount: leasingPaid,
-        refundedAmount: leasingRefunded,
-        dueAmount: order.dueAmount,
+        paidAmount: slice.received,
+        refundedAmount: slice.refunded,
+        dueAmount: slice.due,
         paymentState:
-          order.dueAmount < 0
+          slice.due < 0
             ? 'OVERPAID'
-            : order.dueAmount === 0
+            : slice.due === 0
               ? 'PAID'
-              : leasingPaid > 0
+              : slice.received > 0
                 ? 'PARTIAL'
                 : 'UNPAID',
         sourceTransfer: sourceTransfer

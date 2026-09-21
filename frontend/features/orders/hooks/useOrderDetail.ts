@@ -62,7 +62,8 @@ export function useOrderDetail({
   /** Зөвхөн лизингээр авсан захиалга — QPay захиалгад төлбөр бүртгэх хэвээр. */
   const leasingOrder = order?.isLeasing === true;
   const lockShopPayments = !leasingPortal && leasingOrder;
-  const canWritePayments = canWrite && !lockShopPayments;
+  const mixedLegacyLocked = order?.mixedOwnership === true && user?.role !== "OWNER";
+  const canWritePayments = canWrite && !lockShopPayments && !mixedLegacyLocked;
   const canWriteStatus = canWrite && !leasingPortal;
   const canCancelItems = canWrite && !leasingPortal && !lockShopPayments;
   const busy = busyKey !== null;

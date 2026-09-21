@@ -2,9 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { conflict, notFound } from '../../lib/errors.js';
-import { assertCanWriteLeasingOrderMoney } from '../../lib/leasing.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
+import { assertLeasingOrderMoneyWrite } from '../../modules/leasing/guards.js';
 import {
   applyQpayPayment,
   cancelStoredQpayInvoice,
@@ -43,6 +43,14 @@ async function loadOrder(orderId: string) {
   return order;
 }
 
+async function loadOrderForQpayWrite(
+  orderId: string,
+  auth: { sub: string; role?: string },
+) {
+  await assertLeasingOrderMoneyWrite(orderId, auth);
+  return loadOrder(orderId);
+}
+
 adminOrderQpayRouter.get(
   '/',
   validate({ params: idParams }),
@@ -69,8 +77,10 @@ adminOrderQpayRouter.post(
   '/check',
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
-    const order = await loadOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+    const order = await loadOrderForQpayWrite(param(req, 'id'), {
+      sub: req.auth?.sub ?? '',
+      role: req.auth?.role,
+    });
     if (!order.qpayInvoiceId) throw conflict('QPay нэхэмжлэл алга.');
     const kind = qpayAccountForOrder(order);
     if (!isQpayReady(kind)) throw conflict('QPay одоогоор идэвхжээгүй.', { code: 'QPAY_NOT_READY' });
@@ -124,8 +134,10 @@ adminOrderQpayRouter.delete(
   '/invoice',
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
-    const order = await loadOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+    const order = await loadOrderForQpayWrite(param(req, 'id'), {
+      sub: req.auth?.sub ?? '',
+      role: req.auth?.role,
+    });
     const result = await cancelStoredQpayInvoice(order.id, actorOf(req));
     res.json({ data: result });
   }),
@@ -137,8 +149,10 @@ adminOrderQpayRouter.post(
   '/payments/:paymentId/cancel',
   validate({ params: paymentParams }),
   asyncHandler(async (req, res) => {
-    const order = await loadOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+    const order = await loadOrderForQpayWrite(param(req, 'id'), {
+      sub: req.auth?.sub ?? '',
+      role: req.auth?.role,
+    });
     const result = await reverseQpayPayment({
       paymentId: param(req, 'paymentId'),
       mode: 'cancel',
@@ -153,8 +167,10 @@ adminOrderQpayRouter.post(
   '/payments/:paymentId/refund',
   validate({ params: paymentParams }),
   asyncHandler(async (req, res) => {
-    const order = await loadOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order.isLeasing, req.auth?.role);
+    const order = await loadOrderForQpayWrite(param(req, 'id'), {
+      sub: req.auth?.sub ?? '',
+      role: req.auth?.role,
+    });
     const result = await reverseQpayPayment({
       paymentId: param(req, 'paymentId'),
       mode: 'refund',

@@ -93,6 +93,7 @@ export async function createItgelSettlementsForOrder(orderId: string): Promise<n
       },
     });
     if (!order || !order.isLeasing) return 0;
+    if (order.status === 'NEW' || order.status === 'CANCELLED') return 0;
     const view = leasingView(order);
     if (!view.feePaid) return 0;
 
@@ -626,8 +627,30 @@ export async function applySettlementQpayPayment(
       });
       return false;
     }
-    await confirmSettlementPaymentTx(tx, payment.id, actor);
-    return true;
+    try {
+      await confirmSettlementPaymentTx(tx, payment.id, actor);
+      return true;
+    } catch (error) {
+      const current = await tx.itgelSettlementPayment.findUnique({
+        where: { id: payment.id },
+        select: { status: true },
+      });
+      if (current?.status === 'CONFIRMED') return false;
+      if (current?.status === 'REJECTED' || current?.status === 'SUPERSEDED') {
+        await tx.moneyException.create({
+          data: {
+            kind: 'SETTLEMENT_MISMATCH',
+            settlementPaymentId: payment.id,
+            qpayInvoiceId: invoiceId,
+            amount,
+            note: `Тооцооны төлбөр ${current.status} байхад QPay орсон.`,
+            actor,
+          },
+        });
+        return false;
+      }
+      throw error;
+    }
   });
 }
 
@@ -641,7 +664,11 @@ async function confirmSettlementPaymentTx(tx: Tx, paymentId: string, actor: stri
     where: { id: paymentId, status: { in: ['PENDING'] } },
     data: { status: 'CONFIRMED', confirmedBy: actor },
   });
-  if (updated.count !== 1) throw conflict('Энэ төлбөр аль хэдийн шийдэгдсэн байна.');
+  if (updated.count !== 1) {
+    const raced = await tx.itgelSettlementPayment.findUnique({ where: { id: paymentId } });
+    if (raced?.status === 'CONFIRMED') return;
+    throw conflict('Энэ төлбөр аль хэдийн шийдэгдсэн байна.');
+  }
 
   for (const line of payment.lines) {
     const closed = await tx.itgelSettlement.updateMany({
@@ -751,14 +778,28 @@ export async function cancelOpenSettlementInvoice(paymentId: string, actor: stri
   });
   if (!payment) throw notFound('Төлбөр олдсонгүй.');
   if (payment.status === 'CONFIRMED') throw conflict('Баталгаажсан нэхэмжлэлийг цуцлахгүй.');
+  if (payment.status === 'REJECTED' || payment.status === 'SUPERSEDED') return;
   if (payment.qpayInvoiceId) {
     await cancelQpayInvoice(payment.qpayInvoiceId, { silent: true, kind: 'shop' });
   }
   await prisma.$transaction(async (tx) => {
-    await tx.itgelSettlementPayment.update({
+    const current = await tx.itgelSettlementPayment.findUnique({
       where: { id: payment.id },
+    });
+    if (!current) throw notFound('Төлбөр олдсонгүй.');
+    if (current.status === 'CONFIRMED') throw conflict('Баталгаажсан нэхэмжлэлийг цуцлахгүй.');
+    if (current.status === 'REJECTED' || current.status === 'SUPERSEDED') return;
+    const updated = await tx.itgelSettlementPayment.updateMany({
+      where: { id: payment.id, status: 'PENDING' },
       data: { status: 'SUPERSEDED' },
     });
+    if (updated.count !== 1) {
+      const raced = await tx.itgelSettlementPayment.findUnique({ where: { id: payment.id } });
+      if (raced?.status === 'CONFIRMED') {
+        throw conflict('Баталгаажсан нэхэмжлэлийг цуцлахгүй.');
+      }
+      return;
+    }
     await tx.itgelSettlement.updateMany({
       where: { lockPaymentId: payment.id, status: { in: [...LOCKED_STATUSES] } },
       data: { status: 'OPEN', lockPaymentId: null },

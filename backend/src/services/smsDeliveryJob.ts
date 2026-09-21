@@ -6,6 +6,8 @@ import { smsProviderOf, type SmsLifecycleStatus } from './sms.js';
 export const SMS_DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const SMS_DELIVERY_MAX_CHECKS = 20;
 export const SMS_DELIVERY_BATCH = 8;
+/** Нэг cron дуудлагад багтаан хуримтлагдсан мөрийг шалгана. Төлбөртэй plan шаардахгүй. */
+export const SMS_DELIVERY_BUDGET_MS = 8_000;
 
 const CHECKABLE: SmsLifecycleStatus[] = ['queued', 'pending', 'unknown'];
 
@@ -17,25 +19,36 @@ const BACKOFF_MS = [
  * Хадгалсан SmsDispatch-ийг үргэлжлүүлэн шалгана.
  * SMS дахин илгээхгүй. Timeout/5xx-ийг failed гэж үзэхгүй.
  */
-export async function pollSmsDeliveries(now = new Date()): Promise<{ checked: number; delivered: number }> {
-  const due = await prisma.smsDispatch.findMany({
-    where: {
-      status: { in: CHECKABLE },
-      providerMessageId: { not: null },
-      nextCheckAt: { lte: now },
-      checkCount: { lt: SMS_DELIVERY_MAX_CHECKS },
-    },
-    orderBy: { nextCheckAt: 'asc' },
-    take: SMS_DELIVERY_BATCH,
-  });
-
+export async function pollSmsDeliveries(
+  now = new Date(),
+  budgetMs = SMS_DELIVERY_BUDGET_MS,
+): Promise<{ checked: number; delivered: number }> {
+  const started = Date.now();
   let checked = 0;
   let delivered = 0;
-  for (const row of due) {
-    const result = await checkDispatch(row, now);
-    checked += 1;
-    if (result === 'delivered') delivered += 1;
+
+  while (Date.now() - started < budgetMs) {
+    const due = await prisma.smsDispatch.findMany({
+      where: {
+        status: { in: CHECKABLE },
+        providerMessageId: { not: null },
+        nextCheckAt: { lte: now },
+        checkCount: { lt: SMS_DELIVERY_MAX_CHECKS },
+      },
+      orderBy: { nextCheckAt: 'asc' },
+      take: SMS_DELIVERY_BATCH,
+    });
+    if (due.length === 0) break;
+
+    for (const row of due) {
+      if (Date.now() - started >= budgetMs) break;
+      const result = await checkDispatch(row, now);
+      checked += 1;
+      if (result === 'delivered') delivered += 1;
+    }
+    if (due.length < SMS_DELIVERY_BATCH) break;
   }
+
   return { checked, delivered };
 }
 

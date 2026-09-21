@@ -6,11 +6,17 @@ import { audit } from '../../lib/audit.js';
 import { AppError, badRequest, conflict, notFound } from '../../lib/errors.js';
 import { profitOf } from '../../lib/money.js';
 import { serializeLeasing, leasingGoodsWhere, buildLeasingPayPlan, LEASING_STAFF_ORDER_WHERE, LEASING_INSTALLMENT_WHERE, SMS_TEMPLATE_MAX } from '../../lib/leasing.js';
+import {
+  leasingVisibleOrderWhere,
+  ownLeasingResaleItems,
+  scopedLeasingListMoney,
+} from '../../lib/leasingAccess.js';
+import { isOwnerRole } from '../../lib/adminRoles.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { adminPaymentsRouter } from '../admin/payments.js';
 import { adminOrderQpayRouter } from '../admin/orderQpay.js';
-import { assertLeasingOrder } from '../../modules/leasing/guards.js';
+import { assertLeasingOrderAccess, resolveReadyTransferOwner } from '../../modules/leasing/guards.js';
 import {
   arrivedUnpaidReminderText,
   assertSendSmsText,
@@ -24,6 +30,7 @@ import {
   confirmThreshold,
   fullyPaid,
   loadOrderTotals,
+  PAYMENT_STATE_LABEL,
   paymentState,
 } from '../../services/money.js';
 import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
@@ -46,7 +53,7 @@ export const leasingOrdersRouter = Router();
 leasingOrdersRouter.use(
   '/:id/payments',
   asyncHandler(async (req, _res, next) => {
-    await assertLeasingOrder(param(req, 'id'));
+    await assertLeasingOrderAccess(param(req, 'id'), req.auth!);
     next();
   }),
   adminPaymentsRouter,
@@ -54,7 +61,7 @@ leasingOrdersRouter.use(
 leasingOrdersRouter.use(
   '/:id/qpay',
   asyncHandler(async (req, _res, next) => {
-    await assertLeasingOrder(param(req, 'id'));
+    await assertLeasingOrderAccess(param(req, 'id'), req.auth!);
     next();
   }),
   adminOrderQpayRouter,
@@ -92,8 +99,9 @@ const listQuery = z.object({
 
 leasingOrdersRouter.get(
   '/summary',
-  asyncHandler(async (_req, res) => {
-    const where: Prisma.OrderWhereInput = { ...LEASING_STAFF_ORDER_WHERE, deletedAt: null };
+  asyncHandler(async (req, res) => {
+    const scoped = leasingVisibleOrderWhere(req.auth!);
+    const where: Prisma.OrderWhereInput = { AND: [scoped, { deletedAt: null }] };
     const arrived = leasingGoodsWhere('arrived') as Prisma.OrderWhereInput;
     const notArrived = leasingGoodsWhere('not_arrived') as Prisma.OrderWhereInput;
     const gaps = leasingPayGapsOf(await getSettingsCached());
@@ -107,10 +115,12 @@ leasingOrdersRouter.get(
         where: { ...where, ...arrived, dueAmount: { lte: 0 } },
       }),
       prisma.order.count({
-        where: { deletedAt: null, payeeKind: 'LEASING', isLeasing: false },
+        where: { AND: [scoped, { deletedAt: null, payeeKind: 'LEASING', isLeasing: false }] },
       }),
       prisma.order.findMany({
-        where: { ...LEASING_INSTALLMENT_WHERE, deletedAt: null, status: { not: 'CANCELLED' }, dueAmount: { gt: 0 }, debtClosedAt: null },
+        where: {
+          AND: [scoped, LEASING_INSTALLMENT_WHERE, { deletedAt: null, status: { not: 'CANCELLED' }, dueAmount: { gt: 0 }, debtClosedAt: null }],
+        },
         select: {
           createdAt: true,
           subtotal: true,
@@ -151,31 +161,41 @@ leasingOrdersRouter.get(
     const scheduleFilter = q.goods === 'pay_due_today' || q.goods === 'pay_overdue';
 
     const where: Prisma.OrderWhereInput = {
-      ...(q.goods === 'resale' ? { payeeKind: 'LEASING', isLeasing: false } : LEASING_STAFF_ORDER_WHERE),
-      deletedAt: q.deleted ? { not: null } : null,
-      ...(q.goods === 'resale'
-        ? {}
-        : scheduleFilter
-          ? { status: { not: 'CANCELLED' }, dueAmount: { gt: 0 }, debtClosedAt: null }
-          : (leasingGoodsWhere(
-              q.goods as 'all' | 'arrived' | 'not_arrived' | 'arrived_unpaid' | 'arrived_paid',
-            ) as Prisma.OrderWhereInput)),
-      ...(q.q
-        ? {
-            OR: [
-              { code: { contains: q.q, mode: 'insensitive' } },
-              { customer: { phone: { contains: q.q } } },
-              { customer: { name: { contains: q.q, mode: 'insensitive' } } },
-              { customer: { email: { contains: q.q.toLowerCase(), mode: 'insensitive' } } },
-            ],
-          }
-        : {}),
+      AND: [
+        leasingVisibleOrderWhere(req.auth!),
+        q.goods === 'resale' ? { payeeKind: 'LEASING', isLeasing: false } : LEASING_STAFF_ORDER_WHERE,
+        { deletedAt: q.deleted ? { not: null } : null },
+        q.goods === 'resale'
+          ? {}
+          : scheduleFilter
+            ? { status: { not: 'CANCELLED' }, dueAmount: { gt: 0 }, debtClosedAt: null }
+            : (leasingGoodsWhere(
+                q.goods as 'all' | 'arrived' | 'not_arrived' | 'arrived_unpaid' | 'arrived_paid',
+              ) as Prisma.OrderWhereInput),
+        q.q
+          ? {
+              OR: [
+                { code: { contains: q.q, mode: 'insensitive' } },
+                { customer: { phone: { contains: q.q } } },
+                { customer: { name: { contains: q.q, mode: 'insensitive' } } },
+                { customer: { email: { contains: q.q.toLowerCase(), mode: 'insensitive' } } },
+              ],
+            }
+          : {},
+      ],
     };
 
     const include = {
       customer: { select: { id: true, name: true, phone: true, email: true } },
       items: {
-        select: { qty: true, unitPrice: true, costPriceSnapshot: true, cancelledAt: true },
+        select: {
+          id: true,
+          qty: true,
+          unitPrice: true,
+          costPriceSnapshot: true,
+          cancelledAt: true,
+          round: { select: { ownerKind: true, ownerAdminId: true } },
+        },
       },
       batch: true,
     } as const;
@@ -198,7 +218,24 @@ leasingOrdersRouter.get(
     }
 
     res.json({
-      data: orders.map((order) => ({
+      data: orders.map((order) => {
+        const liveItems = order.items.filter((i) => i.cancelledAt === null);
+        const stored = {
+          itemCount: liveItems.reduce((sum, i) => sum + i.qty, 0),
+          subtotal: order.subtotal,
+          paidAmount: order.paidAmount,
+          refundedAmount: order.refundedAmount,
+          dueAmount: order.dueAmount,
+          profit: profitOf(liveItems),
+        };
+        const scoped = scopedLeasingListMoney(req.auth!, order, order.items, stored);
+        const totals = computeTotals({
+          ...order,
+          subtotal: scoped.subtotal,
+          paidAmount: scoped.paidAmount,
+          refundedAmount: scoped.refundedAmount,
+        });
+        return {
         id: order.id,
         code: order.code,
         status: order.status,
@@ -209,27 +246,27 @@ leasingOrdersRouter.get(
           phone: order.customer.phone,
           email: order.customer.email,
         },
-        itemCount: order.items
-          .filter((i) => i.cancelledAt === null)
-          .reduce((sum, i) => sum + i.qty, 0),
-        subtotal: order.subtotal,
+        itemCount: scoped.itemCount,
+        subtotal: scoped.subtotal,
         deliveryFee: order.deliveryFee,
         storageFee: order.storageFee,
         cargoFee: order.cargoFee,
-        paidAmount: order.paidAmount,
-        refundedAmount: order.refundedAmount,
-        dueAmount: order.dueAmount,
-        paymentState: paymentState(computeTotals(order)),
+        paidAmount: scoped.paidAmount,
+        refundedAmount: scoped.refundedAmount,
+        dueAmount: scoped.dueAmount,
+        paymentState: paymentState(totals),
         payeeKind: (order as { payeeKind?: string }).payeeKind,
         isResale: order.payeeKind === 'LEASING' && !order.isLeasing,
+        mixedOwnership: scoped.mixedOwnership,
         ...serializeLeasing(order, gaps),
         paymentClaimedAt: order.paymentClaimedAt?.toISOString() ?? null,
-        profit: profitOf(order.items.filter((i) => i.cancelledAt === null)),
+        profit: scoped.profit,
         fulfilment: order.fulfilment,
         batch: batchSummary(order.batch),
         createdAt: order.createdAt.toISOString(),
         deletedAt: order.deletedAt?.toISOString() ?? null,
-      })),
+      };
+      }),
       meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
     });
   }),
@@ -240,14 +277,19 @@ leasingOrdersRouter.get(
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
     const orderId = param(req, 'id');
-    await assertLeasingOrder(orderId);
+    await assertLeasingOrderAccess(orderId, req.auth!);
     await syncOrderStorageFee(orderId);
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: {
         customer: true,
-        items: { include: { product: true } },
+        items: {
+          include: {
+            product: true,
+            round: true,
+          },
+        },
         batch: true,
         delivery: true,
       },
@@ -255,11 +297,41 @@ leasingOrdersRouter.get(
     if (!order) throw notFound('Захиалга олдсонгүй.');
     const gaps = leasingPayGapsOf(await getSettingsCached());
     const detail = adminOrderDetail(order, gaps);
+    const scoped = scopedLeasingListMoney(req.auth!, order, order.items, {
+      subtotal: detail.subtotal,
+      paidAmount: detail.paidAmount,
+      refundedAmount: detail.refundedAmount,
+      dueAmount: detail.dueAmount,
+      itemCount: 0,
+      profit: detail.profit,
+    });
+    let items = await attachItgelToItems(detail.items, order.id);
+    if (scoped.mixedOwnership && !isOwnerRole(req.auth!.role)) {
+      const ownIds = new Set(ownLeasingResaleItems(order.items, req.auth!.sub).map((item) => item.id));
+      items = items.filter((item) => ownIds.has(item.id));
+    }
+    const totals = computeTotals({
+      ...order,
+      subtotal: scoped.subtotal,
+      paidAmount: scoped.paidAmount,
+      refundedAmount: scoped.refundedAmount,
+    });
+    const state = paymentState(totals);
     res.json({
       data: {
         ...detail,
         timeline: buildTimeline(order),
-        items: await attachItgelToItems(detail.items, order.id),
+        items,
+        mixedOwnership: scoped.mixedOwnership,
+        subtotal: scoped.subtotal,
+        paidAmount: scoped.paidAmount,
+        refundedAmount: scoped.refundedAmount,
+        dueAmount: scoped.dueAmount,
+        profit: scoped.profit,
+        netPaid: totals.netPaid,
+        total: totals.total,
+        paymentState: state,
+        paymentStateLabel: PAYMENT_STATE_LABEL[state],
       },
     });
   }),
@@ -282,7 +354,7 @@ leasingOrdersRouter.patch(
       force?: boolean;
     };
     const orderId = param(req, 'id');
-    await assertLeasingOrder(orderId);
+    await assertLeasingOrderAccess(orderId, req.auth!);
 
     if (status === 'CONFIRMED' && !force) {
       const totals = await loadOrderTotals(orderId);
@@ -326,7 +398,7 @@ leasingOrdersRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const orderId = param(req, 'id');
-    await assertLeasingOrder(orderId);
+    await assertLeasingOrderAccess(orderId, req.auth!);
     const reason =
       req.body && typeof req.body === 'object' && 'reason' in req.body
         ? (req.body as { reason?: string }).reason
@@ -370,7 +442,7 @@ leasingOrdersRouter.post(
     const actor = actorOf(req);
 
     const orders = await prisma.order.findMany({
-      where: { id: { in: ids }, isLeasing: true },
+      where: { id: { in: ids }, AND: [leasingVisibleOrderWhere(req.auth!)] },
       select: {
         id: true,
         code: true,
@@ -472,19 +544,29 @@ leasingOrdersRouter.post(
     const where: Prisma.OrderWhereInput =
       kind === 'arrived_unpaid'
         ? {
-            ...LEASING_INSTALLMENT_WHERE,
-            deletedAt: null,
-            debtClosedAt: null,
-            id: { in: ids },
-            ...(leasingGoodsWhere('arrived_unpaid') as Prisma.OrderWhereInput),
+            AND: [
+              leasingVisibleOrderWhere(req.auth!),
+              LEASING_INSTALLMENT_WHERE,
+              {
+                deletedAt: null,
+                debtClosedAt: null,
+                id: { in: ids },
+                ...(leasingGoodsWhere('arrived_unpaid') as Prisma.OrderWhereInput),
+              },
+            ],
           }
         : {
-            ...LEASING_INSTALLMENT_WHERE,
-            deletedAt: null,
-            debtClosedAt: null,
-            id: { in: ids },
-            status: { not: 'CANCELLED' },
-            dueAmount: { gt: 0 },
+            AND: [
+              leasingVisibleOrderWhere(req.auth!),
+              LEASING_INSTALLMENT_WHERE,
+              {
+                deletedAt: null,
+                debtClosedAt: null,
+                id: { in: ids },
+                status: { not: 'CANCELLED' },
+                dueAmount: { gt: 0 },
+              },
+            ],
           };
     const orders = await prisma.order.findMany({
       where,
@@ -583,7 +665,7 @@ leasingOrdersRouter.get(
   '/:id/sms',
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
-    const preview = await payReminderPreview(param(req, 'id'));
+    const preview = await payReminderPreview(param(req, 'id'), req.auth!);
     res.json({
       data: {
         text: preview.text,
@@ -609,7 +691,7 @@ leasingOrdersRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const body = req.body as { kind?: 'pay_reminder'; text?: string };
-    const preview = await payReminderPreview(param(req, 'id'));
+    const preview = await payReminderPreview(param(req, 'id'), req.auth!);
     const text = body.text != null ? assertSendSmsText(body.text) : preview.text;
     const { send } = await dispatchSms({
       channel: 'leasing',
@@ -664,7 +746,7 @@ leasingOrdersRouter.get(
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
     const orderId = param(req, 'id');
-    await assertLeasingOrder(orderId);
+    await assertLeasingOrderAccess(orderId, req.auth!);
     const order = await prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, readyTransfers: { orderBy: { createdAt: 'desc' }, take: 20 } },
@@ -712,7 +794,7 @@ leasingOrdersRouter.post(
   validate({ params: z.object({ id: z.string().min(1) }), body: transferBody }),
   asyncHandler(async (req, res) => {
     const orderId = param(req, 'id');
-    await assertLeasingOrder(orderId);
+    await assertLeasingOrderAccess(orderId, req.auth!);
     const body = req.body as z.infer<typeof transferBody>;
     const preview = await loadTransferPreview(orderId, body.lines);
     res.json({ data: { ...serializeTransferPreview(preview), reason: body.reason } });
@@ -724,12 +806,12 @@ leasingOrdersRouter.post(
   validate({ params: z.object({ id: z.string().min(1) }), body: transferBody }),
   asyncHandler(async (req, res) => {
     const orderId = param(req, 'id');
-    await assertLeasingOrder(orderId);
+    await assertLeasingOrderAccess(orderId, req.auth!);
     const body = req.body as z.infer<typeof transferBody>;
-    const adminId = req.auth!.sub;
+    const ownerAdminId = await resolveReadyTransferOwner(orderId);
     const result = await executeReadyTransfer({
       orderId,
-      ownerAdminId: adminId,
+      ownerAdminId,
       reason: body.reason,
       lines: body.lines,
       actor: actorOf(req),

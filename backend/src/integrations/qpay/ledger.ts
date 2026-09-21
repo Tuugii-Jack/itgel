@@ -105,7 +105,7 @@ export async function applyQpayPayment(
     }, tx);
     return true;
   });
-  if (recorded) await confirmLeasingIfFeePaid(orderId, actor);
+  await confirmLeasingIfFeePaid(orderId, actor);
   return recorded;
 }
 

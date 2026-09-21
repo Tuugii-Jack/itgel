@@ -335,6 +335,54 @@ describe('phone OTP', () => {
     expect(mocks.phoneOtp.create).not.toHaveBeenCalled();
   });
 
+  it('зэрэг хүсэлт нэг хүчинтэй код, нэг SMS гаргана', async () => {
+    let unused: { id: string; phone: string; code: string; purpose: string; usedAt: null; createdAt: Date; expiresAt: Date; name: string | null } | null = null;
+    let gate = Promise.resolve();
+    // concurrent in-memory store is not the default Mock client shape
+    mocks.$transaction.mockImplementation((async (fn: (tx: unknown) => unknown) => {
+      const run = gate.then(() =>
+        fn({
+          customer: mocks.customer,
+          phoneOtp: {
+            findFirst: async () => unused,
+            findUnique: mocks.phoneOtp.findUnique,
+            updateMany: mocks.phoneOtp.updateMany,
+            count: mocks.phoneOtp.count,
+            update: mocks.phoneOtp.update,
+            create: async ({ data }: { data: Record<string, unknown> }) => {
+              const created = {
+                id: 'otp-1',
+                phone: '99112233',
+                code: '123456',
+                purpose: 'LOGIN',
+                usedAt: null,
+                createdAt: new Date(),
+                expiresAt: new Date(Date.now() + 300_000),
+                name: null,
+                ...data,
+              } as NonNullable<typeof unused>;
+              unused = created;
+              return created;
+            },
+          },
+          $executeRaw: mocks.$executeRaw,
+        }),
+      );
+      gate = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      return run;
+    }) as never);
+    const results = await Promise.all([
+      issuePhoneOtp({ phone: '99112233' }),
+      issuePhoneOtp({ phone: '99112233' }),
+    ]);
+    expect(mocks.dispatchSms).toHaveBeenCalledOnce();
+    expect(results[0]!.phone).toBe('99112233');
+    expect(results[1]!.phone).toBe('99112233');
+  });
+
   it('IP хязгаарыг DB count-оор шалгана', async () => {
     mocks.phoneOtp.count.mockResolvedValueOnce(0).mockResolvedValueOnce(60);
     await expect(issuePhoneOtp({ phone: '99112233', ip: '1.1.1.1' })).rejects.toMatchObject({

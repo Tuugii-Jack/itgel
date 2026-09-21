@@ -217,6 +217,15 @@ export function OrderDetail({
         </div>
       )}
 
+      {order.mixedOwnership && !canWritePayments && (
+        <div className="mb-4">
+          <ErrorNote>
+            Холимог эзэмшлийн хуучин захиалга. Төлбөр/буцаалтыг эзэмшигч бүртгэнэ. Та зөвхөн өөрийн
+            бараа, хувь орлогыг харж байна.
+          </ErrorNote>
+        </div>
+      )}
+
       {canWriteStatus && shortfall && (
         <Card className="mb-4 border-warn bg-warn-bg p-4">
           <div className="text-[14px] leading-[1.5] text-warn">

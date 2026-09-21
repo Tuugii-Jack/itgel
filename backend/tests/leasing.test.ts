@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { leasingFeeOf, leasingFlagOf, leasingView, leasingFeeHold, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing, SHOP_STAFF_ORDER_WHERE, LEASING_STAFF_ORDER_WHERE, LEASING_FEE_HOLD_WHERE, leasingDueTodayReminder, leasingOverdueReminder, leasingSmsDate, fillLeasingSmsTemplate, leasingSmsTemplatesOf, DEFAULT_LEASING_SMS_TEMPLATES } from '../src/lib/leasing.js';
+import { leasingFeeOf, leasingFlagOf, leasingView, leasingFeeHold, leasingHoldsGoods, resolveInvoiceAmount, canWriteLeasingOrderMoney, assertCanWriteLeasingOrderMoney, leasingGoodsWhere, leasingRatePercent, parseLeasingFeeTiers, assertLeasingFeeTiers, leasingFeeSnapshot, SUGGESTED_LEASING_FEE_TIERS, splitEven, parseLeasingPayGaps, buildLeasingPayPlan, serializeLeasing, SHOP_STAFF_ORDER_WHERE, LEASING_STAFF_ORDER_WHERE, LEASING_FEE_HOLD_WHERE, leasingDueTodayReminder, leasingOverdueReminder, leasingSmsDate, fillLeasingSmsTemplate, leasingSmsTemplatesOf, DEFAULT_LEASING_SMS_TEMPLATES } from '../src/lib/leasing.js';
 import { AppError } from '../src/lib/errors.js';
 
 describe('Лизингийн шимтгэл', () => {
@@ -192,8 +192,13 @@ describe('Лизинг захиалгын мөнгө бичих эрх', () => {
     expect(canWriteLeasingOrderMoney(true, 'STAFF')).toBe(false);
   });
 
-  it('лизингийн админ л лизинг дээр бүртгэнэ', () => {
+  it('лизингийн админ болон OWNER лизинг дээр бүртгэнэ', () => {
     expect(canWriteLeasingOrderMoney(true, 'LEASING')).toBe(true);
+    expect(canWriteLeasingOrderMoney(true, 'OWNER')).toBe(true);
+    expect(canWriteLeasingOrderMoney({ isLeasing: false, payeeKind: 'LEASING' }, 'OWNER')).toBe(true);
+    expect(canWriteLeasingOrderMoney(true, 'ADMIN')).toBe(false);
+    expect(() => assertCanWriteLeasingOrderMoney(true, 'OWNER')).not.toThrow();
+    expect(() => assertCanWriteLeasingOrderMoney(true, 'ADMIN')).toThrow(/эзэмшигч/);
   });
 
   it('QPay захиалга дээр дэлгүүрийн админ бүртгэж болно', () => {

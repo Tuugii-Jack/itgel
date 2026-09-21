@@ -119,6 +119,16 @@ describe('sms delivery job', () => {
     });
   });
 
+  it('хуримтлагдсан ажлыг нэг дуудлагад багтаан шалгана', async () => {
+    const rows = Array.from({ length: 20 }, (_, i) => row({ id: `d${i + 1}`, providerMessageId: `m${i + 1}` }));
+    mocks.smsDispatch.findMany.mockImplementation(async ({ take }: { take: number }) => rows.splice(0, take));
+    mocks.delivery.mockResolvedValue({ status: 'delivered' });
+    const result = await pollSmsDeliveries(new Date('2026-09-16T00:01:00Z'), 60_000);
+    expect(result.checked).toBe(20);
+    expect(result.delivered).toBe(20);
+    expect(mocks.smsDispatch.findMany.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it('цонх дууссан ч delivered биш бол unknown', async () => {
     const createdAt = new Date('2026-09-15T00:00:00Z');
     mocks.smsDispatch.findMany.mockResolvedValue([row({ createdAt, checkCount: 19 })]);

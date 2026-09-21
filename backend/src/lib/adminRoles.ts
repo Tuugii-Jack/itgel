@@ -30,6 +30,15 @@ export function canManageOtherAdminPhones(role: string | undefined): boolean {
   return role === 'ADMIN' || role === 'OWNER';
 }
 
+/** OWNER-ийн нэвтрэх дугаарыг зөвхөн OWNER удирдана. ADMIN бусад админд дугаар нэмж болно. */
+export function canManageTargetAdminPhones(
+  actorRole: string | undefined,
+  targetRole: string | undefined,
+): boolean {
+  if (targetRole === 'OWNER') return actorRole === 'OWNER';
+  return canManageOtherAdminPhones(actorRole);
+}
+
 export function canViewAllSettlements(role: string | undefined): boolean {
   return role === 'ADMIN' || role === 'OWNER';
 }

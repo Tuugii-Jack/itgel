@@ -4,6 +4,7 @@ import {
   canAccessShopAdmin,
   canAccessStaff,
   canWriteShop,
+  canManageTargetAdminPhones,
   isAdminRole,
   workspaceDestinations,
 } from '../src/lib/adminRoles.js';
@@ -28,5 +29,12 @@ describe('adminRoles', () => {
     expect(workspaceDestinations('ADMIN')).toEqual(['shop']);
     expect(workspaceDestinations('STAFF')).toEqual(['shop']);
     expect(workspaceDestinations('LEASING')).toEqual(['leasing']);
+  });
+
+  it('OWNER-ийн нэвтрэх дугаарыг ADMIN удирдахгүй', () => {
+    expect(canManageTargetAdminPhones('ADMIN', 'OWNER')).toBe(false);
+    expect(canManageTargetAdminPhones('OWNER', 'OWNER')).toBe(true);
+    expect(canManageTargetAdminPhones('ADMIN', 'STAFF')).toBe(true);
+    expect(canManageTargetAdminPhones('STAFF', 'ADMIN')).toBe(false);
   });
 });

@@ -1,10 +1,15 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { forbidden, notFound } from '../../lib/errors.js';
-import { assertCanWriteLeasingOrderMoney } from '../../lib/leasing.js';
+import { notFound } from '../../lib/errors.js';
+import { isOwnerRole } from '../../lib/adminRoles.js';
+import {
+  isMixedLeasingResale,
+  leasingResaleMoneyShare,
+} from '../../lib/leasingAccess.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
+import { assertLeasingOrderMoneyWrite } from '../../modules/leasing/guards.js';
 import { loadOrderTotals, PAYMENT_STATE_LABEL, paymentState } from '../../services/money.js';
 import { cancelOrderItem, listPayments, recordPayment, serializePayment } from '../../services/payments.js';
 
@@ -35,33 +40,66 @@ adminPaymentsRouter.get(
     const orderId = param(req, 'id');
     const { syncOrderStorageFee } = await import('../../services/storageFee.js');
     await syncOrderStorageFee(orderId);
-    await loadLiveOrder(orderId);
-
+    const order = await loadLiveOrder(orderId);
     const [payments, totals] = await Promise.all([
       listPayments(orderId),
       loadOrderTotals(orderId),
     ]);
-    const state = paymentState(totals);
+    let scopedTotals = totals;
+    let scopedPayments = payments;
+    let mixedOwnership = false;
+    if (req.auth?.role === 'LEASING') {
+      const items = await prisma.orderItem.findMany({
+        where: { orderId, cancelledAt: null },
+        select: {
+          qty: true,
+          unitPrice: true,
+          round: { select: { ownerKind: true, ownerAdminId: true } },
+        },
+      });
+      if (isMixedLeasingResale(order, items)) {
+        mixedOwnership = true;
+        const share = leasingResaleMoneyShare({
+          ownerAdminId: req.auth.sub,
+          items,
+          paidAmount: totals.paidAmount,
+          refundedAmount: totals.refundedAmount,
+          dueAmount: totals.dueAmount,
+        });
+        scopedTotals = {
+          ...totals,
+          subtotal: share.ownSubtotal,
+          paidAmount: share.paidAmount,
+          refundedAmount: share.refundedAmount,
+          netPaid: share.paidAmount - share.refundedAmount,
+          dueAmount: share.dueAmount,
+          total: share.ownSubtotal + totals.storageFee + totals.cargoFee + totals.leasingFee,
+        };
+        scopedPayments = [];
+      }
+    }
+    const state = paymentState(scopedTotals);
 
     res.json({
       data: {
-        payments: payments.map(serializePayment),
+        payments: scopedPayments.map(serializePayment),
         totals: {
-          subtotal: totals.subtotal,
-          deliveryFee: totals.deliveryFee,
-          storageFee: totals.storageFee,
-          cargoFee: totals.cargoFee,
-          leasingFee: totals.leasingFee,
-          total: totals.total,
-          paidAmount: totals.paidAmount,
-          refundedAmount: totals.refundedAmount,
-          netPaid: totals.netPaid,
-          dueAmount: totals.dueAmount,
-          writtenOffAmount: totals.writtenOffAmount,
+          subtotal: scopedTotals.subtotal,
+          deliveryFee: scopedTotals.deliveryFee,
+          storageFee: scopedTotals.storageFee,
+          cargoFee: scopedTotals.cargoFee,
+          leasingFee: scopedTotals.leasingFee,
+          total: scopedTotals.total,
+          paidAmount: scopedTotals.paidAmount,
+          refundedAmount: scopedTotals.refundedAmount,
+          netPaid: scopedTotals.netPaid,
+          dueAmount: scopedTotals.dueAmount,
+          writtenOffAmount: scopedTotals.writtenOffAmount,
         },
         paymentState: state,
         paymentStateLabel: PAYMENT_STATE_LABEL[state],
-        maxRefundable: totals.netPaid,
+        maxRefundable: mixedOwnership && !isOwnerRole(req.auth?.role) ? 0 : scopedTotals.netPaid,
+        mixedOwnership,
       },
     });
   }),
@@ -87,8 +125,10 @@ adminPaymentsRouter.post(
       note?: string;
     };
 
-    const order = await loadLiveOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order, req.auth?.role);
+    const order = await assertLeasingOrderMoneyWrite(param(req, 'id'), {
+      sub: req.auth?.sub ?? '',
+      role: req.auth?.role,
+    });
 
     const { payment, totals } = await recordPayment({
       orderId: order.id,
@@ -126,8 +166,10 @@ adminPaymentsRouter.post(
       note?: string;
     };
 
-    const order = await loadLiveOrder(param(req, 'id'));
-    assertCanWriteLeasingOrderMoney(order, req.auth?.role);
+    const order = await assertLeasingOrderMoneyWrite(param(req, 'id'), {
+      sub: req.auth?.sub ?? '',
+      role: req.auth?.role,
+    });
 
     const { payment, totals } = await recordPayment({
       orderId: order.id,
@@ -160,10 +202,13 @@ adminPaymentsRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const body = req.body as { reason?: string; refund: boolean };
-    const order = await loadLiveOrder(param(req, 'id'));
-    if ((order.isLeasing || order.payeeKind === 'LEASING') && req.auth?.role !== 'LEASING' && body.refund) {
-      throw forbidden('Лизинг захиалгын буцаалтыг лизингийн админ хийнэ.');
-    }
+    const order =
+      body.refund || req.auth?.role === 'LEASING'
+        ? await assertLeasingOrderMoneyWrite(param(req, 'id'), {
+            sub: req.auth?.sub ?? '',
+            role: req.auth?.role,
+          })
+        : await loadLiveOrder(param(req, 'id'));
 
     const result = await cancelOrderItem({
       orderId: order.id,

@@ -208,6 +208,27 @@ const reused = await req('/api/auth/verify', { method: 'POST', body: { phone, co
 assert.ok(reused.status === 400 || reused.status === 401, reused.text);
 pass('customer phone OTP (local PhoneOtp, console SMS, no double-send)');
 
+const burstPhone = `7${String(Date.now()).slice(-7)}`;
+const burst = await Promise.all(
+  Array.from({ length: 5 }, () =>
+    req('/api/auth/otp', {
+      method: 'POST',
+      body: { phone: burstPhone, name: 'Burst' },
+      forwardedFor: '10.0.0.9',
+    }),
+  ),
+);
+assert.equal(burst.every((r) => r.status === 200), true, burst.map((r) => r.text).join(' | '));
+assert.equal(
+  Number(sql(`SELECT count(*) FROM "PhoneOtp" WHERE phone='${burstPhone}' AND purpose='LOGIN' AND "usedAt" IS NULL`)),
+  1,
+);
+assert.equal(
+  Number(sql(`SELECT count(*) FROM "SmsDispatch" WHERE phone='${burstPhone}' AND purpose='otp_login'`)),
+  1,
+);
+pass('concurrent OTP one valid code and one SMS');
+
 const products = data(await req('/api/products?type=ready&pageSize=50'));
 const shopReady = products.find((p) => p.ownerKind !== 'LEASING' && !p.options?.length && p.stock >= 4);
 const shopSkuReady = products.find(

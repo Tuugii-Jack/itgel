@@ -45,6 +45,7 @@ export interface PaymentLedger {
   paymentState: PaymentState;
   paymentStateLabel: string;
   maxRefundable: number;
+  mixedOwnership?: boolean;
 }
 
 /** Төлбөр хүлээн авах данс. Админ тохируулаагүй бол `null`. */

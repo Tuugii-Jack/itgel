@@ -605,7 +605,7 @@ export function canWriteLeasingOrderMoney(
       ? orderOrFlag === true
       : orderOrFlag.isLeasing === true || orderOrFlag.payeeKind === 'LEASING';
   if (!needs) return true;
-  return role === 'LEASING';
+  return role === 'LEASING' || role === 'OWNER';
 }
 
 export function assertCanWriteLeasingOrderMoney(
@@ -613,6 +613,6 @@ export function assertCanWriteLeasingOrderMoney(
   role?: string,
 ): void {
   if (!canWriteLeasingOrderMoney(orderOrFlag, role)) {
-    throw forbidden('Лизинг захиалгын төлбөрийг зөвхөн лизингийн админ бүртгэнэ.');
+    throw forbidden('Лизинг захиалгын төлбөрийг лизингийн админ эсвэл эзэмшигч бүртгэнэ.');
   }
 }

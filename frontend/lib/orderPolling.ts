@@ -79,12 +79,13 @@ export function shouldPollPayment(
 
 export function shouldPollSuccess(
   order: PollOrder | null | undefined,
-  extra: PollOrder | null | undefined = null,
+  extra: PollOrder | PollOrder[] | null | undefined = null,
 ): boolean {
   const one = (row: PollOrder | null | undefined): boolean => {
     if (!row || row.status === "CANCELLED") return false;
     if (feeHold(row)) return true;
     return !row.isLeasing && awaitingPayment(row.paymentState) && row.dueAmount > 0;
   };
-  return one(order) || one(extra);
+  const extras = Array.isArray(extra) ? extra : extra ? [extra] : [];
+  return one(order) || extras.some(one);
 }

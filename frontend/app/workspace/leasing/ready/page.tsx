@@ -14,6 +14,8 @@ import { LeasingReadyForm } from "@/components/leasing/ReadyForm";
 import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { leasingApi, ApiError } from "@/lib/api";
+import { isOwner } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { useToast } from "@/lib/toast";
 import type { AdminCategory, AdminProduct, AdminRound, ProductStatus } from "@/lib/types";
 import { money } from "@/lib/format";
@@ -22,6 +24,7 @@ const OPEN_STATUSES: ProductStatus[] = ["ACTIVE", "HIDDEN", "DRAFT"];
 
 export default function LeasingReadyPage() {
   const toast = useToast();
+  const { user } = useAdminSession();
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -103,7 +106,11 @@ export default function LeasingReadyPage() {
     <div>
       <PageHead
         title="Бэлэн бараа"
-        hint="Өөрийн эзэмшлийн бэлэн бараа. Шинэ борлуулалтын төлбөр лизингийн дансанд орно."
+        hint={
+          isOwner(user?.role)
+            ? "Бүх лизингийн бэлэн бараа. Шинэ бараа нэмэхдээ эзэмшигч сонгоно."
+            : "Өөрийн эзэмшлийн бэлэн бараа. Шинэ борлуулалтын төлбөр лизингийн дансанд орно."
+        }
         actions={<Button onClick={() => setEditing("new")}>Бэлэн бараа нэмэх</Button>}
       />
       <div className="mb-5 grid grid-cols-3 gap-3 lg:grid-cols-6">

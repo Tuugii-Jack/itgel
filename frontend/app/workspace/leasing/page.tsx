@@ -17,6 +17,8 @@ import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { LeasingScheduleSms } from "@/components/admin/LeasingScheduleSms";
 import { leasingApi, ApiError } from "@/lib/api";
+import { canWriteLeasingMoney } from "@/lib/admin-role";
+import { useAdminSession } from "@/lib/admin-session";
 import { customerNameLabel, dayLabel, money, phoneLabel } from "@/lib/format";
 import { leasingArrivalUnpaid } from "@/lib/leasing";
 import { useDeferredReload } from "@/lib/useDeferredReload";
@@ -43,6 +45,8 @@ function smsKindOf(goods: GoodsFilter): SmsKind | null {
 }
 
 export default function LeasingOrdersPage() {
+  const { user } = useAdminSession();
+  const canWrite = canWriteLeasingMoney(user?.role);
   const [summary, setSummary] = useState<{
     total: number;
     notArrived: number;
@@ -165,7 +169,7 @@ export default function LeasingOrdersPage() {
       <OrderDetail
         orderId={openId}
         api={leasingApi}
-        canWrite
+        canWrite={canWrite}
         workspace="leasing"
         onClose={() => setOpenId(null)}
         onChanged={markChanged}

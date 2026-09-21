@@ -124,4 +124,67 @@ describe('admin login phone', () => {
       }),
     );
   });
+
+  it('ADMIN OWNER бүртгэлд дугаар нэмэхгүй — OTP хүсэх', async () => {
+    mocks.adminUser.findUnique.mockResolvedValue({
+      id: 'owner-1',
+      role: 'OWNER',
+      phone: '80247456',
+      loginPhones: [{ phone: '80247456' }],
+    });
+    await expect(
+      issueAdminLoginPhoneOtp({
+        targetAdminId: 'owner-1',
+        phone: '85001068',
+        actorAdminId: 'adm-1',
+        actorRole: 'ADMIN',
+      }),
+    ).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/OWNER/) });
+    expect(mocks.issuePhoneOtp).not.toHaveBeenCalled();
+  });
+
+  it('ADMIN OWNER бүртгэлд дугаар нэмэхгүй — OTP батлах', async () => {
+    mocks.adminUser.findUnique.mockResolvedValue({
+      id: 'owner-1',
+      role: 'OWNER',
+      phone: '80247456',
+      loginPhones: [{ phone: '80247456' }],
+    });
+    await expect(
+      verifyAdminLoginPhone({
+        targetAdminId: 'owner-1',
+        phone: '85001068',
+        code: '123456',
+        actorAdminId: 'adm-1',
+        actorRole: 'ADMIN',
+      }),
+    ).rejects.toMatchObject({ status: 403, message: expect.stringMatching(/OWNER/) });
+    expect(mocks.adminLoginPhone.create).not.toHaveBeenCalled();
+  });
+
+  it('OWNER өөрийн бүртгэлд хоёр дахь дугаар нэмнэ', async () => {
+    const owner = {
+      id: 'owner-1',
+      role: 'OWNER',
+      phone: '80247456',
+      loginPhones: [{ phone: '80247456' }],
+    };
+    mocks.adminUser.findUnique.mockResolvedValue(owner);
+    mocks.adminUser.update.mockResolvedValue({
+      ...owner,
+      loginPhones: [{ phone: '80247456' }, { phone: '88112233' }],
+    });
+    await verifyAdminLoginPhone({
+      targetAdminId: 'owner-1',
+      phone: '88112233',
+      code: '123456',
+      actorAdminId: 'owner-1',
+      actorRole: 'OWNER',
+    });
+    expect(mocks.adminLoginPhone.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ adminUserId: 'owner-1', phone: '88112233' }),
+      }),
+    );
+  });
 });
