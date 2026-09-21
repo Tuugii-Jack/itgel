@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { notFound } from '../../lib/errors.js';
+import { leasingPayeeSums } from '../../lib/money.js';
 import { isOwnerRole } from '../../lib/adminRoles.js';
 import {
   isMixedLeasingResale,
@@ -48,22 +49,34 @@ adminPaymentsRouter.get(
     let scopedTotals = totals;
     let scopedPayments = payments;
     let mixedOwnership = false;
+    let attributedMoney = false;
+    let unallocatedPaid = 0;
+    let unallocatedRefunded = 0;
     if (req.auth?.role === 'LEASING') {
       const items = await prisma.orderItem.findMany({
-        where: { orderId, cancelledAt: null },
+        where: { orderId },
         select: {
           qty: true,
           unitPrice: true,
+          cancelledAt: true,
           round: { select: { ownerKind: true, ownerAdminId: true } },
         },
       });
+      const leasingSums = leasingPayeeSums(
+        payments.map((payment) => ({
+          kind: payment.kind,
+          payeeKind: payment.payeeKind ?? null,
+          amount: payment.amount,
+        })),
+      );
       if (isMixedLeasingResale(order, items)) {
         mixedOwnership = true;
+        attributedMoney = true;
         const share = leasingResaleMoneyShare({
           ownerAdminId: req.auth.sub,
           items,
-          paidAmount: totals.paidAmount,
-          refundedAmount: totals.refundedAmount,
+          paidAmount: leasingSums.paid,
+          refundedAmount: leasingSums.refunded,
           dueAmount: totals.dueAmount,
         });
         scopedTotals = {
@@ -75,6 +88,8 @@ adminPaymentsRouter.get(
           dueAmount: share.dueAmount,
           total: share.ownSubtotal + totals.storageFee + totals.cargoFee + totals.leasingFee,
         };
+        unallocatedPaid = share.unallocatedPaid;
+        unallocatedRefunded = share.unallocatedRefunded;
         scopedPayments = [];
       }
     }
@@ -95,11 +110,14 @@ adminPaymentsRouter.get(
           netPaid: scopedTotals.netPaid,
           dueAmount: scopedTotals.dueAmount,
           writtenOffAmount: scopedTotals.writtenOffAmount,
+          unallocatedPaid,
+          unallocatedRefunded,
         },
         paymentState: state,
         paymentStateLabel: PAYMENT_STATE_LABEL[state],
-        maxRefundable: mixedOwnership && !isOwnerRole(req.auth?.role) ? 0 : scopedTotals.netPaid,
+        maxRefundable: mixedOwnership && !isOwnerRole(req.auth?.role) ? 0 : Math.max(0, scopedTotals.netPaid),
         mixedOwnership,
+        attributedMoney,
       },
     });
   }),

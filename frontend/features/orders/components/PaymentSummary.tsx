@@ -91,9 +91,24 @@ export function PaymentSummary({
       )}
       <SumRow label="Нийт" value={money(totals.total)} />
       <Divider />
-      <SumRow label="Орсон" value={money(totals.paidAmount)} />
+      {order.attributedMoney ? (
+        <>
+          <SumRow label="Хуваарилсан дүн" value={money(totals.paidAmount)} />
+          {(totals.unallocatedPaid ?? 0) > 0 && (
+            <SumRow label="Хуваарилаагүй" value={money(totals.unallocatedPaid ?? 0)} />
+          )}
+        </>
+      ) : (
+        <SumRow label="Орсон" value={money(totals.paidAmount)} />
+      )}
       {totals.refundedAmount > 0 && (
-        <SumRow label="Буцаасан" value={`−${money(totals.refundedAmount)}`} />
+        <SumRow
+          label={order.attributedMoney ? "Хуваарилсан буцаалт" : "Буцаасан"}
+          value={`−${money(totals.refundedAmount)}`}
+        />
+      )}
+      {order.attributedMoney && (totals.unallocatedRefunded ?? 0) > 0 && (
+        <SumRow label="Хуваарилаагүй буцаалт" value={`−${money(totals.unallocatedRefunded ?? 0)}`} />
       )}
       {(order.writtenOffAmount ?? 0) > 0 && (
         <SumRow

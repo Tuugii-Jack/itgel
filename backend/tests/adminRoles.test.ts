@@ -23,6 +23,7 @@ describe('adminRoles', () => {
     expect(canAccessLeasing('ADMIN')).toBe(false);
     expect(canAccessLeasing('STAFF')).toBe(false);
     expect(canAccessShopAdmin('LEASING')).toBe(false);
+    expect(canAccessStaff('LEASING')).toBe(false);
     expect(canAccessShopAdmin('STAFF')).toBe(false);
     expect(canWriteShop('STAFF')).toBe(false);
     expect(canWriteShop('LEASING')).toBe(false);

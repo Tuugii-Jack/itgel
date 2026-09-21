@@ -213,6 +213,9 @@ export interface AdminOrderRow {
   debtClosedAt?: string | null;
   debtCloseReason?: string | null;
   mixedOwnership?: boolean;
+  attributedMoney?: boolean;
+  unallocatedPaid?: number;
+  unallocatedRefunded?: number;
   isResale?: boolean;
   paymentClaimedAt: string | null;
   profit: number;

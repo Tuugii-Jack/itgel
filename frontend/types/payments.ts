@@ -37,6 +37,8 @@ export interface OrderTotals {
   netPaid: number;
   /** Сөрөг бол илүү төлсөн. */
   dueAmount: number;
+  unallocatedPaid?: number;
+  unallocatedRefunded?: number;
 }
 
 export interface PaymentLedger {
@@ -46,6 +48,7 @@ export interface PaymentLedger {
   paymentStateLabel: string;
   maxRefundable: number;
   mixedOwnership?: boolean;
+  attributedMoney?: boolean;
 }
 
 /** Төлбөр хүлээн авах данс. Админ тохируулаагүй бол `null`. */

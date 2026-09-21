@@ -29,6 +29,8 @@ export default function LeasingSalesPage() {
     refunded: number;
     net: number;
     receivable: number;
+    unallocatedPaid?: number;
+    unallocatedRefunded?: number;
   } | null>(null);
   const [stock, setStock] = useState<{
     onHand: number;
@@ -71,7 +73,7 @@ export default function LeasingSalesPage() {
         hint={
           isOwner(user?.role)
             ? "Бүх эзний бэлэн барааны борлуулалт. Орлого давхар тооцогдохгүй."
-            : "Зөвхөн өөрийн бэлэн бараа. Орлого нь бодит төлбөр, буцаалтаас гарна — ашиг биш."
+            : "Зөвхөн өөрийн бэлэн бараа. Холимог захиалгын хуваарилсан дүн баталгаажсан эзний орлого биш."
         }
       />
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-3">
@@ -80,11 +82,25 @@ export default function LeasingSalesPage() {
         <Metric label="Боломжтой" value={stock?.available ?? 0} tone="ok" />
       </div>
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="Орсон мөнгө" value={money(totals?.received ?? 0)} tone="ok" />
+        <Metric
+          label={isOwner(user?.role) ? "Орсон мөнгө" : "Хуваарилсан дүн"}
+          value={money(totals?.received ?? 0)}
+          tone="ok"
+        />
         <Metric label="Буцаасан" value={money(totals?.refunded ?? 0)} />
-        <Metric label="Цэвэр орлого" value={money(totals?.net ?? 0)} />
-        <Metric label="Авах үлдэгдэл" value={money(totals?.receivable ?? 0)} tone="warn" />
+        <Metric label="Цэвэр" value={money(totals?.net ?? 0)} />
+        <Metric
+          label={(totals?.receivable ?? 0) < 0 ? "Илүү төлсөн" : "Авах үлдэгдэл"}
+          value={money(Math.abs(totals?.receivable ?? 0))}
+          tone="warn"
+        />
       </div>
+      {(totals?.unallocatedPaid || totals?.unallocatedRefunded) ? (
+        <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Metric label="Хуваарилаагүй төлбөр" value={money(totals?.unallocatedPaid ?? 0)} />
+          <Metric label="Хуваарилаагүй буцаалт" value={money(totals?.unallocatedRefunded ?? 0)} />
+        </div>
+      ) : null}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-[12px] text-muted">
           Эхлэл
@@ -155,7 +171,12 @@ export default function LeasingSalesPage() {
                       </div>
                     )}
                   </Td>
-                  <Td className="tnum">{money(row.paidAmount)}</Td>
+                  <Td className="tnum">
+                    {money(row.paidAmount)}
+                    {row.attributedMoney && row.unallocatedPaid > 0 && (
+                      <div className="text-[12px] text-ink-2">хуваарилаагүй {money(row.unallocatedPaid)}</div>
+                    )}
+                  </Td>
                   <Td>
                     {PAY_LABEL[row.paymentState] ?? row.paymentState}
                     {row.refundedAmount > 0 && (

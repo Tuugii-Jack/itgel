@@ -1,7 +1,10 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { startOfUbDay, endOfUbDay, parseUbDay } from '../lib/date.js';
-import { attributedShare, subtotalOf } from '../lib/money.js';
+import { leasingPayeeSums } from '../lib/money.js';
+import { leasingResaleMoneyShare } from '../lib/leasingAccess.js';
+
+export const READY_SALES_TOTALS_BATCH = 200;
 
 /** OWNER (шүүлтгүй) бүх эзний бараа; LEASING зөвхөн өөрийн. `=== undefined` биш. */
 export function leasingReadyOwnItems<T extends {
@@ -15,6 +18,14 @@ export function leasingReadyOwnItems<T extends {
     return item.round.ownerAdminId === ownerAdminId;
   });
 }
+
+export type ReadySalesTotals = {
+  received: number;
+  refunded: number;
+  receivable: number;
+  unallocatedPaid: number;
+  unallocatedRefunded: number;
+};
 
 export function leasingReadyMoney<
   T extends {
@@ -35,36 +46,65 @@ export function leasingReadyMoney<
   refunded: number;
   due: number;
   mixed: boolean;
+  attributed: boolean;
+  unallocatedPaid: number;
+  unallocatedRefunded: number;
 } {
-  const all = leasingReadyOwnItems(input.items, undefined);
+  const readyItems = input.items.filter((item) => item.round.closeAt === null);
   const ownItems = leasingReadyOwnItems(input.items, input.ownerAdminId);
-  const owners = [
-    ...new Set(all.map((item) => item.round.ownerAdminId).filter((id): id is string => Boolean(id))),
-  ];
-  const mixed = owners.length > 1;
-  const scoped = Boolean(input.ownerAdminId) && mixed;
-  const ownSub = subtotalOf(ownItems);
-  const allSub = subtotalOf(all);
-  const received = scoped ? attributedShare(input.paidAmount, ownSub, allSub) : input.paidAmount;
-  const refunded = scoped ? attributedShare(input.refundedAmount, ownSub, allSub) : input.refundedAmount;
+  const share = leasingResaleMoneyShare({
+    ownerAdminId: input.ownerAdminId,
+    items: readyItems,
+    paidAmount: input.paidAmount,
+    refundedAmount: input.refundedAmount,
+    dueAmount: input.dueAmount,
+  });
   return {
     ownItems,
-    received,
-    refunded,
-    due: scoped ? Math.max(0, ownSub - (received - refunded)) : input.dueAmount,
-    mixed,
+    received: share.paidAmount,
+    refunded: share.refundedAmount,
+    due: share.dueAmount,
+    mixed: share.mixed,
+    attributed: share.attributed,
+    unallocatedPaid: share.unallocatedPaid,
+    unallocatedRefunded: share.unallocatedRefunded,
   };
 }
 
-function leasingPaySums(payments: Array<{ kind: string; payeeKind: string | null; amount: number }>) {
-  let paid = 0;
-  let refunded = 0;
-  for (const payment of payments) {
-    if (payment.payeeKind === 'SHOP') continue;
-    if (payment.kind === 'PAYMENT') paid += payment.amount;
-    if (payment.kind === 'REFUND') refunded += payment.amount;
+export function addReadySalesTotals(
+  acc: ReadySalesTotals,
+  slice: {
+    received: number;
+    refunded: number;
+    due: number;
+    attributed: boolean;
+    unallocatedPaid: number;
+    unallocatedRefunded: number;
+  },
+): void {
+  acc.received += slice.received;
+  acc.refunded += slice.refunded;
+  acc.receivable += slice.due;
+  if (slice.attributed) {
+    acc.unallocatedPaid += slice.unallocatedPaid;
+    acc.unallocatedRefunded += slice.unallocatedRefunded;
   }
-  return { paid, refunded };
+}
+
+export async function reduceOrderPages<T extends { id: string }, A>(
+  fetchPage: (cursor: string | undefined) => Promise<T[]>,
+  acc: A,
+  add: (acc: A, row: T) => void,
+): Promise<A> {
+  let cursor: string | undefined;
+  for (;;) {
+    const rows = await fetchPage(cursor);
+    if (rows.length === 0) break;
+    for (const row of rows) add(acc, row);
+    if (rows.length < READY_SALES_TOTALS_BATCH) break;
+    cursor = rows[rows.length - 1]!.id;
+  }
+  return acc;
 }
 
 export async function leasingReadyStockSummary(ownerAdminId?: string) {
@@ -84,6 +124,19 @@ export async function leasingReadyStockSummary(ownerAdminId?: string) {
     roundCount: rounds.length,
   };
 }
+
+const moneyOrderSelect = {
+  id: true,
+  dueAmount: true,
+  items: {
+    include: {
+      round: { select: { id: true, ownerAdminId: true, closeAt: true, ownerKind: true } },
+    },
+  },
+  payments: { select: { kind: true, payeeKind: true, amount: true } },
+} as const;
+
+type ReadyMoneyOrder = Prisma.OrderGetPayload<{ select: typeof moneyOrderSelect }>;
 
 export async function leasingReadySales(input: {
   ownerAdminId?: string;
@@ -121,7 +174,7 @@ export async function leasingReadySales(input: {
     },
   } as const;
 
-  const [total, orders, moneyOrders] = await Promise.all([
+  const [total, orders, totalsAcc] = await Promise.all([
     prisma.order.count({ where }),
     prisma.order.findMany({
       where,
@@ -134,33 +187,31 @@ export async function leasingReadySales(input: {
         payments: { orderBy: { createdAt: 'asc' } },
       },
     }),
-    prisma.order.findMany({
-      where,
-      take: 5000,
-      select: {
-        dueAmount: true,
-        items: itemInclude,
-        payments: { select: { kind: true, payeeKind: true, amount: true } },
+    reduceOrderPages<ReadyMoneyOrder, ReadySalesTotals>(
+      (cursor) =>
+        prisma.order.findMany({
+          where,
+          take: READY_SALES_TOTALS_BATCH,
+          orderBy: { id: 'asc' },
+          ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+          select: moneyOrderSelect,
+        }),
+      { received: 0, refunded: 0, receivable: 0, unallocatedPaid: 0, unallocatedRefunded: 0 },
+      (acc, order) => {
+        const sums = leasingPayeeSums(order.payments);
+        addReadySalesTotals(
+          acc,
+          leasingReadyMoney({
+            ownerAdminId: input.ownerAdminId,
+            items: order.items,
+            paidAmount: sums.paid,
+            refundedAmount: sums.refunded,
+            dueAmount: order.dueAmount,
+          }),
+        );
       },
-    }),
+    ),
   ]);
-
-  let received = 0;
-  let refunded = 0;
-  let receivable = 0;
-  for (const order of moneyOrders) {
-    const sums = leasingPaySums(order.payments);
-    const slice = leasingReadyMoney({
-      ownerAdminId: input.ownerAdminId,
-      items: order.items,
-      paidAmount: sums.paid,
-      refundedAmount: sums.refunded,
-      dueAmount: order.dueAmount,
-    });
-    received += slice.received;
-    refunded += slice.refunded;
-    receivable += slice.due;
-  }
 
   const destRoundIds = [
     ...new Set(
@@ -184,13 +235,15 @@ export async function leasingReadySales(input: {
   return {
     meta: { total, page: input.page, pageSize: input.pageSize, pages: Math.ceil(total / input.pageSize) },
     totals: {
-      received,
-      refunded,
-      net: received - refunded,
-      receivable: Math.max(0, receivable),
+      received: totalsAcc.received,
+      refunded: totalsAcc.refunded,
+      net: totalsAcc.received - totalsAcc.refunded,
+      receivable: totalsAcc.receivable,
+      unallocatedPaid: totalsAcc.unallocatedPaid,
+      unallocatedRefunded: totalsAcc.unallocatedRefunded,
     },
     rows: orders.map((order) => {
-      const sums = leasingPaySums(order.payments);
+      const sums = leasingPayeeSums(order.payments);
       const slice = leasingReadyMoney({
         ownerAdminId: input.ownerAdminId,
         items: order.items,
@@ -223,6 +276,10 @@ export async function leasingReadySales(input: {
         paidAmount: slice.received,
         refundedAmount: slice.refunded,
         dueAmount: slice.due,
+        unallocatedPaid: slice.unallocatedPaid,
+        unallocatedRefunded: slice.unallocatedRefunded,
+        attributedMoney: slice.attributed,
+        mixedOwnership: slice.mixed,
         paymentState:
           slice.due < 0
             ? 'OVERPAID'

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { findFirst } = vi.hoisted(() => ({ findFirst: vi.fn() }));
 vi.mock('../src/prisma.js', () => ({ prisma: { order: { findFirst }, adminUser: { findUnique: vi.fn() } } }));
 
-import { assertLeasingOrderAccess, resolveReadyTransferOwner } from '../src/modules/leasing/guards.js';
+import { assertLeasingOrderAccess, assertLeasingOrderMutation, resolveReadyTransferOwner } from '../src/modules/leasing/guards.js';
 import { prisma } from '../src/prisma.js';
 
 describe('Лизингийн захиалгын эзэн хамгаалалт', () => {
@@ -17,6 +17,25 @@ describe('Лизингийн захиалгын эзэн хамгаалалт', 
     await expect(
       assertLeasingOrderAccess('order-a', { sub: 'lease-b', role: 'LEASING' }),
     ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('mixed mutation LEASING-д 409, OWNER-д зөвшөөрнө', async () => {
+    findFirst.mockResolvedValue({
+      id: 'order-mix',
+      leasingOperatorAdminId: 'lease-a',
+      isLeasing: false,
+      payeeKind: 'LEASING',
+      items: [
+        { cancelledAt: null, round: { ownerKind: 'LEASING', ownerAdminId: 'lease-a' } },
+        { cancelledAt: null, round: { ownerKind: 'LEASING', ownerAdminId: 'lease-b' } },
+      ],
+    });
+    await expect(
+      assertLeasingOrderMutation('order-mix', { sub: 'lease-a', role: 'LEASING' }),
+    ).rejects.toMatchObject({ status: 409 });
+    await expect(
+      assertLeasingOrderMutation('order-mix', { sub: 'owner-1', role: 'OWNER' }),
+    ).resolves.toMatchObject({ id: 'order-mix' });
   });
 
   it('OWNER хандаж болно', async () => {

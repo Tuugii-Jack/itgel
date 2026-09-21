@@ -405,7 +405,14 @@ export const leasingApi = {
 
   readySales: (query?: Query) =>
     request<{
-      totals: { received: number; refunded: number; net: number; receivable: number };
+      totals: {
+        received: number;
+        refunded: number;
+        net: number;
+        receivable: number;
+        unallocatedPaid: number;
+        unallocatedRefunded: number;
+      };
       rows: {
         id: string;
         code: string;
@@ -416,6 +423,10 @@ export const leasingApi = {
         paidAmount: number;
         refundedAmount: number;
         dueAmount: number;
+        unallocatedPaid: number;
+        unallocatedRefunded: number;
+        attributedMoney: boolean;
+        mixedOwnership: boolean;
         paymentState: string;
         sourceTransfer: { id: string; sourceOrderId: string; paidKeptAmount: number } | null;
       }[];

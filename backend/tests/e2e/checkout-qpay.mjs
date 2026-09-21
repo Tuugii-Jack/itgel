@@ -1679,6 +1679,284 @@ try {
   assert.notEqual(mixedRowA.paidAmount, mixedRowOwner.paidAmount);
   passLog('legacy mixed order keeps stored money; LEASING cannot write; reports attributed');
 
+  const mixMutId = randomUUID();
+  const mixMutCode = `PHMM${phoneA.slice(-4)}`;
+  const mixMutItemA = randomUUID();
+  const mixMutItemB = randomUUID();
+  sql(
+    `INSERT INTO "Order" (id, code, "customerId", status, subtotal, "paidAmount", "dueAmount", "payeeKind", "isLeasing", "leasingFee", "createdAt", "updatedAt") VALUES ('${mixMutId}', '${mixMutCode}', '${userA.customerId}', 'NEW', 30000, 0, 30000, 'LEASING', false, 0, NOW(), NOW())`,
+  );
+  sql(
+    `INSERT INTO "OrderItem" (id, "orderId", "roundId", "productId", "nameSnapshot", qty, "unitPrice", "costPriceSnapshot") VALUES ('${mixMutItemA}', '${mixMutId}', '${prodA.roundId}', '${prodA.productId}', 'A-mut', 1, 10000, 0), ('${mixMutItemB}', '${mixMutId}', '${prodB.roundId}', '${prodB.productId}', 'B-mut', 1, 20000, 0)`,
+  );
+  const stockBBefore = roundHold({ id: prodB.roundId });
+  const aCancel = await req(`/api/leasing/orders/${mixMutId}/status`, {
+    method: 'PATCH',
+    token: leasingToken,
+    body: { status: 'CANCELLED' },
+  });
+  assert.equal(aCancel.status, 409, aCancel.text);
+  const aRevert = await req(`/api/leasing/orders/${mixMutId}/status/revert`, {
+    method: 'POST',
+    token: leasingToken,
+    body: {},
+  });
+  assert.equal(aRevert.status, 409, aRevert.text);
+  const aBulk = await req('/api/leasing/orders/bulk-status', {
+    method: 'POST',
+    token: leasingToken,
+    body: { ids: [mixMutId], status: 'CANCELLED' },
+  });
+  assert.equal(aBulk.status, 200, aBulk.text);
+  assert.equal(data(aBulk).succeeded, 0);
+  assert.ok(data(aBulk).failed.some((row) => row.id === mixMutId));
+  const aItemCancel = await req(`/api/leasing/orders/${mixMutId}/payments/items/${mixMutItemB}/cancel`, {
+    method: 'POST',
+    token: leasingToken,
+    body: { reason: 'cross-stock', refund: false },
+  });
+  assert.equal(aItemCancel.status, 409, aItemCancel.text);
+  const stockBAfter = roundHold({ id: prodB.roundId });
+  assert.equal(stockBAfter.stock, stockBBefore.stock);
+  assert.equal(stockBAfter.reserved, stockBBefore.reserved);
+  assert.equal(stockBAfter.available, stockBBefore.available);
+  assert.equal(sql(`SELECT status FROM "Order" WHERE id='${mixMutId}'`), 'NEW');
+  const ownerStatus = await req(`/api/leasing/orders/${mixMutId}/status`, {
+    method: 'PATCH',
+    token: ownerToken,
+    body: { status: 'CONFIRMED', force: true },
+  });
+  assert.equal(ownerStatus.status, 200, ownerStatus.text);
+  assert.equal(data(ownerStatus).mixedOwnership, true);
+  const mixMutStatusAfterOwner = sql(`SELECT status FROM "Order" WHERE id='${mixMutId}'`);
+  assert.notEqual(mixMutStatusAfterOwner, 'NEW');
+  assert.notEqual(mixMutStatusAfterOwner, 'CANCELLED');
+  passLog('mixed A+B cancel/revert/bulk blocked for LEASING; B stock unchanged; OWNER can write');
+
+  const aReadyMix = await req(`/api/leasing/orders/${mixMutId}/ready-transfer`, {
+    method: 'POST',
+    token: leasingToken,
+    body: {
+      reason: 'bypass',
+      lines: [{ orderItemId: mixMutItemA, qty: 1, resaleUnitPrice: 10_000 }],
+    },
+  });
+  assert.equal(aReadyMix.status, 409, aReadyMix.text);
+  const aPayMix = await req(`/api/leasing/orders/${mixMutId}/payments`, {
+    method: 'POST',
+    token: leasingToken,
+    body: { amount: 1, method: 'CASH' },
+  });
+  assert.equal(aPayMix.status, 409, aPayMix.text);
+  const aRefundMix = await req(`/api/leasing/orders/${mixMutId}/payments/refunds`, {
+    method: 'POST',
+    token: leasingToken,
+    body: { amount: 1, method: 'CASH' },
+  });
+  assert.equal(aRefundMix.status, 409, aRefundMix.text);
+
+  const leasingAdminPaths = [
+    { method: 'GET', path: `/api/admin/orders/${mixMutId}` },
+    { method: 'GET', path: `/api/admin/orders/${mixMutId}/payments` },
+    { method: 'POST', path: `/api/admin/orders/${mixMutId}/payments`, body: { amount: 1, method: 'CASH' } },
+    { method: 'POST', path: `/api/admin/orders/${mixMutId}/payments/refunds`, body: { amount: 1, method: 'CASH' } },
+    { method: 'PATCH', path: `/api/admin/orders/${mixMutId}/status`, body: { status: 'CANCELLED' } },
+    { method: 'POST', path: `/api/admin/orders/${mixMutId}/status/revert`, body: {} },
+    { method: 'POST', path: '/api/admin/orders/bulk-status', body: { ids: [mixMutId], status: 'CANCELLED' } },
+    {
+      method: 'POST',
+      path: `/api/admin/orders/${mixMutId}/payments/items/${mixMutItemB}/cancel`,
+      body: { reason: 'admin-bypass', refund: false },
+    },
+    {
+      method: 'POST',
+      path: `/api/admin/orders/${mixMutId}/ready-transfer`,
+      body: {
+        reason: 'bypass',
+        lines: [{ orderItemId: mixMutItemA, qty: 1, resaleUnitPrice: 10_000 }],
+      },
+    },
+  ];
+  for (const row of leasingAdminPaths) {
+    const res = await req(row.path, { method: row.method, token: leasingToken, body: row.body });
+    assert.equal(res.status, 403, `${row.method} ${row.path} ${res.status} ${res.text}`);
+  }
+
+  const adminGetMix = await req(`/api/admin/orders/${mixMutId}`, { token: adminToken });
+  assert.equal(adminGetMix.status, 200, adminGetMix.text);
+  assert.equal(data(adminGetMix).id, mixMutId);
+  const adminLedgerMix = await req(`/api/admin/orders/${mixMutId}/payments`, { token: adminToken });
+  assert.equal(adminLedgerMix.status, 200, adminLedgerMix.text);
+  const adminPayMix = await req(`/api/admin/orders/${mixMutId}/payments`, {
+    method: 'POST',
+    token: adminToken,
+    body: { amount: 1, method: 'CASH' },
+  });
+  assert.equal(adminPayMix.status, 403, adminPayMix.text);
+  const adminRefundMix = await req(`/api/admin/orders/${mixMutId}/payments/refunds`, {
+    method: 'POST',
+    token: adminToken,
+    body: { amount: 1, method: 'CASH' },
+  });
+  assert.equal(adminRefundMix.status, 403, adminRefundMix.text);
+  const adminItemRefundMix = await req(
+    `/api/admin/orders/${mixMutId}/payments/items/${mixMutItemB}/cancel`,
+    {
+      method: 'POST',
+      token: adminToken,
+      body: { reason: 'admin-refund', refund: true },
+    },
+  );
+  assert.equal(adminItemRefundMix.status, 403, adminItemRefundMix.text);
+  const adminLeasingGet = await req(`/api/leasing/orders/${mixMutId}`, { token: adminToken });
+  assert.equal(adminLeasingGet.status, 403, adminLeasingGet.text);
+  const ownerAdminGet = await req(`/api/admin/orders/${mixMutId}`, { token: ownerToken });
+  assert.equal(ownerAdminGet.status, 200, ownerAdminGet.text);
+  assert.equal(sql(`SELECT status FROM "Order" WHERE id='${mixMutId}'`), mixMutStatusAfterOwner);
+  assert.equal(sql(`SELECT "paidAmount" FROM "Order" WHERE id='${mixMutId}'`), '0');
+  const stockBAfterAdmin = roundHold({ id: prodB.roundId });
+  assert.equal(stockBAfterAdmin.stock, stockBAfter.stock);
+  assert.equal(stockBAfterAdmin.reserved, stockBAfter.reserved);
+  passLog('LEASING cannot bypass mixed writes via /admin; ADMIN read kept, leasing money write not added');
+
+  const mixOneId = randomUUID();
+  const mixOneCode = `PH1T${phoneA.slice(-4)}`;
+  const mixOnePay = randomUUID();
+  const mixShopPay = randomUUID();
+  sql(
+    `INSERT INTO "Order" (id, code, "customerId", status, subtotal, "paidAmount", "refundedAmount", "dueAmount", "payeeKind", "isLeasing", "leasingFee", "createdAt", "updatedAt") VALUES ('${mixOneId}', '${mixOneCode}', '${userA.customerId}', 'NEW', 30000, 1, 0, 29999, 'LEASING', false, 0, NOW(), NOW())`,
+  );
+  sql(
+    `INSERT INTO "OrderItem" (id, "orderId", "roundId", "productId", "nameSnapshot", qty, "unitPrice", "costPriceSnapshot") VALUES ('${randomUUID()}', '${mixOneId}', '${prodA.roundId}', '${prodA.productId}', 'A-1t', 1, 10000, 0), ('${randomUUID()}', '${mixOneId}', '${prodB.roundId}', '${prodB.productId}', 'B-1t', 1, 20000, 0)`,
+  );
+  sql(
+    `INSERT INTO "Payment" (id, "orderId", kind, amount, method, actor, "payeeKind") VALUES ('${mixOnePay}', '${mixOneId}', 'PAYMENT', 1, 'CASH', 'system', 'LEASING'), ('${mixShopPay}', '${mixOneId}', 'PAYMENT', 5000, 'CASH', 'system', 'SHOP')`,
+  );
+  const oneA = data(await req(`/api/leasing/orders/${mixOneId}`, { token: leasingToken }));
+  const oneB = data(await req(`/api/leasing/orders/${mixOneId}`, { token: leaseBToken }));
+  const oneOwner = data(await req(`/api/leasing/orders/${mixOneId}`, { token: ownerToken }));
+  const oneLedger = data(await req(`/api/leasing/orders/${mixOneId}/payments`, { token: leasingToken }));
+  assert.equal(oneA.paidAmount + oneB.paidAmount + oneA.unallocatedPaid, 1);
+  assert.equal(oneA.unallocatedPaid, 1);
+  assert.equal(oneA.attributedMoney, true);
+  assert.equal(oneOwner.paidAmount, 1);
+  assert.equal(oneOwner.attributedMoney, false);
+  assert.equal(oneLedger.totals.paidAmount + oneLedger.totals.unallocatedPaid, 1);
+  assert.equal(oneA.items.every((item) => (item.name ?? item.nameSnapshot) !== 'B-1t'), true);
+  const oneSalesA = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leasingToken }));
+  const oneSalesB = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: leaseBToken }));
+  const oneSalesOwner = data(await req('/api/leasing/finance/ready/sales?pageSize=100', { token: ownerToken }));
+  const oneRowA = oneSalesA.rows.find((row) => row.code === mixOneCode);
+  const oneRowB = oneSalesB.rows.find((row) => row.code === mixOneCode);
+  const oneRowOwner = oneSalesOwner.rows.find((row) => row.code === mixOneCode);
+  assert.ok(oneRowA && oneRowB && oneRowOwner);
+  assert.equal(oneRowA.paidAmount + oneRowB.paidAmount + oneRowA.unallocatedPaid, oneRowOwner.paidAmount);
+  assert.equal(oneRowOwner.paidAmount, 1);
+  passLog('1₮ remainder + SHOP cargo stay exact across detail/ledger/sales');
+
+  const t5tag = `T5${phoneA.slice(-4)}${Date.now().toString(36).slice(-4)}`;
+  sql(
+    `INSERT INTO "Order" (id, code, "customerId", status, subtotal, "paidAmount", "refundedAmount", "dueAmount", "payeeKind", "isLeasing", "leasingFee", "createdAt", "updatedAt")
+     SELECT '${t5tag}' || 'o' || lpad(n::text, 5, '0'),
+            '${t5tag}' || lpad(n::text, 5, '0'),
+            '${userA.customerId}',
+            'NEW',
+            10,
+            CASE WHEN n <= 4000 THEN 10 WHEN n <= 4500 THEN 10 ELSE 15 END,
+            CASE WHEN n <= 4000 THEN 0 WHEN n <= 4500 THEN 3 ELSE 0 END,
+            CASE WHEN n <= 4000 THEN 0 WHEN n <= 4500 THEN 3 ELSE -5 END,
+            'LEASING', false, 0,
+            TIMESTAMPTZ '2099-01-15 04:00:00+00',
+            TIMESTAMPTZ '2099-01-15 04:00:00+00'
+     FROM generate_series(1, 5000) AS n`,
+  );
+  sql(
+    `INSERT INTO "OrderItem" (id, "orderId", "roundId", "productId", "nameSnapshot", qty, "unitPrice", "costPriceSnapshot")
+     SELECT '${t5tag}' || 'i' || lpad(n::text, 5, '0'),
+            '${t5tag}' || 'o' || lpad(n::text, 5, '0'),
+            '${prodA.roundId}', '${prodA.productId}', 'T5', 1, 10, 0
+     FROM generate_series(1, 5000) AS n`,
+  );
+  sql(
+    `INSERT INTO "Payment" (id, "orderId", kind, amount, method, actor, "payeeKind")
+     SELECT '${t5tag}' || 'p' || lpad(n::text, 5, '0'),
+            '${t5tag}' || 'o' || lpad(n::text, 5, '0'),
+            'PAYMENT',
+            CASE WHEN n <= 4000 THEN 10 WHEN n <= 4500 THEN 10 ELSE 15 END,
+            'CASH', 'system', 'LEASING'
+     FROM generate_series(1, 5000) AS n`,
+  );
+  sql(
+    `INSERT INTO "Payment" (id, "orderId", kind, amount, method, actor, "payeeKind")
+     SELECT '${t5tag}' || 'r' || lpad(n::text, 5, '0'),
+            '${t5tag}' || 'o' || lpad(n::text, 5, '0'),
+            'REFUND', 3, 'CASH', 'system', 'LEASING'
+     FROM generate_series(4001, 4500) AS n`,
+  );
+  sql(
+    `INSERT INTO "Order" (id, code, "customerId", status, subtotal, "paidAmount", "refundedAmount", "dueAmount", "payeeKind", "isLeasing", "leasingFee", "createdAt", "updatedAt")
+     VALUES ('${t5tag}o05001', '${t5tag}05001', '${userA.customerId}', 'NEW', 30000, 1, 0, 29999, 'LEASING', false, 0, TIMESTAMPTZ '2099-01-15 04:00:00+00', TIMESTAMPTZ '2099-01-15 04:00:00+00')`,
+  );
+  sql(
+    `INSERT INTO "OrderItem" (id, "orderId", "roundId", "productId", "nameSnapshot", qty, "unitPrice", "costPriceSnapshot")
+     VALUES ('${t5tag}i05001a', '${t5tag}o05001', '${prodA.roundId}', '${prodA.productId}', 'T5A', 1, 10000, 0),
+            ('${t5tag}i05001b', '${t5tag}o05001', '${prodB.roundId}', '${prodB.productId}', 'T5B', 1, 20000, 0)`,
+  );
+  sql(
+    `INSERT INTO "Payment" (id, "orderId", kind, amount, method, actor, "payeeKind")
+     VALUES ('${t5tag}p05001', '${t5tag}o05001', 'PAYMENT', 1, 'CASH', 'system', 'LEASING'),
+            ('${t5tag}s05001', '${t5tag}o05001', 'PAYMENT', 5000, 'CASH', 'system', 'SHOP')`,
+  );
+  const sqlCount = Number(sql(`SELECT count(*) FROM "Order" WHERE code LIKE '${t5tag}%'`));
+  const sqlPaid = Number(
+    sql(
+      `SELECT coalesce(sum(p.amount),0) FROM "Payment" p JOIN "Order" o ON o.id=p."orderId"
+       WHERE o.code LIKE '${t5tag}%' AND p.kind='PAYMENT' AND (p."payeeKind" IS NULL OR p."payeeKind"='LEASING')`,
+    ),
+  );
+  const sqlRefunded = Number(
+    sql(
+      `SELECT coalesce(sum(p.amount),0) FROM "Payment" p JOIN "Order" o ON o.id=p."orderId"
+       WHERE o.code LIKE '${t5tag}%' AND p.kind='REFUND' AND (p."payeeKind" IS NULL OR p."payeeKind"='LEASING')`,
+    ),
+  );
+  const sqlShopPaid = Number(
+    sql(
+      `SELECT coalesce(sum(p.amount),0) FROM "Payment" p JOIN "Order" o ON o.id=p."orderId"
+       WHERE o.code LIKE '${t5tag}%' AND p.kind='PAYMENT' AND p."payeeKind"='SHOP'`,
+    ),
+  );
+  const sqlDue = Number(sql(`SELECT coalesce(sum("dueAmount"),0) FROM "Order" WHERE code LIKE '${t5tag}%'`));
+  assert.equal(sqlCount, 5001);
+  assert.equal(sqlPaid, 52_501);
+  assert.equal(sqlRefunded, 1_500);
+  assert.equal(sqlShopPaid, 5_000);
+  assert.equal(sqlDue, 28_999);
+  const t5q = '/api/leasing/finance/ready/sales?from=2099-01-15&to=2099-01-15&pageSize=1';
+  const t5OwnerRes = await req(t5q, { token: ownerToken });
+  const t5ARes = await req(t5q, { token: leasingToken });
+  const t5BRes = await req(t5q, { token: leaseBToken });
+  assert.equal(t5OwnerRes.status, 200, t5OwnerRes.text);
+  assert.equal(t5ARes.status, 200, t5ARes.text);
+  assert.equal(t5BRes.status, 200, t5BRes.text);
+  assert.equal(t5OwnerRes.json.meta.total, 5001);
+  assert.equal(t5ARes.json.meta.total, 5001);
+  assert.equal(t5BRes.json.meta.total, 1);
+  const t5Owner = data(t5OwnerRes).totals;
+  const t5A = data(t5ARes).totals;
+  const t5B = data(t5BRes).totals;
+  assert.equal(t5Owner.received, sqlPaid);
+  assert.equal(t5Owner.refunded, sqlRefunded);
+  assert.equal(t5Owner.unallocatedPaid, 0);
+  assert.equal(t5Owner.unallocatedRefunded, 0);
+  assert.equal(t5Owner.receivable, sqlDue);
+  assert.equal(t5A.received + t5B.received + t5A.unallocatedPaid, sqlPaid);
+  assert.equal(t5A.refunded + t5B.refunded + t5A.unallocatedRefunded, sqlRefunded);
+  assert.equal(t5A.unallocatedPaid, 1);
+  assert.equal(t5B.unallocatedPaid, 1);
+  assert.equal(t5A.received + t5A.unallocatedPaid, sqlPaid);
+  passLog('5001 cursor totals match independent SQL; no skip/dup; unallocated identity holds');
+
   const bPayAOrder = await req(`/api/leasing/orders/${lease1.orderId}`, { token: leaseBToken });
   assert.equal(bPayAOrder.status, 404, bPayAOrder.text);
   const bPayALedger = await req(`/api/leasing/orders/${lease1.orderId}/payments`, { token: leaseBToken });

@@ -2,6 +2,7 @@ import { prisma } from '../../prisma.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { LEASING_INSTALLMENT_WHERE, assertCanWriteLeasingOrderMoney } from '../../lib/leasing.js';
 import {
+  assertCanMutateScopedLeasingOrder,
   assertCanWriteScopedLeasingMoney,
   leasingVisibleOrderWhere,
   type LeasingAuth,
@@ -36,6 +37,30 @@ export async function assertLeasingOrderAccess(id: string, auth: LeasingAuth) {
   return order;
 }
 
+export async function assertLeasingOrderMutation(id: string, auth: LeasingAuth) {
+  const order = await prisma.order.findFirst({
+    where: {
+      id,
+      AND: [
+        { OR: [LEASING_INSTALLMENT_WHERE, { payeeKind: 'LEASING', isLeasing: false }] },
+        leasingVisibleOrderWhere(auth),
+      ],
+    },
+    select: {
+      id: true,
+      leasingOperatorAdminId: true,
+      isLeasing: true,
+      payeeKind: true,
+      items: {
+        select: { cancelledAt: true, round: { select: { ownerKind: true, ownerAdminId: true } } },
+      },
+    },
+  });
+  if (!order) throw notFound('Захиалга олдсонгүй.');
+  assertCanMutateScopedLeasingOrder(order, order.items, auth);
+  return order;
+}
+
 export async function assertLeasingOrderMoneyWrite(
   orderId: string,
   auth: { sub: string; role?: string },
@@ -47,8 +72,7 @@ export async function assertLeasingOrderMoneyWrite(
       isLeasing: true,
       payeeKind: true,
       items: {
-        where: { cancelledAt: null },
-        select: { round: { select: { ownerKind: true, ownerAdminId: true } } },
+        select: { cancelledAt: true, round: { select: { ownerKind: true, ownerAdminId: true } } },
       },
     },
   });
