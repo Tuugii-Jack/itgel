@@ -20,8 +20,11 @@ export const SUGGESTED_LEASING_FEE_TIERS: LeasingFeeTier[] = [
   { minAmount: 0, ratePercent: 15 },
 ];
 
-export const DEFAULT_LEASING_CHOICE_HINT =
+/** Өмнө нь хувиар харуулж байсан тайлбар. Хадгалсан бол төгрөгийн дүнгээр солино. */
+export const LEGACY_LEASING_CHOICE_HINT =
   "Эхлээд {percent}% шимтгэл, дараа нь үндсэн 100%-ийг хуваарьтай төлнө.";
+export const DEFAULT_LEASING_CHOICE_HINT =
+  "Эхлээд {fee} шимтгэл, дараа нь үндсэн 100%-ийг хуваарьтай төлнө.";
 export const DEFAULT_LEASING_TERMS_TITLE = "Лизингийн нөхцөл";
 export const DEFAULT_LEASING_TERMS_BODY =
   "Эхний төлөлт нь барааны үнийн {percent}% — лизингийн шимтгэл. Шимтгэл төлөгдсөний дараа барааны үндсэн 100%-ийг хуваарьтай төлнө. Сүүлийн төлөлт бараа ирэх үетэй давхцана. Шимтгэл нь барааны үнээс тусдаа.";

@@ -8,8 +8,10 @@ import { Button, Card, ErrorNote, Field, Input, Spinner, Textarea } from "@/comp
 import { leasingApi, ApiError } from "@/lib/api";
 import { money } from "@/lib/format";
 import {
+  DEFAULT_LEASING_CHOICE_HINT,
   DEFAULT_LEASING_PAY_GAPS,
   DEFAULT_LEASING_SMS_TEMPLATES,
+  LEGACY_LEASING_CHOICE_HINT,
   SMS_TEMPLATE_MAX,
   buildLeasingPayPlan,
   fillLeasingCopy,
@@ -68,7 +70,12 @@ export default function LeasingSettingsPage() {
       const data = await leasingApi.settings();
       setSettings(data);
       setRows(tiersToRows(data.feeTiers));
-      setChoiceHint(data.choiceHint);
+      const storedHint = data.choiceHint.trim();
+      setChoiceHint(
+        !storedHint || storedHint === LEGACY_LEASING_CHOICE_HINT
+          ? DEFAULT_LEASING_CHOICE_HINT
+          : data.choiceHint,
+      );
       setTermsTitle(data.termsTitle);
       setTermsBody(data.termsBody);
       setSmsDueToday(data.smsDueToday);
@@ -149,7 +156,12 @@ export default function LeasingSettingsPage() {
       });
       setSettings(updated);
       setRows(tiersToRows(updated.feeTiers));
-      setChoiceHint(updated.choiceHint);
+      const savedHint = updated.choiceHint.trim();
+      setChoiceHint(
+        !savedHint || savedHint === LEGACY_LEASING_CHOICE_HINT
+          ? DEFAULT_LEASING_CHOICE_HINT
+          : updated.choiceHint,
+      );
       setTermsTitle(updated.termsTitle);
       setTermsBody(updated.termsBody);
       setSmsDueToday(updated.smsDueToday);

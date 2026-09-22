@@ -3,6 +3,7 @@
 import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import {
   DEFAULT_LEASING_CHOICE_HINT,
+  LEGACY_LEASING_CHOICE_HINT,
   DEFAULT_LEASING_TERMS_BODY,
   DEFAULT_LEASING_TERMS_TITLE,
   buildLeasingPayPlan,
@@ -48,7 +49,13 @@ export function PayMethodChoice({
   const percent = leasingRatePercent(subtotal, feeTiers);
   const fee = leasingFeeOf(subtotal, feeTiers);
   const vars = { percent, fee, feeText: money(fee) };
-  const hint = fillLeasingCopy(choiceHint?.trim() || DEFAULT_LEASING_CHOICE_HINT, vars);
+  const storedHint = choiceHint?.trim() || "";
+  const hint = fillLeasingCopy(
+    !storedHint || storedHint === LEGACY_LEASING_CHOICE_HINT
+      ? DEFAULT_LEASING_CHOICE_HINT
+      : storedHint,
+    vars,
+  );
   const title = compact ? "" : termsTitle?.trim() || DEFAULT_LEASING_TERMS_TITLE;
   const body = compact
     ? ""
