@@ -1,0 +1,131 @@
+{
+  "id": "SMOKE-20260921",
+  "prefix": "[TEST]",
+  "note": "Production-д бичихгүй — зөвхөн зөвшөөрлийн дараа UI/API-ээр. Төлбөр/өр/stock-ийг SQL-ээр бүү зохио.",
+  "liveSettingsSnapshot": {
+    "readFrom": "GET https://api.itgelshop.mn/api/store 2026-09-21",
+    "unpaidCancelHours": 12,
+    "storageFreeDays": 14,
+    "storageFeePerDay": 1000,
+    "leasingFeeTiers": [
+      { "minAmount": 600000, "ratePercent": 10 },
+      { "minAmount": 500000, "ratePercent": 11 },
+      { "minAmount": 400000, "ratePercent": 12 },
+      { "minAmount": 300000, "ratePercent": 13 },
+      { "minAmount": 200000, "ratePercent": 14 },
+      { "minAmount": 0, "ratePercent": 15 }
+    ],
+    "payGaps": [5, 8, 8],
+    "shopQpay": { "enabled": true, "ready": true },
+    "leasingQpay": { "enabled": true, "ready": true },
+    "publicShopBank": null,
+    "publicLeasingBank": false
+  },
+  "placeholders": {
+    "PHONE_CUSTOMER": "Зөвшөөрсөн 8 оронтой дугаар, эзэмшигч нь та",
+    "OWNER": "Одоогийн OWNER бүртгэл — шинээр бүү үүсгэ",
+    "ADMIN": "Одоогийн ADMIN",
+    "STAFF": "Одоогийн STAFF",
+    "LEASING_A": "Одоогийн LEASING эзэн A",
+    "LEASING_B": "Одоогийн LEASING эзэн B, A-аас өөр"
+  },
+  "customer": {
+    "name": "[TEST] Smoke",
+    "phone": "{{PHONE_CUSTOMER}}"
+  },
+  "category": {
+    "name": "[TEST] SMOKE",
+    "isActive": true,
+    "sortOrder": 999
+  },
+  "products": [
+    {
+      "code": "SMOKE-PO",
+      "name": "[TEST] SMOKE-PO Урьдчилсан",
+      "ownerKind": "SHOP",
+      "type": "order",
+      "sellPrice": 20000,
+      "costPrice": 8000,
+      "stock": 10,
+      "closeAtDays": 14,
+      "leadMinDays": 14,
+      "leadMaxDays": 21,
+      "status": "ACTIVE",
+      "cargoFee": 5000,
+      "options": []
+    },
+    {
+      "code": "SMOKE-RD",
+      "name": "[TEST] SMOKE-RD Бэлэн SKU",
+      "ownerKind": "SHOP",
+      "type": "ready",
+      "sellPrice": 10000,
+      "costPrice": 4000,
+      "status": "ACTIVE",
+      "options": [
+        { "name": "Өнгө", "values": ["Хар", "Цагаан"] },
+        { "name": "Хэмжээ", "values": ["M", "L"] }
+      ],
+      "optionPrices": [
+        { "selections": { "Өнгө": "Хар", "Хэмжээ": "M" }, "sellPrice": 10000, "costPrice": 4000 },
+        { "selections": { "Өнгө": "Цагаан", "Хэмжээ": "L" }, "sellPrice": 12000, "costPrice": 5000 }
+      ],
+      "skuStocks": [
+        { "selections": { "Өнгө": "Хар", "Хэмжээ": "M" }, "stock": 3 },
+        { "selections": { "Өнгө": "Цагаан", "Хэмжээ": "L" }, "stock": 2 },
+        { "selections": { "Өнгө": "Хар", "Хэмжээ": "L" }, "stock": 0 },
+        { "selections": { "Өнгө": "Цагаан", "Хэмжээ": "M" }, "stock": 0 }
+      ]
+    },
+    {
+      "code": "SMOKE-LA",
+      "name": "[TEST] SMOKE-LA Лизинг A",
+      "ownerKind": "LEASING",
+      "ownerAdminId": "{{LEASING_A_ADMIN_ID}}",
+      "type": "ready",
+      "sellPrice": 10000,
+      "costPrice": 4000,
+      "stock": 4,
+      "status": "ACTIVE",
+      "options": []
+    },
+    {
+      "code": "SMOKE-LB",
+      "name": "[TEST] SMOKE-LB Лизинг B",
+      "ownerKind": "LEASING",
+      "ownerAdminId": "{{LEASING_B_ADMIN_ID}}",
+      "type": "ready",
+      "sellPrice": 20000,
+      "costPrice": 8000,
+      "stock": 4,
+      "status": "ACTIVE",
+      "options": []
+    }
+  ],
+  "batch": {
+    "name": "[TEST] SMOKE-BATCH",
+    "attachProductCode": "SMOKE-PO"
+  },
+  "ad": {
+    "title": "[TEST] SMOKE-AD",
+    "isActive": true
+  },
+  "expectedMath": {
+    "leasingFeeOn20000": 3000,
+    "installmentsOn20000": [6666, 6666, 6668],
+    "planDays": [0, 5, 13, 21],
+    "skuKeyBlackM": "Өнгө=Хар|Хэмжээ=M",
+    "skuKeyWhiteL": "Өнгө=Цагаан|Хэмжээ=L",
+    "mixedCheckout": "LA+LB сагс = 2 захиалга, нэг холимог захиалга биш",
+    "shopCargoExcludedFromLeasingTotals": true,
+    "deliveryFeeAlways": 0,
+    "confirmThresholdShop": "subtotal",
+    "confirmThresholdLeasing": "leasingFee"
+  },
+  "cleanup": {
+    "hideThenArchive": ["[TEST] SMOKE-PO Урьдчилсан", "[TEST] SMOKE-RD Бэлэн SKU", "[TEST] SMOKE-LA Лизинг A", "[TEST] SMOKE-LB Лизинг B"],
+    "deactivateAd": "[TEST] SMOKE-AD",
+    "cancelUnpaidNew": true,
+    "keepForever": ["Payment", "AuditLog", "QpayInvoice", "SmsDispatch", "ItgelSettlement", "ItgelSettlementPayment", "RefundPayout"]
+  }
+}

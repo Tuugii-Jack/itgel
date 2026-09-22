@@ -1,5 +1,11 @@
 import type { PageMeta } from "@/types";
 import {
+  adminMemoGetKey,
+  catalogCacheTtlMs,
+  isAdminCatalogMemoKey,
+  isAdminCatalogWritePath,
+} from "./cacheTtl";
+import {
   ADMIN_SESSION_COOKIE,
   TOKEN_KEYS,
   clearStoredTokens,
@@ -7,7 +13,7 @@ import {
   writeToken,
 } from "./tokens";
 
-export { ADMIN_SESSION_COOKIE, TOKEN_KEYS, readToken, writeToken };
+export { ADMIN_SESSION_COOKIE, TOKEN_KEYS, readToken, writeToken, catalogCacheTtlMs };
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api";
@@ -81,13 +87,16 @@ async function parseEnvelope<T>(res: Response): Promise<Envelope<T>> {
 
 function requestKey(path: string, options: RequestOptions): string {
   const token = options.auth ? (readToken(options.auth) ?? "") : "";
+  if ((options.method ?? "GET") === "GET" && options.auth === "admin") {
+    return adminMemoGetKey(token, path, qs(options.query));
+  }
   return `${options.method ?? "GET"}:${options.auth ?? ""}:${token}:${path}${qs(options.query)}`;
 }
 
 function getTtlMs(path: string, options: RequestOptions): number {
   const method = options.method ?? "GET";
   if (method !== "GET") return -1;
-  if (options.auth === "admin") return 0;
+  if (options.auth === "admin") return catalogCacheTtlMs(path, "admin");
   if (path === "/store" || path === "/categories" || path === "/ads") return 30_000;
   if (path === "/home" || path === "/products" || path.startsWith("/products/")) return 5_000;
   return 0;
@@ -95,8 +104,21 @@ function getTtlMs(path: string, options: RequestOptions): number {
 
 const inflightGets = new Map<string, Promise<Envelope<unknown>>>();
 const memoGets = new Map<string, { at: number; value: Envelope<unknown> }>();
+let catalogMemoEpoch = 0;
+
+function invalidateAdminCatalogCache(path: string): void {
+  if (!isAdminCatalogWritePath(path)) return;
+  catalogMemoEpoch += 1;
+  for (const key of [...memoGets.keys()]) {
+    if (isAdminCatalogMemoKey(key)) memoGets.delete(key);
+  }
+  for (const key of [...inflightGets.keys()]) {
+    if (isAdminCatalogMemoKey(key)) inflightGets.delete(key);
+  }
+}
 
 export function clearRequestCache(): void {
+  catalogMemoEpoch += 1;
   inflightGets.clear();
   memoGets.clear();
 }
@@ -141,6 +163,8 @@ export async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<Envelope<T>> {
+  const method = options.method ?? "GET";
+  if (method !== "GET") invalidateAdminCatalogCache(path);
   const ttl = getTtlMs(path, options);
   if (ttl < 0) return fetchEnvelope<T>(path, options);
 
@@ -152,9 +176,10 @@ export async function request<T>(
   const pending = inflightGets.get(key);
   if (pending) return pending as Promise<Envelope<T>>;
 
+  const epoch = catalogMemoEpoch;
   const p = fetchEnvelope<T>(path, options)
     .then((value) => {
-      if (ttl > 0) memoGets.set(key, { at: Date.now(), value });
+      if (ttl > 0 && epoch === catalogMemoEpoch) memoGets.set(key, { at: Date.now(), value });
       return value;
     })
     .finally(() => {
