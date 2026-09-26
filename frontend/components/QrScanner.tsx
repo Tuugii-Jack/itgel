@@ -46,9 +46,9 @@ export function QrScanner({
       }
     }
 
-    async function start() {
+    async function start(preview: HTMLVideoElement) {
       const hung = window.setTimeout(() => {
-        if (!cancelled && video.videoWidth === 0) {
+        if (!cancelled && preview.videoWidth === 0) {
           setError(
             "Камер нээгдсэнгүй. Зөвшөөрлөө шалгаад дахин оролдох эсвэл кодыг гараар оруулна уу.",
           );
@@ -61,14 +61,14 @@ export function QrScanner({
           stream.getTracks().forEach((track) => track.stop());
           return;
         }
-        video.setAttribute("playsinline", "true");
-        video.setAttribute("webkit-playsinline", "true");
-        video.muted = true;
-        video.srcObject = stream;
-        await video.play();
+        preview.setAttribute("playsinline", "true");
+        preview.setAttribute("webkit-playsinline", "true");
+        preview.muted = true;
+        preview.srcObject = stream;
+        await preview.play();
         if (cancelled) return;
         setStatus("QR-ийг хүрээнд оруулна уу.");
-        controls = await reader.decodeFromStream(stream, video, (result) => {
+        controls = await reader.decodeFromStream(stream, preview, (result) => {
           if (!result || cancelled) return;
           const text = result.getText();
           const now = Date.now();
@@ -89,7 +89,7 @@ export function QrScanner({
       }
     }
 
-    void start();
+    void start(video);
 
     return () => {
       cancelled = true;
