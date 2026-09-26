@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Badge, Button, Card, ErrorNote } from "@/components/ui";
 import { money, phoneLabel } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
@@ -36,8 +37,20 @@ export function CustomerItemsPanel({
   onPayMethod: (v: HandoverPayMethod) => void;
   onBack: () => void;
   onPrint: () => void;
-  onMarkReceived: () => void;
+  onMarkReceived: (lines: { itemId: string; qty: number; expectedHandedQty: number }[]) => void;
 }) {
+  const [qtyById, setQtyById] = useState<Record<string, number>>(() => {
+    const next: Record<string, number> = {};
+    for (const item of customer.items) {
+      const pick = item.pickableQty ?? 0;
+      if (pick > 0) next[item.id] = pick;
+    }
+    return next;
+  });
+  const giveCount = pickableSelected.reduce(
+    (sum, item) => sum + Math.min(qtyById[item.id] ?? item.pickableQty ?? 0, item.pickableQty ?? 0),
+    0,
+  );
   return (
     <div className="mx-auto max-w-[560px] pb-40">
       <div className="mb-4 flex items-start justify-between gap-3">
@@ -139,6 +152,29 @@ export function CustomerItemsPanel({
                   {item.name}
                 </div>
                 {sel ? <div className="text-[13px] text-muted">{sel}</div> : null}
+                <div className="mt-1 tnum text-[12px] text-muted">
+                  Захиалсан {item.qty} · ирсэн {item.arrivedQty ?? 0} · олгосон {item.handedOverQty ?? 0} ·
+                  одоо олгох {item.pickableQty ?? 0} · ирээгүй {item.waitingQty ?? Math.max(0, item.qty - (item.arrivedQty ?? 0))}
+                </div>
+                {item.canPick && (item.pickableQty ?? 0) > 0 ? (
+                  <label className="mt-2 flex items-center gap-2 text-[13px] text-ink-2">
+                    Энэ удаа
+                    <input
+                      type="number"
+                      min={1}
+                      max={item.pickableQty}
+                      value={Math.min(qtyById[item.id] ?? item.pickableQty ?? 1, item.pickableQty ?? 1)}
+                      className="tnum h-9 w-16 rounded-[8px] border border-line bg-bg px-2 text-[14px]"
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        const max = item.pickableQty ?? 1;
+                        const next = Math.max(1, Math.min(max, Number(e.target.value) || 1));
+                        setQtyById((prev) => ({ ...prev, [item.id]: next }));
+                      }}
+                    />
+                    / {item.pickableQty} ш
+                  </label>
+                ) : null}
                 {item.isLeasing &&
                 (item.leasingDueAmount ?? 0) > 0 &&
                 item.itemStatus === "arrived" &&
@@ -163,13 +199,21 @@ export function CustomerItemsPanel({
         primaryLabel={
           dueForSelected > 0
             ? `${money(dueForSelected)} авч өгөх`
-            : `Авсан (${pickableSelected.length})`
+            : `Авсан (${giveCount} ш)`
         }
         primaryAmount={dueForSelected > 0 ? dueForSelected : null}
         primarySub={paySub(payMethod)}
         primaryDisabled={pickableSelected.length === 0 || (dueForSelected > 0 && !payMethod)}
         primaryLoading={busy}
-        onPrimary={() => void onMarkReceived()}
+        onPrimary={() =>
+          onMarkReceived(
+            pickableSelected.map((item) => ({
+              itemId: item.id,
+              qty: Math.min(qtyById[item.id] ?? item.pickableQty ?? 1, item.pickableQty ?? 1),
+              expectedHandedQty: item.handedOverQty ?? 0,
+            })),
+          )
+        }
       />
     </div>
   );

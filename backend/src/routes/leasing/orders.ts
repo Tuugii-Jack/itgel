@@ -20,11 +20,10 @@ import { adminPaymentsRouter } from '../admin/payments.js';
 import { adminOrderQpayRouter } from '../admin/orderQpay.js';
 import { assertLeasingOrderAccess, assertLeasingOrderMutation, resolveReadyTransferOwner } from '../../modules/leasing/guards.js';
 import {
-  arrivedUnpaidReminderText,
   assertSendSmsText,
+  filledScheduleSms,
   payReminderPreview,
   reminderTemplateOf,
-  scheduleReminderText,
 } from '../../modules/leasing/orderSms.js';
 import { adminOrderDetail } from '../../modules/orders/adminDetail.js';
 import {
@@ -38,9 +37,11 @@ import {
 import { buildTimeline, changeOrderStatus, revertOrderStatus } from '../../services/orders.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
 import { syncOrderStorageFee } from '../../services/storageFee.js';
-import { getSettingsCached, invalidateSettingsCache, leasingPayGapsOf } from '../../services/settings.js';
+import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
 import { stripSmsUrls } from '../../services/sms.js';
 import { dispatchSms } from '../../services/smsDispatch.js';
+import { env } from '../../env.js';
+import { smsPreviewToken, smsSegmentOf } from '../../lib/smsCompose.js';
 import {
   executeReadyTransfer,
   loadTransferPreview,
@@ -603,152 +604,185 @@ leasingOrdersRouter.post(
 
 type ScheduleSmsKind = 'due_today' | 'overdue' | 'arrived_unpaid';
 
+const scheduleSmsBody = z.object({
+  kind: z.enum(['due_today', 'overdue', 'arrived_unpaid']),
+  orderIds: z.array(z.string().min(1).max(80)).min(1).max(500),
+  template: z.string().max(SMS_TEMPLATE_MAX).optional(),
+  overrides: z
+    .array(
+      z.object({
+        orderId: z.string().min(1).max(80),
+        text: z.string().min(1).max(400),
+      }),
+    )
+    .max(500)
+    .optional(),
+});
+
+async function scheduleSmsDraft(
+  auth: LeasingAuth,
+  body: {
+    kind: ScheduleSmsKind;
+    orderIds: string[];
+    template?: string;
+    overrides?: { orderId: string; text: string }[];
+  },
+) {
+  const ids = [...new Set(body.orderIds)];
+  const settings = await getSettingsCached();
+  const gaps = leasingPayGapsOf(settings);
+  const template = reminderTemplateOf(body.kind, body.template, settings);
+  const where: Prisma.OrderWhereInput =
+    body.kind === 'arrived_unpaid'
+      ? {
+          AND: [
+            leasingVisibleOrderWhere(auth),
+            LEASING_INSTALLMENT_WHERE,
+            {
+              deletedAt: null,
+              debtClosedAt: null,
+              id: { in: ids },
+              ...(leasingGoodsWhere('arrived_unpaid') as Prisma.OrderWhereInput),
+            },
+          ],
+        }
+      : {
+          AND: [
+            leasingVisibleOrderWhere(auth),
+            LEASING_INSTALLMENT_WHERE,
+            {
+              deletedAt: null,
+              debtClosedAt: null,
+              id: { in: ids },
+              status: { not: 'CANCELLED' },
+              dueAmount: { gt: 0 },
+            },
+          ],
+        };
+  const orders = await prisma.order.findMany({
+    where,
+    select: {
+      id: true,
+      code: true,
+      createdAt: true,
+      subtotal: true,
+      leasingFee: true,
+      paidAmount: true,
+      refundedAmount: true,
+      dueAmount: true,
+      isLeasing: true,
+      customer: { select: { name: true, phone: true } },
+    },
+  });
+  const overrideById = new Map((body.overrides ?? []).map((row) => [row.orderId, row.text] as const));
+  const recipients: {
+    orderId: string;
+    code: string;
+    name: string | null;
+    phone: string;
+    text: string;
+    chars: number;
+    segments: number;
+  }[] = [];
+  const skipped: { orderId: string; code: string; reason: string }[] = [];
+  const failed: { orderId: string; code: string; error: string }[] = [];
+  for (const order of orders) {
+    const filled = filledScheduleSms({
+      kind: body.kind,
+      name: order.customer.name,
+      dueAmount: order.dueAmount,
+      plan: buildLeasingPayPlan({ ...order, payGaps: gaps }),
+      template,
+      override: overrideById.get(order.id),
+    });
+    if (filled.error) {
+      failed.push({ orderId: order.id, code: order.code, error: filled.error });
+      continue;
+    }
+    if (!filled.text) {
+      skipped.push({ orderId: order.id, code: order.code, reason: 'Мессеж хоосон' });
+      continue;
+    }
+    if (!order.customer.phone) {
+      skipped.push({ orderId: order.id, code: order.code, reason: 'Утас алга' });
+      continue;
+    }
+    const seg = smsSegmentOf(filled.text);
+    recipients.push({
+      orderId: order.id,
+      code: order.code,
+      name: order.customer.name,
+      phone: order.customer.phone,
+      text: filled.text,
+      chars: seg.chars,
+      segments: seg.segments,
+    });
+  }
+  return {
+    sender: env.SMS_FROM ?? null,
+    channel: 'leasing' as const,
+    recipients,
+    skipped,
+    failed,
+    previewToken: smsPreviewToken(recipients.map((row) => ({ id: row.orderId, text: row.text })), {
+      channel: 'leasing',
+      relatedType: 'order',
+    }),
+  };
+}
+
+/**
+ * POST /orders/sms-reminders/preview — илгээхээс өмнө эцсийн мессеж.
+ */
+leasingOrdersRouter.post(
+  '/sms-reminders/preview',
+  validate({ body: scheduleSmsBody }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as z.infer<typeof scheduleSmsBody>;
+    res.json({ data: await scheduleSmsDraft(req.auth!, body) });
+  }),
+);
+
 /**
  * POST /orders/sms-reminders — өнөөдөр төлөгдөөгүй, хуваарь хоцорсон, ирсэн·төлөөгүй бүгдэд.
- * `/:id`-ээс өмнө бүртгэнэ.
+ * `/:id`-ээс өмнө бүртгэнэ. Загварыг чимээгүй хадгалахгүй.
  */
 leasingOrdersRouter.post(
   '/sms-reminders',
   validate({
-    body: z.object({
-      kind: z.enum(['due_today', 'overdue', 'arrived_unpaid']),
-      orderIds: z.array(z.string().min(1).max(80)).min(1).max(500),
-      template: z.string().max(SMS_TEMPLATE_MAX).optional(),
-      overrides: z
-        .array(
-          z.object({
-            orderId: z.string().min(1).max(80),
-            text: z.string().min(1).max(400),
-          }),
-        )
-        .max(500)
-        .optional(),
+    body: scheduleSmsBody.extend({
+      previewToken: z.string().min(8).max(128),
+      sendKey: z.string().trim().min(8).max(128),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const { kind, orderIds, template: templateOverride, overrides } = req.body as {
-      kind: ScheduleSmsKind;
-      orderIds: string[];
-      template?: string;
-      overrides?: { orderId: string; text: string }[];
-    };
-    const ids = [...new Set(orderIds)];
-    const settings = await getSettingsCached();
-    const gaps = leasingPayGapsOf(settings);
-    const template = reminderTemplateOf(kind, templateOverride, settings);
-    const saved = templateOverride?.trim();
-    if (saved) {
-      await prisma.setting.update({
-        where: { id: 1 },
-        data:
-          kind === 'due_today'
-            ? { leasingSmsDueToday: saved }
-            : kind === 'overdue'
-              ? { leasingSmsOverdue: saved }
-              : { leasingSmsArrivedUnpaid: saved },
-      });
-      invalidateSettingsCache();
+    const body = req.body as z.infer<typeof scheduleSmsBody> & { previewToken: string; sendKey: string };
+    const draft = await scheduleSmsDraft(req.auth!, body);
+    if (body.previewToken !== draft.previewToken) {
+      throw conflict('Preview-ийн дараа хүлээн авагч эсвэл мессеж өөрчлөгдсөн. Дахин шалгана уу.');
     }
-    const where: Prisma.OrderWhereInput =
-      kind === 'arrived_unpaid'
-        ? {
-            AND: [
-              leasingVisibleOrderWhere(req.auth!),
-              LEASING_INSTALLMENT_WHERE,
-              {
-                deletedAt: null,
-                debtClosedAt: null,
-                id: { in: ids },
-                ...(leasingGoodsWhere('arrived_unpaid') as Prisma.OrderWhereInput),
-              },
-            ],
-          }
-        : {
-            AND: [
-              leasingVisibleOrderWhere(req.auth!),
-              LEASING_INSTALLMENT_WHERE,
-              {
-                deletedAt: null,
-                debtClosedAt: null,
-                id: { in: ids },
-                status: { not: 'CANCELLED' },
-                dueAmount: { gt: 0 },
-              },
-            ],
-          };
-    const orders = await prisma.order.findMany({
-      where,
-      select: {
-        id: true,
-        code: true,
-        createdAt: true,
-        subtotal: true,
-        leasingFee: true,
-        paidAmount: true,
-        refundedAmount: true,
-        dueAmount: true,
-        isLeasing: true,
-        customer: { select: { name: true, phone: true } },
-      },
-    });
-
-    const overrideById = new Map(
-      (overrides ?? []).map((row) => [row.orderId, row.text] as const),
-    );
     const sent: string[] = [];
-    const skipped: string[] = [];
-    const failed: { orderId: string; code: string; error: string }[] = [];
+    const skipped = draft.skipped.length;
+    const failed = [...draft.failed];
     let pending = 0;
     let delivered = 0;
     let unknown = 0;
 
-    for (const order of orders) {
-      const overrideRaw = overrideById.get(order.id);
-      let text: string | null = null;
-      if (overrideRaw != null) {
-        try {
-          text = assertSendSmsText(overrideRaw);
-        } catch (error) {
-          failed.push({
-            orderId: order.id,
-            code: order.code,
-            error: error instanceof AppError ? error.message : 'Мессеж буруу.',
-          });
-          continue;
-        }
-      } else {
-        const filled =
-          kind === 'arrived_unpaid'
-            ? arrivedUnpaidReminderText(order.customer.name, order.dueAmount, template)
-            : scheduleReminderText(
-                kind,
-                order.customer.name,
-                buildLeasingPayPlan({ ...order, payGaps: gaps }),
-                template,
-              );
-        text = filled ? stripSmsUrls(filled) : null;
-      }
-      if (!text) {
-        skipped.push(order.id);
-        continue;
-      }
-      if (!order.customer.phone) {
-        skipped.push(order.id);
-        continue;
-      }
+    for (const row of draft.recipients) {
       const { send } = await dispatchSms({
         channel: 'leasing',
         purpose: 'leasing_schedule',
-        phone: order.customer.phone,
-        text,
+        phone: row.phone,
+        text: row.text,
         relatedType: 'order',
-        relatedId: order.id,
+        relatedId: row.orderId,
+        confirmKey: body.sendKey,
       });
       if (!send.accepted) {
-        failed.push({ orderId: order.id, code: order.code, error: send.error ?? 'SMS илгээгдсэнгүй.' });
+        failed.push({ orderId: row.orderId, code: row.code, error: send.error ?? 'SMS илгээгдсэнгүй.' });
         continue;
       }
-      sent.push(order.id);
+      sent.push(row.orderId);
       if (send.status === 'delivered') delivered += 1;
       else if (send.status === 'unknown') unknown += 1;
       else pending += 1;
@@ -758,11 +792,20 @@ leasingOrdersRouter.post(
       actor: actorOf(req),
       action: 'LEASING_SCHEDULE_SMS',
       entity: 'Order',
-      entityId: kind,
-      after: { kind, requested: ids.length, sent: sent.length, skipped: skipped.length, failed: failed.length, pending, delivered, unknown },
+      entityId: body.kind,
+      after: {
+        kind: body.kind,
+        requested: body.orderIds.length,
+        sent: sent.length,
+        skipped,
+        failed: failed.length,
+        pending,
+        delivered,
+        unknown,
+      },
     });
 
-    res.json({ data: { sent: sent.length, skipped: skipped.length, pending, delivered, failed, unknown } });
+    res.json({ data: { sent: sent.length, skipped, pending, delivered, failed, unknown } });
   }),
 );
 
@@ -774,12 +817,52 @@ leasingOrdersRouter.get(
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
     const preview = await payReminderPreview(param(req, 'id'), req.auth!);
+    const seg = smsSegmentOf(preview.text);
     res.json({
       data: {
+        sender: env.SMS_FROM ?? null,
+        channel: 'leasing',
         text: preview.text,
         phone: preview.order.customer.phone,
         name: preview.order.customer.name,
         amount: preview.amount,
+        chars: seg.chars,
+        segments: seg.segments,
+        previewToken: smsPreviewToken([{ id: preview.order.id, text: preview.text }], {
+          channel: 'leasing',
+          relatedType: 'order',
+        }),
+      },
+    });
+  }),
+);
+
+leasingOrdersRouter.post(
+  '/:id/sms/preview',
+  validate({
+    params: z.object({ id: z.string().min(1) }),
+    body: z.object({ text: z.string().min(1).max(400).optional() }),
+  }),
+  asyncHandler(async (req, res) => {
+    const preview = await payReminderPreview(param(req, 'id'), req.auth!);
+    const text = (req.body as { text?: string }).text != null
+      ? assertSendSmsText((req.body as { text?: string }).text!)
+      : preview.text;
+    const seg = smsSegmentOf(text);
+    res.json({
+      data: {
+        sender: env.SMS_FROM ?? null,
+        channel: 'leasing',
+        text,
+        phone: preview.order.customer.phone,
+        name: preview.order.customer.name,
+        amount: preview.amount,
+        chars: seg.chars,
+        segments: seg.segments,
+        previewToken: smsPreviewToken([{ id: preview.order.id, text }], {
+          channel: 'leasing',
+          relatedType: 'order',
+        }),
       },
     });
   }),
@@ -795,12 +878,21 @@ leasingOrdersRouter.post(
     body: z.object({
       kind: z.enum(['pay_reminder']).default('pay_reminder'),
       text: z.string().min(1).max(400).optional(),
+      previewToken: z.string().min(8).max(128),
+      sendKey: z.string().trim().min(8).max(128),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const body = req.body as { kind?: 'pay_reminder'; text?: string };
+    const body = req.body as { kind?: 'pay_reminder'; text?: string; previewToken: string; sendKey: string };
     const preview = await payReminderPreview(param(req, 'id'), req.auth!);
     const text = body.text != null ? assertSendSmsText(body.text) : preview.text;
+    const expected = smsPreviewToken([{ id: preview.order.id, text }], {
+      channel: 'leasing',
+      relatedType: 'order',
+    });
+    if (body.previewToken !== expected) {
+      throw conflict('Preview-ийн дараа мессеж өөрчлөгдсөн. Дахин шалгана уу.');
+    }
     const { send } = await dispatchSms({
       channel: 'leasing',
       purpose: 'leasing_pay',
@@ -808,6 +900,7 @@ leasingOrdersRouter.post(
       text,
       relatedType: 'order',
       relatedId: preview.order.id,
+      confirmKey: body.sendKey,
     });
     if (!send.accepted) throw badRequest(send.error ?? 'SMS илгээгдсэнгүй.');
 

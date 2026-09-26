@@ -4,6 +4,8 @@ const db = vi.hoisted(() => ({
   transaction: vi.fn(),
   tx: {
     $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(),
+    actorIdempotency: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     order: {
       findFirst: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(),
       update: vi.fn(), updateMany: vi.fn(),
@@ -47,6 +49,7 @@ function line(id: string, handedOver = false) {
     id, orderId: 'order', qty: 1, unitPrice: 100_000, nameSnapshot: `Item ${id}`,
     cancelledAt: null as Date | null,
     handedOverAt: handedOver ? arrival : null,
+    handedOverQty: handedOver ? 1 : 0,
     arrivedAt: arrival, arrivedQty: 1,
     selections: {}, size: null, color: null,
     round: { id: `round-${id}`, closeAt: null, status: 'ACTIVE', skuStocks: [] },
@@ -80,6 +83,20 @@ beforeEach(() => {
     }
   });
   db.tx.$queryRaw.mockResolvedValue([]);
+  db.tx.$executeRaw.mockImplementation(async () => {
+    const waiting = items.find((row) => row.id === 'waiting' && !row.cancelledAt);
+    if (!waiting || waiting.handedOverQty >= waiting.qty) return 0;
+    waiting.handedOverQty = waiting.qty;
+    waiting.handedOverAt = new Date();
+    return 1;
+  });
+  db.tx.actorIdempotency.findUnique.mockResolvedValue(null);
+  db.tx.actorIdempotency.create.mockImplementation(async ({ data }) => ({
+    id: 'idem-1',
+    response: null,
+    ...data,
+  }));
+  db.tx.actorIdempotency.update.mockResolvedValue({});
   db.tx.order.findFirst.mockImplementation(async () => ({ ...order }));
   db.tx.order.findUnique.mockImplementation(async () => ({ ...order }));
   db.tx.order.findUniqueOrThrow.mockImplementation(async () => ({ ...order }));
@@ -207,16 +224,25 @@ describe('Cancellation after partial handover', () => {
   });
 
   it('does not hand over a line whose guarded write detects a concurrent cancellation', async () => {
-    db.tx.orderItem.updateMany.mockResolvedValueOnce({ count: 0 });
-    await expect(handOverItems({ itemIds: ['waiting'], actor: 'test' }))
-      .rejects.toMatchObject({ status: 409 });
+    db.tx.$executeRaw.mockResolvedValueOnce(0);
+    await expect(
+      handOverItems({
+        lines: [{ itemId: 'waiting', qty: 1, expectedHandedQty: 0 }],
+        actor: 'test',
+        idempotencyKey: 'handover-cancel-1',
+      }),
+    ).rejects.toMatchObject({ status: 409 });
     expect(items[1]!.handedOverAt).toBeNull();
     expect(db.tx.order.update).not.toHaveBeenCalled();
   });
 
   it('still completes a normal handover of the last remaining line', async () => {
-    const result = await handOverItems({ itemIds: ['waiting'], actor: 'test' });
-    expect(result).toMatchObject({ itemCount: 1, completedOrderIds: ['order'] });
+    const result = await handOverItems({
+      lines: [{ itemId: 'waiting', qty: 1, expectedHandedQty: 0 }],
+      actor: 'test',
+      idempotencyKey: 'handover-ok-1',
+    });
+    expect(result).toMatchObject({ itemCount: 1, pieceCount: 1, completedOrderIds: ['order'] });
     expect(order.status).toBe('HANDED_OVER');
     expect(items[1]!.handedOverAt).toBeInstanceOf(Date);
   });

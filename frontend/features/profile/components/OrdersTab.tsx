@@ -24,6 +24,13 @@ const STATUS_TONE: Record<OrderStatus, Tone> = {
   CANCELLED: "danger",
 };
 
+const CTA_LABEL = {
+  pay: "Төлөх",
+  contact: "Холбогдох",
+  pickup: "Авах мэдээлэл",
+  fulfilment: "Авах арга",
+} as const;
+
 export function OrdersTab({
   orders,
   activeCount,
@@ -50,10 +57,13 @@ export function OrdersTab({
 
       <div className='flex flex-col gap-3 lg:grid lg:grid-cols-2 lg:gap-4'>
         {orders.map((order) => {
-          const eta = order.timeline.find((s) => s.key === "arrived");
-          const etaValue = eta?.at ?? eta?.estimatedAt;
+          const next = order.nextAction;
           const feeHold = leasingFeeHold(order);
-          const stages = buildOrderStages(order.status, { feeHold });
+          const stages = next?.progress?.length
+            ? next.progress
+            : buildOrderStages(order.status, { feeHold });
+          const etaFrom = next?.etaFrom;
+          const etaTo = next?.etaTo;
           return (
             <Link
               key={order.code}
@@ -75,7 +85,10 @@ export function OrdersTab({
                   </Badge>
                 </div>
 
-                <div className='mt-3 grid grid-cols-3 gap-2'>
+                <div
+                  className='mt-3 grid gap-2'
+                  style={{ gridTemplateColumns: `repeat(${Math.max(stages.length, 1)}, minmax(0, 1fr))` }}
+                >
                   {stages.map((stage) => (
                     <div key={stage.key} className='flex flex-col gap-1.5'>
                       <span
@@ -90,31 +103,49 @@ export function OrdersTab({
                   ))}
                 </div>
 
+                {next && (
+                  <div className='mt-3 rounded-[10px] border border-line bg-surface px-3 py-2'>
+                    <div className='text-[13px] font-medium'>{next.title}</div>
+                    <p className='mt-0.5 mb-0 text-[13px] leading-[1.45] text-ink-2'>
+                      {next.detail}
+                    </p>
+                    {next.cta && (
+                      <div className='mt-2'>
+                        <Badge tone={next.cta === "pay" ? "warn" : "info"}>
+                          {CTA_LABEL[next.cta]}
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <Divider className='my-3' />
 
                 <div className='flex items-baseline justify-between gap-2 text-[13px]'>
-                  <span className='text-muted'>
-                    {order.status === "HANDED_OVER"
-                      ? "Хүлээлгэн өгсөн"
-                      : "Гарт очих"}
-                  </span>
+                  <span className='text-muted'>Төлбөр</span>
                   <span className='tnum'>
-                    {order.status === "HANDED_OVER" && order.handedOverAt
-                      ? dayLabel(order.handedOverAt)
-                      : etaValue
-                        ? dayLabel(etaValue)
-                        : "—"}
+                    {money(order.paidAmount)}
+                    {order.dueAmount > 0 ? ` · үлдсэн ${money(order.dueAmount)}` : " · төлсөн"}
                   </span>
                 </div>
-                <div className='flex items-baseline justify-between gap-2 text-[13px]'>
-                  <span className='text-muted'>Төлсөн</span>
-                  <span className='tnum'>{money(order.paidAmount)}</span>
-                </div>
-                {order.dueAmount > 0 && (
+                {next?.nextPayAmount != null && next.nextPayAmount > 0 && (
                   <div className='flex items-baseline justify-between gap-2 text-[13px]'>
-                    <span className='text-muted'>Шилжүүлэх</span>
+                    <span className='text-muted'>
+                      {next.key === "pay_overdue" ? "Хугацаа хэтэрсэн" : "Дараагийн төлөлт"}
+                    </span>
                     <span className='tnum text-warn'>
-                      {money(order.dueAmount)}
+                      {money(next.nextPayAmount)}
+                      {next.nextPayAt ? ` · ${dayLabel(next.nextPayAt)}` : ""}
+                    </span>
+                  </div>
+                )}
+                {(etaFrom || etaTo) && (
+                  <div className='flex items-baseline justify-between gap-2 text-[13px]'>
+                    <span className='text-muted'>Ирэх төлөвлөгөө</span>
+                    <span className='tnum'>
+                      {etaFrom && etaTo && etaFrom !== etaTo
+                        ? `${dayLabel(etaFrom)} – ${dayLabel(etaTo)}`
+                        : dayLabel((etaTo ?? etaFrom)!)}
                     </span>
                   </div>
                 )}
@@ -136,9 +167,6 @@ export function OrdersTab({
                     )}
                   {order.canChooseFulfilment && leasingHoldsGoods(order) && (
                     <Badge tone="danger">Лизингийн төлбөрөө төлөөрэй</Badge>
-                  )}
-                  {order.canChooseFulfilment && !leasingHoldsGoods(order) && (
-                    <Badge tone="ok">Авах аргаа сонгоно уу</Badge>
                   )}
                 </div>
               </Card>

@@ -104,6 +104,12 @@ export function LeasingScheduleSms({
   const toast = useToast();
   const sendable = useMemo(() => orders.filter(hasPhone), [orders]);
   const [selected, setSelected] = useState<Set<string>>(() => new Set(sendable.map((o) => o.id)));
+  const [confirming, setConfirming] = useState(false);
+  const [confirmDraft, setConfirmDraft] = useState<{
+    sender: string | null;
+    recipients: { orderId: string; code: string; name: string | null; phone: string; text: string; chars: number; segments: number }[];
+    previewToken: string;
+  } | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [smsTick, setSmsTick] = useState(0);
@@ -187,9 +193,48 @@ export function LeasingScheduleSms({
     }
   };
 
+  const openConfirm = async () => {
+    const orderIds = sendable.filter((o) => selected.has(o.id)).map((o) => o.id);
+    if (orderIds.length === 0 || busy || overLimit || confirming) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const draft = await leasingApi.previewScheduleSms(
+        kind,
+        orderIds,
+        sendTemplate,
+        orderIds
+          .map((id) => {
+            const order = sendable.find((row) => row.id === id);
+            const text = overrides[id];
+            if (!order || !text || hasCustomizedSms(order.customer.id)) return null;
+            const def = smsPreview(sendTemplate, kind, order);
+            if (smsTextsEqual(text, def)) return null;
+            return { orderId: id, text };
+          })
+          .filter((row): row is { orderId: string; text: string } => row !== null),
+      );
+      if (draft.failed.length > 0) {
+        setError(draft.failed.map((f) => `${f.code}: ${f.error}`).join(" · "));
+      }
+      setConfirmDraft({
+        sender: draft.sender,
+        recipients: draft.recipients,
+        previewToken: draft.previewToken,
+      });
+      setConfirming(true);
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : "Урьдчилан харж чадсангүй.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const send = async () => {
     const orderIds = sendable.filter((o) => selected.has(o.id)).map((o) => o.id);
-    if (orderIds.length === 0 || busy || overLimit) return;
+    if (orderIds.length === 0 || busy || overLimit || !confirmDraft) return;
     setBusy(true);
     setError(null);
     try {
@@ -207,9 +252,9 @@ export function LeasingScheduleSms({
             return { orderId: id, text };
           })
           .filter((row): row is { orderId: string; text: string } => row !== null),
+        confirmDraft.previewToken,
+        crypto.randomUUID(),
       );
-      setSavedTemplate(sendTemplate);
-      setTemplate(sendTemplate);
       const fail = result.failed.length;
       if (fail > 0) {
         setError(
@@ -241,6 +286,8 @@ export function LeasingScheduleSms({
       }
       setSmsTick((n) => n + 1);
       setOverrides({});
+      setConfirming(false);
+      setConfirmDraft(null);
       setSelected((prev) => {
         const next = new Set(prev);
         for (const id of orderIds) {
@@ -406,15 +453,65 @@ export function LeasingScheduleSms({
             <ErrorNote>{error}</ErrorNote>
           </div>
         )}
+        {confirming && confirmDraft && (
+          <div className="mt-3 rounded-[10px] border border-line bg-surface p-3">
+            <div className="text-[14px] font-medium">Илгээхээс өмнө шалгах</div>
+            <p className="mt-1 mb-2 text-[12px] text-muted">
+              Суваг: лизинг{confirmDraft.sender ? ` · ${confirmDraft.sender}` : ""}.
+              Засвар зөвхөн энэ илгээлтэд.
+            </p>
+            <div className="max-h-[240px] overflow-y-auto">
+              {confirmDraft.recipients.slice(0, 12).map((row) => (
+                <div key={row.orderId} className="border-b border-line py-2 last:border-b-0">
+                  <div className="tnum text-[12px] text-ink-2">
+                    {row.code} · {phoneLabel(row.phone)}
+                  </div>
+                  <div className="mt-0.5 text-[13px] leading-[1.4]">{row.text}</div>
+                  <div className="tnum text-[11px] text-muted">
+                    {row.chars} тэмдэгт · {row.segments} SMS
+                  </div>
+                </div>
+              ))}
+              {confirmDraft.recipients.length > 12 && (
+                <div className="py-2 text-[12px] text-muted">
+                  +{confirmDraft.recipients.length - 12} хүлээн авагч
+                </div>
+              )}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button
+                variant="outline"
+                full
+                disabled={busy}
+                onClick={() => {
+                  setConfirming(false);
+                  setConfirmDraft(null);
+                }}
+              >
+                Болих
+              </Button>
+              <Button
+                full
+                loading={busy}
+                disabled={confirmDraft.recipients.length === 0}
+                onClick={() => void send()}
+              >
+                {confirmDraft.recipients.length} дугаарт илгээх
+              </Button>
+            </div>
+          </div>
+        )}
+        {!confirming && (
         <Button
           full
           className="mt-3"
           loading={busy}
           disabled={selectedCount === 0 || overLimit || templateLoading}
-          onClick={() => void send()}
+          onClick={() => void openConfirm()}
         >
           {selectedCount} дугаар руу илгээх
         </Button>
+        )}
       </Card>
 
       {previewOrder && (

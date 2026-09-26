@@ -17,6 +17,7 @@ import { adminSettingsRouter } from './settings.js';
 import { adminQpayRouter } from './qpay.js';
 import { adminStaffRouter } from './staff.js';
 import { adminSettlementsRouter } from './settlements.js';
+import { adminWorkRouter } from './work.js';
 
 export const adminRouter = Router();
 
@@ -36,6 +37,7 @@ adminRouter.use('/deliveries', requireAdminWrites, adminDeliveriesRouter);
 adminRouter.use('/returns', requireAdminWrites, adminReturnsRouter);
 adminRouter.use('/customers', requireAdminWrites, adminCustomersRouter);
 adminRouter.use('/reports', requireAdminWrites, adminReportsRouter);
+adminRouter.use('/work', requireAdminWrites, adminWorkRouter);
 adminRouter.use('/settings', requireAdmin, adminSettingsRouter);
 adminRouter.use('/qpay', requireAdmin, adminQpayRouter);
 adminRouter.use('/staff', requireAdmin, adminStaffRouter);

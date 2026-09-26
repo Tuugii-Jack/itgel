@@ -381,6 +381,20 @@ model CheckoutIdempotency {
   @@index([createdAt])
 }
 
+/// Админы нэг товч даралт (олголт, SMS илгээлт) — preview token биш.
+model ActorIdempotency {
+  id             String   @id @default(cuid())
+  kind           String
+  actorId        String
+  idempotencyKey String
+  payloadHash    String
+  response       Json?
+  createdAt      DateTime @default(now())
+
+  @@unique([kind, actorId, idempotencyKey])
+  @@index([createdAt])
+}
+
 model EmailOtp {
   id        String    @id @default(cuid())
   email     String
@@ -601,11 +615,13 @@ model OrderItem {
   cancelledAt  DateTime?
   cancelReason String?
 
-  /// Агуулахад ирсэн огноо — мөр бүтнээр (arrivedQty >= qty) ирэхэд тавина.
+  /// Агуулахад ирсэн огноо — мөр бүтнээр (arrivedQty >= qty) ирэхэд тавина. Тоо биш.
   arrivedAt DateTime?
   /// Энэ мөрөөс агуулахад ирсэн ширхэг (0..qty). Дутуу ирвэл FIFO-оор нэмэгдэнэ.
   arrivedQty Int @default(0)
-  /// Хэрэглэгчид хүлээлгэн өгсөн огноо (хэсэгчилсэн авах боломжтой).
+  /// Хэрэглэгчид хүлээлгэн өгсөн ширхэг (0..qty). Огноог тоо мэт ашиглахгүй.
+  handedOverQty Int @default(0)
+  /// Сүүлд (эсвэл бүтнээр) хүлээлгэсэн огноо. Тоо биш.
   handedOverAt DateTime?
   /// Ирсэн мөр бүрийн авах арга — захиалгад хольж болно.
   fulfilment   Fulfilment?
@@ -632,6 +648,7 @@ model OrderItem {
   @@index([roundId, cancelledAt])
   @@index([arrivedAt])
   @@index([handedOverAt])
+  @@index([handedOverQty])
   @@index([readyTransferId])
   @@index([transferredAt])
   @@index([stockHold])

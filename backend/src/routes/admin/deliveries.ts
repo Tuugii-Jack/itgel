@@ -6,6 +6,7 @@ import { audit } from '../../lib/audit.js';
 import { endOfUbDay, parseUbDay, startOfUbDay } from '../../lib/date.js';
 import { notFound } from '../../lib/errors.js';
 import { selectionsOf } from '../../lib/options.js';
+import { pickableQtyOf, handedQtyOf } from '../../lib/itemQty.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { deliveryHistory } from '../../services/deliveryHistory.js';
@@ -204,21 +205,29 @@ adminDeliveriesRouter.patch(
     if (body.status === 'DELIVERED' && before.order.status !== 'CANCELLED' && before.order.status !== 'HANDED_OVER') {
       const actor = actorOf(req);
       const deliveryIds = before.order.items
-        .filter((item) => !item.cancelledAt && !item.handedOverAt && item.fulfilment === 'DELIVERY')
+        .filter((item) => !item.cancelledAt && pickableQtyOf(item) > 0 && item.fulfilment === 'DELIVERY')
         .map((item) => item.id);
       const anyItemFulfilment = before.order.items.some((item) => item.fulfilment != null);
       const legacyIds =
         !anyItemFulfilment && before.order.fulfilment === 'DELIVERY'
           ? before.order.items
-              .filter((item) => !item.cancelledAt && !item.handedOverAt)
+              .filter((item) => !item.cancelledAt && pickableQtyOf(item) > 0)
               .map((item) => item.id)
           : [];
       const toHand = deliveryIds.length > 0 ? deliveryIds : legacyIds;
       if (toHand.length > 0) {
         await handOverItems({
-          itemIds: toHand,
+          lines: toHand.map((itemId) => {
+            const item = before.order.items.find((row) => row.id === itemId)!;
+            return {
+              itemId,
+              qty: pickableQtyOf(item),
+              expectedHandedQty: handedQtyOf(item),
+            };
+          }),
           actor,
           note: 'Хүргэлтээр хүлээлгэн өгсөн',
+          idempotencyKey: `delivery-${before.id}`,
         });
       }
       const shopDue = shopDueAmount(before.order);

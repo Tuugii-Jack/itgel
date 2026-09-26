@@ -1,4 +1,5 @@
 import type { OrderStatus } from '@prisma/client';
+import { pickableQtyOf } from './itemQty.js';
 
 export type ArrivalSmsItem = {
   cancelledAt: Date | null;
@@ -6,6 +7,7 @@ export type ArrivalSmsItem = {
   arrivedQty: number;
   qty: number;
   handedOverAt: Date | null;
+  handedOverQty?: number | null;
 };
 
 export type ArrivalSmsOrder = {
@@ -20,12 +22,12 @@ export type ArrivalSmsDecision =
 
 function itemArrived(item: ArrivalSmsItem): boolean {
   if (item.cancelledAt) return false;
-  return item.arrivedQty > 0 || item.arrivedAt !== null;
+  return item.arrivedQty > 0;
 }
 
 /** Ирсэн, хараахан хүлээлгэж өгөөгүй идэвхтэй мөр. */
 export function itemsAwaitingHandover(items: ArrivalSmsItem[]): ArrivalSmsItem[] {
-  return items.filter((item) => itemArrived(item) && !item.handedOverAt);
+  return items.filter((item) => pickableQtyOf(item) > 0);
 }
 
 /**

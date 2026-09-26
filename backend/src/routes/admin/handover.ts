@@ -4,9 +4,12 @@ import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
-import { itemPickableAtStore } from '../../lib/itemFulfilment.js';
+import { parsePickupLookup } from '../../lib/pickupQr.js';
 import { isLeasingResale } from '../../lib/inventoryOwner.js';
 import { leasingFeeHold, leasingHoldsGoods, leasingView, SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
+import { itemPickableAtStore } from '../../lib/itemFulfilment.js';
+import { handedQtyOf, pickableQtyOf } from '../../lib/itemQty.js';
+import { readActorIdempotencyKey } from '../../lib/actorIdempotency.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
 import { handOverItems } from '../../services/orders.js';
@@ -21,7 +24,7 @@ import { currentLeasingPayGaps } from '../../services/settings.js';
 
 export const adminHandoverRouter = Router();
 
-const lookupQuery = z.object({ code: z.string().trim().min(3).max(20) });
+const lookupQuery = z.object({ code: z.string().trim().min(3).max(80) });
 
 const customerQuery = z.object({
   q: z.string().trim().min(2).max(120),
@@ -49,7 +52,8 @@ adminHandoverRouter.get(
   '/lookup',
   validate({ query: lookupQuery }),
   asyncHandler(async (req, res) => {
-    const { code } = query<z.infer<typeof lookupQuery>>(req);
+    const { code: raw } = query<z.infer<typeof lookupQuery>>(req);
+    const code = parsePickupLookup(raw) ?? raw.trim().toUpperCase();
 
     const order = await prisma.order.findFirst({
       where: { code: code.toUpperCase(), deletedAt: null },
@@ -86,7 +90,7 @@ adminHandoverRouter.get(
 
     const pickable = fresh.items.filter(itemPickableAtStore);
     const deliveryHeld = fresh.items.filter(
-      (i) => !i.cancelledAt && i.arrivedAt && !i.handedOverAt && i.fulfilment === 'DELIVERY',
+      (i) => !i.cancelledAt && pickableQtyOf(i) > 0 && i.fulfilment === 'DELIVERY',
     );
     const leasingHeld = leasingHoldsGoods(fresh);
     const leasingUnpaid = isLeasingResale(fresh) && !isProductPaid(fresh);
@@ -112,6 +116,13 @@ adminHandoverRouter.get(
                       : 'Авах боломжтой (ирсэн) бараа алга.'
                     : null,
         pickableItemIds: pickable.map((i) => i.id),
+        pickableItems: pickable.map((i) => ({
+          itemId: i.id,
+          pickableQty: pickableQtyOf(i),
+          expectedHandedQty: handedQtyOf(i),
+        })),
+        recipientProof: 'paper_signature',
+        lookupOnly: true,
       },
     });
   }),
@@ -217,7 +228,7 @@ adminHandoverRouter.get(
               paidAmount: order.paidAmount,
               subtotal: order.subtotal,
               canPick:
-                pub.itemStatus === 'arrived' &&
+                pickableQtyOf(item) > 0 &&
                 pub.fulfilment !== 'DELIVERY' &&
                 !leasingHeld,
             };
@@ -262,26 +273,39 @@ adminHandoverRouter.post(
   '/partial',
   validate({
     body: z.object({
-      itemIds: z.array(z.string().min(1)).min(1).max(200),
+      items: z
+        .array(
+          z.object({
+            itemId: z.string().min(1),
+            qty: z.coerce.number().int().min(1).max(10_000),
+            expectedHandedQty: z.coerce.number().int().min(0).max(10_000),
+          }),
+        )
+        .min(1)
+        .max(200),
       collectedAmount: z.coerce.number().int().min(0).optional(),
       method: payMethod.optional(),
       note: z.string().trim().max(300).optional(),
+      idempotencyKey: z.string().trim().min(8).max(128).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
     const body = req.body as {
-      itemIds: string[];
+      items: { itemId: string; qty: number; expectedHandedQty: number }[];
       collectedAmount?: number;
       method?: 'CASH' | 'CARD' | 'BANK_TRANSFER';
       note?: string;
+      idempotencyKey?: string;
     };
     const actor = actorOf(req);
+    const idempotencyKey = readActorIdempotencyKey(req.headers['idempotency-key'], body.idempotencyKey);
+    const itemIds = body.items.map((row) => row.itemId);
 
     const items = await prisma.orderItem.findMany({
-      where: { id: { in: body.itemIds } },
+      where: { id: { in: itemIds } },
       include: { order: true },
     });
-    if (items.length !== body.itemIds.length) throw conflict('Зарим бараа олдсонгүй.');
+    if (items.length !== itemIds.length) throw conflict('Зарим бараа олдсонгүй.');
 
     const uniqueOrderIds = [...new Set(items.map((i) => i.orderId))];
     await syncOrdersStorageFees(uniqueOrderIds);
@@ -328,9 +352,10 @@ adminHandoverRouter.post(
     }
 
     const result = await handOverItems({
-      itemIds: body.itemIds,
+      lines: body.items,
       actor,
       note: body.note,
+      idempotencyKey,
     });
 
     // Төлбөр — захиалга бүрд due-г нэг удаа.
@@ -352,11 +377,12 @@ adminHandoverRouter.post(
       actor,
       action: 'HANDOVER_PARTIAL',
       entity: 'OrderItem',
-      entityId: body.itemIds[0]!,
+      entityId: itemIds[0]!,
       after: {
-        itemIds: body.itemIds,
+        items: body.items,
         orderIds: result.orderIds,
         completedOrderIds: result.completedOrderIds,
+        pieceCount: result.pieceCount,
         method: body.method ?? null,
         note: body.note,
       },
@@ -365,6 +391,7 @@ adminHandoverRouter.post(
     res.json({
       data: {
         itemCount: result.itemCount,
+        pieceCount: result.pieceCount,
         orderIds: result.orderIds,
         completedOrderIds: result.completedOrderIds,
       },
@@ -382,14 +409,16 @@ adminHandoverRouter.post(
         collectedAmount: z.coerce.number().int().min(0).optional(),
         method: payMethod.optional(),
         note: z.string().trim().max(300).optional(),
+        idempotencyKey: z.string().trim().min(8).max(128).optional(),
       })
       .default({}),
   }),
   asyncHandler(async (req, res) => {
-    const { collectedAmount, method, note } = req.body as {
+    const { collectedAmount, method, note, idempotencyKey: bodyKey } = req.body as {
       collectedAmount?: number;
       method?: 'CASH' | 'CARD' | 'BANK_TRANSFER';
       note?: string;
+      idempotencyKey?: string;
     };
     const orderId = param(req, 'orderId');
 
@@ -428,12 +457,18 @@ adminHandoverRouter.post(
     }
 
     const actor = actorOf(req);
+    const idempotencyKey = readActorIdempotencyKey(req.headers['idempotency-key'], bodyKey);
 
-    // Бүх ирсэн мөрийг өгнө; үлдсэн хүлээж буй мөр байвал захиалга ARRIVED үлдэнэ.
+    // Бүх ирсэн ширхгийг өгнө; үлдсэн хүлээж буй мөр байвал захиалга ARRIVED үлдэнэ.
     await handOverItems({
-      itemIds: pickable.map((i) => i.id),
+      lines: pickable.map((i) => ({
+        itemId: i.id,
+        qty: pickableQtyOf(i),
+        expectedHandedQty: handedQtyOf(i),
+      })),
       actor,
       note,
+      idempotencyKey,
     });
 
     // Хэрэв бүх мөр авсан бол handOverItems аль хэдийн HANDED_OVER болгосон.

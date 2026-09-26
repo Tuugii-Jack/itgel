@@ -33,6 +33,8 @@ export type DispatchSmsInput = {
   /** Шинэ оролдлого. Хуучин pending-ийг дахин илгээхгүй. */
   resend?: boolean;
   provider?: SmsProvider;
+  /** Preview token биш — нэг баталгаажуулалтын давхар илгээлтийг хориглоно. */
+  confirmKey?: string;
 };
 
 export type DispatchSmsResult = {
@@ -105,8 +107,50 @@ export async function dispatchSms(input: DispatchSmsInput): Promise<DispatchSmsR
   }
 
   const provider = input.provider ?? smsProviderOf(input.channel);
+  const confirmKey = input.confirmKey?.trim() || null;
+  if (confirmKey) {
+    const confirmIdempotencyKey = `confirm:${input.purpose}:${confirmKey}:${input.relatedId ?? phone}`;
+    const existingConfirm = await prisma.smsDispatch.findUnique({
+      where: { idempotencyKey: confirmIdempotencyKey },
+    });
+    if (existingConfirm) {
+      if (existingConfirm.status !== 'failed') {
+        return {
+          dispatch: existingConfirm,
+          send: {
+            accepted: Boolean(existingConfirm.acceptedAt || existingConfirm.providerMessageId),
+            status: existingConfirm.status as SmsLifecycleStatus,
+            id: existingConfirm.providerMessageId ?? undefined,
+            error: existingConfirm.error ?? undefined,
+          },
+          skipped: true,
+        };
+      }
+      const send = await provider.send({ phone, text: input.text });
+      const nextCheckAt =
+        send.accepted && provider.tracksDelivery && send.id && send.status !== 'delivered'
+          ? new Date()
+          : null;
+      const dispatch = await prisma.smsDispatch.update({
+        where: { id: existingConfirm.id },
+        data: {
+          status: send.status,
+          providerMessageId: send.id ?? null,
+          error: send.error ?? null,
+          acceptedAt: send.accepted ? new Date() : existingConfirm.acceptedAt,
+          deliveredAt: send.status === 'delivered' ? new Date() : existingConfirm.deliveredAt,
+          nextCheckAt,
+          attempt: existingConfirm.attempt + 1,
+        },
+      });
+      return { dispatch, send };
+    }
+  }
+
   const attempt = await nextAttempt(input);
-  const idempotencyKey = dispatchKey(input, attempt);
+  const idempotencyKey = confirmKey
+    ? `confirm:${input.purpose}:${confirmKey}:${input.relatedId ?? phone}`
+    : dispatchKey(input, attempt);
 
   let row: SmsDispatch;
   try {

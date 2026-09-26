@@ -75,6 +75,7 @@ export function useOrderDetail({
   const [exportBusy, setExportBusy] = useState(false);
   const [smsOpen, setSmsOpen] = useState(false);
   const [smsDefault, setSmsDefault] = useState("");
+  const [smsToken, setSmsToken] = useState<string | null>(null);
   const [smsTick, setSmsTick] = useState(0);
 
   const load = useCallback(async () => {
@@ -101,6 +102,7 @@ export function useOrderDetail({
   useOnKeyChange(orderId, () => {
     setSmsOpen(false);
     setSmsDefault("");
+    setSmsToken(null);
   });
 
   const run = async (key: string, action: () => Promise<unknown>, okMessage: string) => {
@@ -128,6 +130,7 @@ export function useOrderDetail({
     try {
       const preview = await leasingApi.previewOrderSms(order.id);
       setSmsDefault(preview.text);
+      setSmsToken(preview.previewToken);
       setSmsOpen(true);
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Урьдчилан харах боломжгүй.";
@@ -145,7 +148,17 @@ export function useOrderDetail({
     setBusyKey("leasing-sms");
     setError(null);
     try {
-      const result = await leasingApi.sendOrderSms(order.id, "pay_reminder", custom ? text : undefined);
+      const preview = custom
+        ? await leasingApi.previewOrderSms(order.id, text)
+        : { previewToken: smsToken, text };
+      if (!preview.previewToken) throw new Error("Preview token алга.");
+      const result = await leasingApi.sendOrderSms(
+        order.id,
+        "pay_reminder",
+        custom ? preview.text : undefined,
+        preview.previewToken,
+        crypto.randomUUID(),
+      );
       if (custom) {
         markCustomizedSms(order.customer.id);
         setSmsTick((n) => n + 1);

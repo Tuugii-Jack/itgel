@@ -26,6 +26,7 @@ import {
   sizeColorFromSelections,
 } from '../lib/options.js';
 import { leasingFeeHold } from '../lib/leasing.js';
+import { itemQtyStatusOf, qtySnapshotOf } from '../lib/itemQty.js';
 import { BATCH_STAGE_LABEL, ORDER_STATUS_LABEL } from '../lib/orderStatus.js';
 import { publicSkuStocks } from '../lib/skuStock.js';
 import { lineCargoFee } from './cargoFee.js';
@@ -200,15 +201,8 @@ export function publicOrderItem(
     return normalizeLegacy(item.size, item.color);
   })();
   const { size, color } = sizeColorFromSelections(selections);
-  const arrived = item.arrivedAt !== null || item.arrivedQty >= item.qty;
-  const handedOver = item.handedOverAt !== null;
-  const itemStatus = item.cancelledAt
-    ? ('cancelled' as const)
-    : handedOver
-      ? ('handed_over' as const)
-      : arrived
-        ? ('arrived' as const)
-        : ('waiting' as const);
+  const qty = qtySnapshotOf(item);
+  const itemStatus = itemQtyStatusOf(item);
   const refundPayoutOn = item.cancelledAt ? payoutDateForReturn(item.cancelledAt) : null;
   return {
     id: item.id,
@@ -219,8 +213,11 @@ export function publicOrderItem(
     selections,
     size: size ?? item.size,
     color: color ?? item.color,
-    qty: item.qty,
-    arrivedQty: item.arrivedQty,
+    qty: qty.qty,
+    arrivedQty: qty.arrivedQty,
+    handedOverQty: qty.handedOverQty,
+    pickableQty: qty.pickableQty,
+    waitingQty: qty.waitingQty,
     unitPrice: item.unitPrice,
     total: item.unitPrice * item.qty,
     cargoFee: lineCargoFee(item.qty, item.round, selections),

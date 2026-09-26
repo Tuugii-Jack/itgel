@@ -18,6 +18,7 @@ import { checkoutFlagsForGroup } from '../src/lib/inventoryOwner.js';
 import { optionsFromVariants, selectionsOf } from '../src/lib/options.js';
 import { resolveOptionPrice } from '../src/lib/optionPrices.js';
 import { skuKeyOf } from '../src/lib/skuStock.js';
+import { handedQtyOf, pickableQtyOf } from '../src/lib/itemQty.js';
 import { createOrder } from '../src/services/createOrder.js';
 import { createOrderWithUniqueCode } from '../src/modules/orders/createWithCode.js';
 import { snapshotOrderLines } from '../src/modules/orders/lineSnapshots.js';
@@ -723,12 +724,21 @@ async function main() {
     }
     const items = await prisma.orderItem.findMany({
       where: { orderId: s5.id, cancelledAt: null },
-      select: { id: true, arrivedAt: true, handedOverAt: true },
+      select: { id: true, qty: true, arrivedQty: true, handedOverAt: true, handedOverQty: true, cancelledAt: true },
     });
-    const toHand = items.filter((i) => i.arrivedAt && !i.handedOverAt).map((i) => i.id);
+    const toHand = items.filter((i) => pickableQtyOf(i) > 0);
     if (toHand.length > 0) {
       await withRetry(() =>
-        handOverItems({ itemIds: toHand, actor: ACTOR, note: `${TAG} S5 handover` }),
+        handOverItems({
+          lines: toHand.map((item) => ({
+            itemId: item.id,
+            qty: pickableQtyOf(item),
+            expectedHandedQty: handedQtyOf(item),
+          })),
+          actor: ACTOR,
+          note: `${TAG} S5 handover`,
+          idempotencyKey: `${TAG}-s5-${s5.id}`,
+        }),
       );
     }
   }
@@ -842,12 +852,21 @@ async function main() {
     }
     const items = await prisma.orderItem.findMany({
       where: { orderId: l5.id, cancelledAt: null },
-      select: { id: true, arrivedAt: true, handedOverAt: true },
+      select: { id: true, qty: true, arrivedQty: true, handedOverAt: true, handedOverQty: true, cancelledAt: true },
     });
-    const toHand = items.filter((i) => i.arrivedAt && !i.handedOverAt).map((i) => i.id);
+    const toHand = items.filter((i) => pickableQtyOf(i) > 0);
     if (toHand.length > 0) {
       await withRetry(() =>
-        handOverItems({ itemIds: toHand, actor: ACTOR, note: `${TAG} L5 handover` }),
+        handOverItems({
+          lines: toHand.map((item) => ({
+            itemId: item.id,
+            qty: pickableQtyOf(item),
+            expectedHandedQty: handedQtyOf(item),
+          })),
+          actor: ACTOR,
+          note: `${TAG} L5 handover`,
+          idempotencyKey: `${TAG}-l5-${l5.id}`,
+        }),
       );
     }
   }

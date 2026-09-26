@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Card, Empty } from "@/components/ui";
+import { Button, Card, Empty, ErrorNote, Field, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { phoneLabel } from "@/lib/format";
 import { smsStatusLabel, smsToastForSend } from "@/lib/smsStatus";
@@ -18,8 +18,16 @@ export function ArrivalSmsPanel({
   const toast = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [preview, setPreview] = useState<ArrivalSmsPreview | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  const [commonText, setCommonText] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [composeFor, setComposeFor] = useState<{ orderId?: string; resend?: boolean } | null>(null);
+
+  const refreshPreview = (body?: { commonText?: string }) =>
+    adminApi.previewBatchArrivalSms(batch.id, body).then((data) => {
+      setPreview(data);
+      setPreviewError(null);
+      return data;
+    });
 
   useEffect(() => {
     let cancelled = false;
@@ -46,10 +54,15 @@ export function ArrivalSmsPanel({
     if (busyId) return;
     setBusyId(key);
     try {
-      const result = await adminApi.sendBatchArrivalSms(
-        batch.id,
-        orderId ? { orderId, resend: resend || undefined } : undefined,
-      );
+      const live = await refreshPreview(commonText.trim() ? { commonText } : undefined);
+      if (!live.previewToken) throw new Error("Preview token алга.");
+      const result = await adminApi.sendBatchArrivalSms(batch.id, {
+        orderId,
+        resend: resend || undefined,
+        previewToken: live.previewToken,
+        commonText: commonText.trim() || undefined,
+        sendKey: crypto.randomUUID(),
+      });
       const fail = result.failed.length;
       if (fail > 0 && result.sent === 0) {
         toast.error(result.failed[0]?.error ?? "Хүргэлт амжилтгүй.");
@@ -65,7 +78,7 @@ export function ArrivalSmsPanel({
         else if (note) toast.success(note.message);
         else toast.success("Илгээх захиалга алга.");
       }
-      setConfirming(false);
+      setComposeFor(null);
       onSent();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "SMS илгээж чадсангүй.");
@@ -76,6 +89,10 @@ export function ArrivalSmsPanel({
 
   const recipients = preview?.recipients ?? [];
   const skipped = preview?.skipped ?? [];
+  const composeRows = composeFor?.orderId
+    ? recipients.filter((row) => row.orderId === composeFor.orderId)
+    : recipients;
+  const confirmCount = composeFor?.resend ? 1 : composeFor?.orderId ? Math.max(composeRows.length, 0) : recipients.length;
 
   return (
     <Card className="mt-4 p-4">
@@ -83,12 +100,12 @@ export function ArrivalSmsPanel({
         <div>
           <div className="text-[15px] font-medium">Бараа ирсэн SMS</div>
           <p className="mt-1 mb-0 text-[13px] text-ink-2">
-            Зөвхөн бодитоор ирсэн, хуваарилагдсан, олгоогүй захиалгад илгээнэ. Давхар дарахад автоматаар дахин явахгүй.
+            Илгээх товч шууд явуулахгүй. Эцсийн мессежийг хараад батална. Давхар дарахад дахин явахгүй.
           </p>
         </div>
         <Button
           size="sm"
-          onClick={() => setConfirming(true)}
+          onClick={() => setComposeFor({})}
           disabled={recipients.length === 0 || busyId !== null}
         >
           Бөөнөөр илгээх ({recipients.length})
@@ -97,26 +114,59 @@ export function ArrivalSmsPanel({
 
       {previewError && <div className="mb-3 text-[13px] text-warn">{previewError}</div>}
 
-      {confirming && (
+      {composeFor && (
         <div className="mb-3 rounded-[10px] border border-line bg-surface p-3">
-          <div className="text-[14px] font-medium">Илгээх preview</div>
+          <div className="text-[14px] font-medium">Илгээхээс өмнө шалгах</div>
           <p className="mt-1 mb-2 text-[13px] text-muted">
-            {recipients.length} хүлээн авагч. Агуулга: itgel {"{код}"} бараа ирлээ.
+            Суваг: дэлгүүр{preview?.sender ? ` · ${preview.sender}` : ""}. Засвар зөвхөн энэ илгээлтэд.
           </p>
-          {recipients.slice(0, 8).map((row) => (
-            <div key={row.orderId} className="tnum text-[13px] text-ink-2">
-              {row.code} · {row.name ?? "Нэргүй"} · {phoneLabel(row.phone)}
-            </div>
-          ))}
-          {recipients.length > 8 && (
-            <div className="mt-1 text-[12px] text-muted">+{recipients.length - 8} захиалга</div>
+          <Field label="Нийтлэг эх" hint="{code} захиалгын кодоор солигдоно. Хоосон бол үндсэн загвар.">
+            <Textarea
+              value={commonText}
+              onChange={setCommonText}
+              rows={3}
+              resize="y"
+              placeholder="itgel {code} бараа ирлээ."
+            />
+          </Field>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            onClick={() => void refreshPreview(commonText.trim() ? { commonText } : undefined).catch((e) => {
+              setPreviewError(e instanceof ApiError ? e.message : "Preview ачаалж чадсангүй.");
+            })}
+          >
+            Урьдчилан харах
+          </Button>
+          <div className="mt-3 flex max-h-48 flex-col gap-2 overflow-y-auto">
+            {composeRows.map((row) => (
+              <div key={row.orderId} className="rounded-[8px] border border-line px-3 py-2">
+                <div className="tnum text-[13px]">
+                  {row.code} · {row.name ?? "Нэргүй"} · {phoneLabel(row.phone)}
+                </div>
+                <div className="mt-1 text-[13px] leading-[1.45] text-ink-2">{row.text}</div>
+                <div className="mt-0.5 tnum text-[12px] text-muted">
+                  {row.chars ?? [...row.text].length} тэмдэгт
+                  {row.segments != null ? ` · ${row.segments} SMS` : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+          {composeRows.length === 0 && (
+            <ErrorNote>Илгээх хүлээн авагч алга. Дахин шалгана уу.</ErrorNote>
           )}
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
+            <Button size="sm" variant="outline" onClick={() => setComposeFor(null)} disabled={busyId !== null}>
               Болих
             </Button>
-            <Button size="sm" onClick={() => void send()} loading={busyId === "all"}>
-              Илгээх
+            <Button
+              size="sm"
+              onClick={() => void send(composeFor.orderId, composeFor.resend)}
+              loading={busyId === (composeFor.orderId ?? "all")}
+              disabled={confirmCount === 0}
+            >
+              {confirmCount} дугаарт илгээх
             </Button>
           </div>
         </div>
@@ -140,8 +190,7 @@ export function ArrivalSmsPanel({
               </div>
               <Button
                 size="sm"
-                onClick={() => void send(row.orderId)}
-                loading={busyId === row.orderId}
+                onClick={() => setComposeFor({ orderId: row.orderId })}
                 disabled={busyId !== null}
               >
                 SMS илгээх
@@ -170,8 +219,7 @@ export function ArrivalSmsPanel({
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => void send(row.orderId, true)}
-                    loading={busyId === row.orderId}
+                    onClick={() => setComposeFor({ orderId: row.orderId, resend: true })}
                     disabled={busyId !== null}
                   >
                     Дахин илгээх

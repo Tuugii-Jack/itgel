@@ -1,5 +1,6 @@
 import { prisma } from '../../prisma.js';
 import { notFound } from '../../lib/errors.js';
+import { arrivedQtyOf, handedQtyOf } from '../../lib/itemQty.js';
 import { isArrivalSmsEligible } from '../../lib/arrivalSms.js';
 import { canEditBatchComposition, nextBatchStage, previousBatchStage } from '../../lib/orderStatus.js';
 import { attachOrdersForRound, findOrderIdsForBatch } from '../../services/batches.js';
@@ -62,6 +63,7 @@ export async function loadBatchDetail(id: string, opts: { includeOrders?: boolea
                 arrivedQty: true,
                 arrivedAt: true,
                 handedOverAt: true,
+                handedOverQty: true,
                 cancelledAt: true,
               },
             },
@@ -90,11 +92,8 @@ export async function loadBatchDetail(id: string, opts: { includeOrders?: boolea
 
   const serializeOrder = (order: (typeof orderRows)[number]) => {
     const state = paymentState(computeTotals(order));
-    const arrivedPieces = order.items.reduce(
-      (sum, i) => sum + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
-      0,
-    );
-    const handedOverPieces = order.items.reduce((sum, i) => sum + (i.handedOverAt ? i.qty : 0), 0);
+    const arrivedPieces = order.items.reduce((sum, i) => sum + arrivedQtyOf(i), 0);
+    const handedOverPieces = order.items.reduce((sum, i) => sum + handedQtyOf(i), 0);
     const itemCount = order.items.reduce((sum, i) => sum + i.qty, 0);
     return {
       id: order.id,

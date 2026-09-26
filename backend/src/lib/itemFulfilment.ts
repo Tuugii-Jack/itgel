@@ -1,17 +1,21 @@
 import type { Fulfilment, OrderStatus, Prisma } from '@prisma/client';
+import { pickableQtyOf } from './itemQty.js';
 
 export type FulfilmentItem = {
   cancelledAt: Date | null;
   handedOverAt: Date | null;
+  handedOverQty?: number | null;
   arrivedAt: Date | null;
   arrivedQty: number;
+  qty?: number;
   fulfilment: Fulfilment | null;
 };
 
 /** Ирсэн, авгаагүй, авах арга сонгоогүй мөр. */
 export function itemNeedsFulfilment(item: FulfilmentItem): boolean {
-  if (item.cancelledAt || item.handedOverAt || item.fulfilment) return false;
-  return item.arrivedAt !== null || item.arrivedQty > 0;
+  if (item.cancelledAt || item.fulfilment) return false;
+  const qty = item.qty ?? Math.max(item.arrivedQty, 1);
+  return pickableQtyOf({ ...item, qty }) > 0;
 }
 
 export function orderCanChooseFulfilment(order: {
@@ -24,8 +28,9 @@ export function orderCanChooseFulfilment(order: {
 
 /** Дэлгүүрт биеэр өгөх боломжтой — хүргэлтээр сонгогдсоныг хасна. */
 export function itemPickableAtStore(item: FulfilmentItem): boolean {
-  if (item.cancelledAt || !item.arrivedAt || item.handedOverAt) return false;
-  return item.fulfilment !== 'DELIVERY';
+  if (item.cancelledAt || item.fulfilment === 'DELIVERY') return false;
+  const qty = item.qty ?? Math.max(item.arrivedQty, 1);
+  return pickableQtyOf({ ...item, qty }) > 0;
 }
 
 /** Аль нэг мөр хүргэлт бол захиалга хүргэлтийн жагсаалтад үлдэнэ. */

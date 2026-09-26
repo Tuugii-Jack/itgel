@@ -31,6 +31,7 @@ export function helperAdminCanAccess(pathname: string): boolean {
   if (
     pathname === "/workspace" ||
     pathname === "/workspace/shop" ||
+    pathname === "/workspace/shop/today" ||
     pathname === "/workspace/shop/account"
   ) {
     return true;

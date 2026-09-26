@@ -24,7 +24,7 @@ export function safeNextPath(raw: string | null | undefined): string | null {
 
 export function workspaceHome(role: string | null | undefined): string {
   if (role === "OWNER") return "/workspace";
-  return role === "LEASING" ? "/workspace/leasing" : "/workspace/shop";
+  return role === "LEASING" ? "/workspace/leasing/today" : "/workspace/shop/today";
 }
 
 export function profileLoginPath(next?: string | null): string {

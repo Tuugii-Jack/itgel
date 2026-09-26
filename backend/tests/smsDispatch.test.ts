@@ -53,6 +53,7 @@ describe('dispatchSms', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.smsDispatch.findFirst.mockResolvedValue(null);
+    mocks.smsDispatch.findUnique.mockResolvedValue(null);
     mocks.smsDispatch.create.mockImplementation(async ({ data }) => row(data));
     mocks.smsDispatch.update.mockImplementation(async ({ data }) => row(data));
     mocks.send.mockResolvedValue({ accepted: true, status: 'queued', id: 'm1' });
@@ -177,6 +178,41 @@ describe('dispatchSms', () => {
       relatedType: 'phone_otp',
       relatedId: 'otp-1',
     });
+    expect(mocks.send).toHaveBeenCalledOnce();
+  });
+
+  it('confirmKey нь preview биш, ижил баталгаажуулалтыг нэг dispatch болгоно', async () => {
+    mocks.smsDispatch.findUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(
+        row({
+          status: 'queued',
+          acceptedAt: new Date(),
+          providerMessageId: 'm1',
+          idempotencyKey: 'confirm:leasing_custom:send-1:99112233',
+        }),
+      );
+    const first = await dispatchSms({
+      channel: 'leasing',
+      purpose: 'leasing_custom',
+      phone: '99112233',
+      text: 'зассан мессеж',
+      relatedType: 'custom',
+      relatedId: '99112233',
+      confirmKey: 'send-1',
+    });
+    expect(first.skipped).toBeUndefined();
+    expect(mocks.send).toHaveBeenCalledWith({ phone: '99112233', text: 'зассан мессеж' });
+    const retry = await dispatchSms({
+      channel: 'leasing',
+      purpose: 'leasing_custom',
+      phone: '99112233',
+      text: 'зассан мессеж',
+      relatedType: 'custom',
+      relatedId: '99112233',
+      confirmKey: 'send-1',
+    });
+    expect(retry.skipped).toBe(true);
     expect(mocks.send).toHaveBeenCalledOnce();
   });
 });

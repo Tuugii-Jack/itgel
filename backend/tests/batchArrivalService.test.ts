@@ -45,6 +45,7 @@ function item(id: string, arrivedQty: number, handedOver = false, qty = 1) {
     arrivedQty,
     arrivedAt: arrivedQty >= qty ? arrivedAt : null,
     handedOverAt: handedOver ? arrivedAt : null,
+    handedOverQty: handedOver ? qty : 0,
     cancelledAt: null,
     selections: {},
     size: null,
@@ -305,5 +306,61 @@ describe('Cumulative batch arrival service', () => {
       registerBatchArrivals('batch', [{ roundId: 'round', selections: {}, arrivedQty: 1 }], 'test'),
     ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('Холбоос дутуу') });
     expect(items.map((row) => row.arrivedQty)).toEqual([1, 0, 0]);
+  });
+
+  it('accepts remaining waves after the batch is at the warehouse without reversing prior qty', async () => {
+    items = [item('1', 0, false, 10)];
+    db.tx.batch.findFirst.mockResolvedValue({
+      id: 'batch', name: 'Wh', stage: 'AT_WAREHOUSE', rounds: [{ id: 'round' }],
+    });
+    const first = await confirmBatchArrivalAdds(
+      'batch',
+      {
+        lines: [{ roundId: 'round', selections: {}, addQty: 4 }],
+        expected: [{ roundId: 'round', selections: {}, arrivedQty: 0 }],
+      },
+      'test',
+    );
+    expect(first.allocated).toBe(4);
+    expect(items[0]!.arrivedQty).toBe(4);
+    const second = await confirmBatchArrivalAdds(
+      'batch',
+      {
+        lines: [{ roundId: 'round', selections: {}, addQty: 3 }],
+        expected: [{ roundId: 'round', selections: {}, arrivedQty: 4 }],
+      },
+      'test',
+    );
+    expect(second.allocated).toBe(3);
+    expect(items[0]!.arrivedQty).toBe(7);
+    const third = await confirmBatchArrivalAdds(
+      'batch',
+      {
+        lines: [{ roundId: 'round', selections: {}, addQty: 3 }],
+        expected: [{ roundId: 'round', selections: {}, arrivedQty: 7 }],
+      },
+      'test',
+    );
+    expect(third.allocated).toBe(3);
+    expect(items[0]!.arrivedQty).toBe(10);
+  });
+
+  it('still allocates remaining cargo after a partial handover', async () => {
+    items = [item('1', 4, true, 4), item('2', 0, false, 6)];
+    db.tx.batch.findFirst.mockResolvedValue({
+      id: 'batch', name: 'Wh', stage: 'AT_WAREHOUSE', rounds: [{ id: 'round' }],
+    });
+    const result = await confirmBatchArrivalAdds(
+      'batch',
+      {
+        lines: [{ roundId: 'round', selections: {}, addQty: 3 }],
+        expected: [{ roundId: 'round', selections: {}, arrivedQty: 4 }],
+      },
+      'test',
+    );
+    expect(result.allocated).toBe(3);
+    expect(items[0]!.arrivedQty).toBe(4);
+    expect(items[0]!.handedOverAt).toEqual(arrivedAt);
+    expect(items[1]!.arrivedQty).toBe(3);
   });
 });

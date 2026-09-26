@@ -21,6 +21,7 @@ import { requireCustomer, actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { reserveReadyStock } from '../../services/readyStock.js';
 import { releaseExpiredReadyHoldsForRounds } from '../../services/stockHold.js';
+import { customerNextActionOf } from '../../modules/orders/customerNextAction.js';
 import { buildTimeline } from '../../services/orders.js';
 import { batchSummary, publicDelivery, publicOrderItem, customerFacingStatusLabel, refundPayoutDatesFor, refundPayoutStatus } from '../../services/serialize.js';
 import { paidPayoutDaySet } from '../../services/returns.js';
@@ -426,6 +427,26 @@ publicOrdersRouter.get(
         delivery: publicDelivery(order.delivery),
         timeline: buildTimeline(order),
         canChooseFulfilment: orderCanChooseFulfilment(order),
+        nextAction: customerNextActionOf({
+          code: order.code,
+          status: order.status,
+          isLeasing: order.isLeasing,
+          items: order.items,
+          totals: computeTotals({
+            subtotal,
+            storageFee,
+            cargoFee,
+            leasingFee: order.leasingFee,
+            paidAmount,
+            refundedAmount,
+            writtenOffAmount: order.writtenOffAmount,
+          }),
+          payPlan: leasing.payPlan,
+          canChooseFulfilment: orderCanChooseFulfilment(order),
+          batchEtaFrom: order.batch?.etaFrom,
+          batchEtaTo: order.batch?.etaTo,
+          readyStock: !order.batch && order.items.every((item) => !item.arriveFrom),
+        }),
       },
     });
   }),

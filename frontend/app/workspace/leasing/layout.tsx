@@ -10,6 +10,7 @@ import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 import { WorkspaceSectionLinks } from "@/features/auth/components/WorkspaceChooser";
 
 const NAV = [
+  { href: "/workspace/leasing/today", label: "Өнөөдрийн ажил" },
   { href: "/workspace/leasing", label: "Захиалга" },
   { href: "/workspace/leasing/ready", label: "Бэлэн бараа" },
   { href: "/workspace/leasing/sales", label: "Борлуулалт" },

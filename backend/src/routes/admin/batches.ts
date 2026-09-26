@@ -107,16 +107,34 @@ adminBatchesRouter.post(
     body: z.object({
       orderId: z.string().min(1).optional(),
       resend: z.boolean().optional(),
+      previewToken: z.string().min(8).max(128),
+      sendKey: z.string().trim().min(8).max(128),
+      commonText: z.string().max(400).optional(),
+      overrides: z
+        .array(z.object({ orderId: z.string().min(1), text: z.string().max(400) }))
+        .max(200)
+        .optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
-    const { orderId, resend } = req.body as { orderId?: string; resend?: boolean };
+    const { orderId, resend, previewToken, commonText, overrides, sendKey } = req.body as {
+      orderId?: string;
+      resend?: boolean;
+      previewToken?: string;
+      commonText?: string;
+      overrides?: { orderId: string; text: string }[];
+      sendKey?: string;
+    };
     res.json({
       data: await sendBatchArrivalSms({
         batchId: param(req, 'id'),
         orderId,
         resend,
         actor: actorOf(req),
+        previewToken,
+        commonText,
+        overrides,
+        sendKey,
       }),
     });
   }),
@@ -127,6 +145,27 @@ adminBatchesRouter.get(
   validate({ params: idParams }),
   asyncHandler(async (req, res) => {
     res.json({ data: await previewBatchArrivalSms(param(req, 'id')) });
+  }),
+);
+
+adminBatchesRouter.post(
+  '/:id/arrival-sms/preview',
+  validate({
+    params: idParams,
+    body: z.object({
+      commonText: z.string().max(400).optional(),
+      overrides: z
+        .array(z.object({ orderId: z.string().min(1), text: z.string().max(400) }))
+        .max(200)
+        .optional(),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      commonText?: string;
+      overrides?: { orderId: string; text: string }[];
+    };
+    res.json({ data: await previewBatchArrivalSms(param(req, 'id'), body) });
   }),
 );
 

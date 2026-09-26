@@ -15,6 +15,7 @@ import {
   publicLeasingContactOf,
   serializeOrderContact,
 } from "../../lib/leasingContact.js";
+import { customerNextActionOf } from "../../modules/orders/customerNextAction.js";
 import { buildTimeline } from "../../services/orders.js";
 import {
   customerFacingStatusLabel,
@@ -326,6 +327,8 @@ publicMeRouter.get(
       data: orders.map((order) => {
         const dates = refundPayoutDatesFor({ items: order.items, refunds: order.payments });
         const refund = refundPayoutStatus(dates, paidDays);
+        const leasing = serializeLeasing(order, gaps);
+        const totals = computeTotals(order);
         return {
           code: order.code,
           status: order.status,
@@ -341,8 +344,8 @@ publicMeRouter.get(
           paidAmount: order.paidAmount,
           refundedAmount: order.refundedAmount,
           dueAmount: order.dueAmount,
-          paymentState: paymentState(computeTotals(order)),
-          ...serializeLeasing(order, gaps),
+          paymentState: paymentState(totals),
+          ...leasing,
           contact: serializeOrderContact({
             kind: orderContactKindOf(order),
             shop: settings,
@@ -356,6 +359,18 @@ publicMeRouter.get(
           refundPaid: refund.refundPaid,
           delivery: publicDelivery(order.delivery),
           timeline: buildTimeline(order),
+          nextAction: customerNextActionOf({
+            code: order.code,
+            status: order.status,
+            isLeasing: order.isLeasing,
+            items: order.items,
+            totals,
+            payPlan: leasing.payPlan,
+            canChooseFulfilment: orderCanChooseFulfilment(order),
+            batchEtaFrom: order.batch?.etaFrom,
+            batchEtaTo: order.batch?.etaTo,
+            readyStock: !order.batch && order.items.every((item) => !item.arriveFrom),
+          }),
           createdAt: order.createdAt.toISOString(),
           handedOverAt: toIso(order.handedOverAt),
         };

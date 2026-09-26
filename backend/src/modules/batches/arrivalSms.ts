@@ -1,12 +1,23 @@
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { isArrivalSmsEligible } from '../../lib/arrivalSms.js';
+import { env } from '../../env.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
+import { assertSmsText, smsPreviewToken, smsSegmentOf } from '../../lib/smsCompose.js';
 import { findOrderIdsForBatch } from '../../services/batches.js';
 import { smsTemplates, type SmsLifecycleStatus } from '../../services/sms.js';
 import { notifyArrival } from '../orders/notify.js';
 
-export async function previewBatchArrivalSms(batchId: string) {
+function arrivalTextOf(code: string, commonText?: string, override?: string) {
+  if (override?.trim()) return assertSmsText(override.replaceAll('{code}', code));
+  if (commonText?.trim()) return assertSmsText(commonText.replaceAll('{code}', code));
+  return smsTemplates.arrived(code);
+}
+
+export async function previewBatchArrivalSms(
+  batchId: string,
+  opts: { commonText?: string; overrides?: { orderId: string; text: string }[] } = {},
+) {
   const batch = await prisma.batch.findFirst({
     where: { id: batchId, deletedAt: null },
     include: { rounds: { where: { deletedAt: null }, select: { id: true } } },
@@ -28,6 +39,7 @@ export async function previewBatchArrivalSms(batchId: string) {
           arrivedQty: true,
           qty: true,
           handedOverAt: true,
+          handedOverQty: true,
         },
       },
     },
@@ -44,12 +56,15 @@ export async function previewBatchArrivalSms(batchId: string) {
     latestByOrder.set(row.relatedId, row.status);
   }
 
+  const overrideMap = new Map((opts.overrides ?? []).map((row) => [row.orderId, row.text]));
   const recipients: {
     orderId: string;
     code: string;
     name: string | null;
     phone: string;
     text: string;
+    chars: number;
+    segments: number;
   }[] = [];
   const skipped: { orderId: string; code: string; reason: string }[] = [];
   for (const order of orders) {
@@ -70,15 +85,28 @@ export async function previewBatchArrivalSms(batchId: string) {
       skipped.push({ orderId: order.id, code: order.code, reason: 'Хүргэлт хүлээгдэж байна' });
       continue;
     }
+    const text = arrivalTextOf(order.code, opts.commonText, overrideMap.get(order.id));
+    const seg = smsSegmentOf(text);
     recipients.push({
       orderId: order.id,
       code: order.code,
       name: order.customer.name,
       phone: order.customer.phone,
-      text: smsTemplates.arrived(order.code),
+      text,
+      chars: seg.chars,
+      segments: seg.segments,
     });
   }
-  return { recipients, skipped };
+  return {
+    sender: env.SHOP_SMS_FROM ?? null,
+    channel: 'shop' as const,
+    recipients,
+    skipped,
+    previewToken: smsPreviewToken(
+      recipients.map((row) => ({ id: row.orderId, text: row.text })),
+      { channel: 'shop', relatedType: 'order' },
+    ),
+  };
 }
 
 export async function sendBatchArrivalSms(opts: {
@@ -86,8 +114,22 @@ export async function sendBatchArrivalSms(opts: {
   orderId?: string;
   resend?: boolean;
   actor: string;
+  previewToken?: string;
+  commonText?: string;
+  overrides?: { orderId: string; text: string }[];
+  sendKey?: string;
 }) {
   const { batchId, orderId, resend, actor } = opts;
+  const preview = await previewBatchArrivalSms(batchId, {
+    commonText: opts.commonText,
+    overrides: opts.overrides,
+  });
+  if (!opts.sendKey?.trim()) {
+    throw badRequest('Илгээлтийн түлхүүр алга.');
+  }
+  if (opts.previewToken !== preview.previewToken) {
+    throw conflict('Preview-ийн дараа хүлээн авагч эсвэл мессеж өөрчлөгдсөн. Дахин шалгана уу.');
+  }
   const batch = await prisma.batch.findFirst({
     where: { id: batchId, deletedAt: null },
     include: { rounds: { where: { deletedAt: null }, select: { id: true } } },
@@ -102,7 +144,11 @@ export async function sendBatchArrivalSms(opts: {
   if (orderId && !activeIds.includes(orderId)) {
     throw badRequest('Энэ захиалга энэ багцад алга.');
   }
-  const targetIds = orderId ? [orderId] : activeIds;
+  const targetRecipients = orderId
+    ? preview.recipients.filter((row) => row.orderId === orderId)
+    : preview.recipients;
+  const textByOrder = new Map(targetRecipients.map((row) => [row.orderId, row.text]));
+  const targetIds = orderId ? [orderId] : targetRecipients.map((row) => row.orderId);
   const orders = await prisma.order.findMany({
     where: {
       id: { in: targetIds },
@@ -117,6 +163,7 @@ export async function sendBatchArrivalSms(opts: {
           arrivedQty: true,
           qty: true,
           handedOverAt: true,
+          handedOverQty: true,
         },
       },
     },
@@ -136,7 +183,11 @@ export async function sendBatchArrivalSms(opts: {
       skipped.push(order.id);
       continue;
     }
-    const result = await notifyArrival(order, { resend: Boolean(resend) && forceSingle });
+    const result = await notifyArrival(order, {
+      resend: Boolean(resend) && forceSingle,
+      text: textByOrder.get(order.id),
+      confirmKey: opts.sendKey,
+    });
     if (result.skipped) skipped.push(order.id);
     else if (result.ok) {
       sent.push(order.id);

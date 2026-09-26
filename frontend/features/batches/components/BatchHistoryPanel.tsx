@@ -84,12 +84,55 @@ export function BatchHistoryPanel({ batch }: { batch: AdminBatchDetail }) {
       ) : (
         <div className="flex flex-col gap-2">
           {logs.map((log) => {
-            const after = log.after as { reason?: unknown } | null;
+            const after = log.after as {
+              reason?: unknown;
+              mode?: unknown;
+              allocated?: unknown;
+              released?: unknown;
+              lines?: unknown;
+              allocations?: unknown;
+            } | null;
             const reason = typeof after?.reason === "string" ? after.reason.trim() : "";
+            const lines = Array.isArray(after?.lines) ? after.lines : [];
+            const allocations = Array.isArray(after?.allocations) ? after.allocations : [];
             return (
               <div key={log.id} className="rounded-[10px] border border-line px-3 py-2">
                 <div className="text-[14px]">{ACTION_LABEL[log.action] ?? log.action}</div>
                 {reason ? <div className="mt-0.5 text-[13px] text-ink-2">{reason}</div> : null}
+                {log.action === "BATCH_ARRIVAL" && lines.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-0.5 text-[13px] text-ink-2">
+                    {lines.map((line, i) => {
+                      const row = line as {
+                        selections?: Record<string, string>;
+                        addQty?: number;
+                        arrivedQty?: number;
+                      };
+                      const sel = row.selections
+                        ? Object.values(row.selections).filter(Boolean).join(" / ")
+                        : "";
+                      const add = typeof row.addQty === "number" ? row.addQty : 0;
+                      const total = typeof row.arrivedQty === "number" ? row.arrivedQty : null;
+                      return (
+                        <div key={`${log.id}-line-${i}`}>
+                          {sel || "Үндсэн"} · {add > 0 ? `+${add}` : add} ш
+                          {total != null ? ` · нийт ${total}` : ""}
+                        </div>
+                      );
+                    })}
+                    {typeof after?.allocated === "number" && after.allocated > 0 && (
+                      <div className="text-[12px] text-muted">Хуваарилсан {after.allocated} ш</div>
+                    )}
+                    {allocations.slice(0, 8).map((row, i) => {
+                      const a = row as { orderCode?: string; add?: number };
+                      if (!a.orderCode || !a.add) return null;
+                      return (
+                        <div key={`${log.id}-a-${i}`} className="tnum text-[12px] text-muted">
+                          {a.orderCode}: +{a.add}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <div className="mt-0.5 text-[12px] text-muted">
                   {actorLabel(log.actor)} · {dayLabel(log.createdAt)}
                 </div>

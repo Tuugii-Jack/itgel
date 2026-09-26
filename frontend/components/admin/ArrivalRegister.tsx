@@ -41,10 +41,7 @@ export function ArrivalRegister({
   const [noteRoundId, setNoteRoundId] = useState("");
   const [noteKey, setNoteKey] = useState("");
 
-  const canEdit = batch.stage === "IN_TRANSIT";
-  const products = batch.products.filter((p) => (p.variants?.length ?? 0) > 0);
-  const firstVariant = products[0]?.variants?.[0];
-
+  const linked = (batch.products ?? []).some((p) => (p.variants?.length ?? 0) > 0);
   const remainingTotal = useMemo(
     () =>
       batch.products.reduce(
@@ -61,6 +58,11 @@ export function ArrivalRegister({
       ),
     [batch.products],
   );
+  const canReceive = linked && remainingTotal > 0;
+  const canCorrect = linked && (batch.stage === "IN_TRANSIT" || batch.stage === "AT_WAREHOUSE");
+  const canEdit = correcting ? canCorrect : canReceive;
+  const products = batch.products.filter((p) => (p.variants?.length ?? 0) > 0);
+  const firstVariant = products[0]?.variants?.[0];
 
   const addValueOf = (p: BatchProduct, v: BatchArrivalVariant) => {
     const key = draftKey(p.roundId, v.key);
@@ -224,16 +226,20 @@ export function ArrivalRegister({
     <Card className="mb-4 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-[16px] font-medium">Ачаа хүлээн авах</div>
+          <div className="text-[16px] font-medium">
+            {arrivedTotal > 0 && remainingTotal > 0 ? "Үлдсэн ачаа хүлээн авах" : "Ачаа хүлээн авах"}
+          </div>
           <p className="m-0 mt-1 text-[13px] text-muted">
-            {canEdit
-              ? "Мөр бүрт «Энэ удаа ирсэн тоо»-г оруулна. Түрүүлж захиалсан захиалгад эхлээд хуваарилна. Дараагийн ирэлт үлдсэнийг нэмнэ."
-              : batch.stage === "AT_WAREHOUSE"
-                ? `Агуулахад орсон тул ирсэн тоо түгжигдсэн. Ирсэн ${arrivedTotal} ш · дутуу ${remainingTotal} ш.`
-                : `Ирсэн ${arrivedTotal} ш · захиалсан дундаас ${remainingTotal} ш дутуу.`}
+            {correcting
+              ? "Алдаа залруулах: нийт ирсэн тоог засана. Өмнөх олголт, төлбөр буцаахгүй."
+              : canReceive
+                ? "Мөр бүрт хүлээгдэж буй, өмнө ирсэн, дутуу, «Энэ удаа ирсэн» тоо харагдана. Нэмэгдэх тоо л хуваарилагдана."
+                : remainingTotal <= 0
+                  ? `Бүх холбосон бараа ирсэн. Ирсэн ${arrivedTotal} ш.`
+                  : `Ирсэн ${arrivedTotal} ш · дутуу ${remainingTotal} ш.`}
           </p>
         </div>
-        {canEdit && (
+        {canCorrect && (
           <Button
             size="sm"
             variant="outline"
@@ -254,7 +260,7 @@ export function ArrivalRegister({
             key={p.roundId}
             product={p}
             valueOf={(v) => (correcting ? totalValueOf(p, v) : addValueOf(p, v))}
-            canEdit={canEdit}
+            canEdit={correcting ? canCorrect : canReceive}
             remainingHint={!correcting}
             onChange={(key, value) => {
               setPreview(null);
@@ -264,7 +270,7 @@ export function ArrivalRegister({
         ))}
       </div>
 
-      {canEdit && !correcting && preview && (
+      {canReceive && !correcting && preview && (
         <div className="mt-4 rounded-[10px] border border-line bg-surface p-3">
           <div className="text-[14px] font-medium">Хуваарилалтын preview</div>
           <p className="mt-1 mb-3 text-[13px] text-muted">{preview.fifoNote}</p>
@@ -289,7 +295,7 @@ export function ArrivalRegister({
         </div>
       )}
 
-      {canEdit && (
+      {(canReceive || canCorrect) && (
         <div className="mt-4 rounded-[10px] border border-line p-3">
           <div className="text-[14px] font-medium">Гэмтэл / зөрүү</div>
           <p className="mt-1 mb-2 text-[12px] text-muted">
@@ -340,13 +346,13 @@ export function ArrivalRegister({
         </div>
       )}
 
-      {canEdit && correcting && (
+      {canCorrect && correcting && (
         <div className="mt-3">
           <Input value={reason} onChange={setReason} placeholder="Засварлах шалтгаан" />
         </div>
       )}
 
-      {canEdit && (
+      {((canReceive && !correcting) || (canCorrect && correcting)) && (
         <div className="mt-3 flex flex-wrap justify-end gap-2">
           {correcting ? (
             <Button onClick={() => void saveCorrection()} loading={busy} className="min-w-[160px]">
@@ -354,7 +360,7 @@ export function ArrivalRegister({
             </Button>
           ) : preview ? (
             <Button onClick={() => void confirmAdds()} loading={busy} className="min-w-[160px]">
-              Ачаа хүлээн авах
+              {arrivedTotal > 0 ? "Үлдсэн ачаа хүлээн авах" : "Ачаа хүлээн авах"}
             </Button>
           ) : (
             <Button onClick={() => void runPreview()} loading={busy} className="min-w-[160px]">
@@ -400,7 +406,7 @@ function ProductArrivalRows({
         <div className="grid grid-cols-[minmax(0,1fr)_64px_64px_88px_56px] gap-2 border-b border-line bg-surface px-3 py-2 text-[12px] text-muted">
           <span>SKU / өнгө / хэмжээ</span>
           <span className="text-right">Хүлээгдэж</span>
-          <span className="text-right">Ирсэн</span>
+          <span className="text-right">Өмнө ирсэн</span>
           <span className="text-right">{remainingHint ? "Энэ удаа" : "Нийт ирсэн"}</span>
           <span className="text-right">Дутуу</span>
         </div>
@@ -411,7 +417,8 @@ function ProductArrivalRows({
           const remaining = remainingHint
             ? Math.max(0, v.remainingQty - entered)
             : Math.max(0, v.orderedQty - entered);
-          const done = remaining <= 0;
+          const done = remainingHint ? v.remainingQty <= 0 : remaining <= 0;
+          const rowEditable = canEdit && (remainingHint ? v.remainingQty > 0 : true);
           return (
             <div
               key={v.key}
@@ -423,9 +430,11 @@ function ProductArrivalRows({
                   <div className="text-[12px] text-muted">{locked} ш өгсөн</div>
                 )}
               </div>
-              <div className="tnum text-right text-[13px]">{v.orderedQty}</div>
+              <div className="tnum text-right text-[13px]">
+                {remainingHint ? v.remainingQty : v.orderedQty}
+              </div>
               <div className="tnum text-right text-[13px]">{v.arrivedQty}</div>
-              {canEdit ? (
+              {rowEditable ? (
                 <Input
                   value={raw}
                   onChange={(val) => onChange(v.key, val)}
@@ -434,10 +443,12 @@ function ProductArrivalRows({
                   aria-label={`${product.name} ${v.label || "үндсэн"} энэ удаа ирсэн`}
                 />
               ) : (
-                <div className="tnum text-right text-[13px]">{v.arrivedQty}</div>
+                <div className="tnum text-right text-[13px] text-muted">
+                  {remainingHint && done ? "Бүрэн" : remainingHint ? "—" : v.arrivedQty}
+                </div>
               )}
               <div className={`tnum text-right text-[13px] ${done ? "text-ok" : "text-warn"}`}>
-                {remaining}
+                {remainingHint && done ? 0 : remaining}
               </div>
             </div>
           );

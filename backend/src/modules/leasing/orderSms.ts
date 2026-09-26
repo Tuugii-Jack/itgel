@@ -61,6 +61,31 @@ export async function payReminderPreview(orderId: string, auth: LeasingAuth) {
   };
 }
 
+export function filledScheduleSms(opts: {
+  kind: 'due_today' | 'overdue' | 'arrived_unpaid';
+  name: string | null;
+  dueAmount: number;
+  plan: ReturnType<typeof buildLeasingPayPlan>;
+  template: string;
+  override?: string;
+}): { text: string | null; error?: string } {
+  if (opts.override != null) {
+    try {
+      return { text: assertSendSmsText(opts.override) };
+    } catch (error) {
+      return {
+        text: null,
+        error: error instanceof Error ? error.message : 'Мессеж буруу.',
+      };
+    }
+  }
+  const filled =
+    opts.kind === 'arrived_unpaid'
+      ? arrivedUnpaidReminderText(opts.name, opts.dueAmount, opts.template)
+      : scheduleReminderText(opts.kind, opts.name, opts.plan, opts.template);
+  return { text: filled ? stripSmsUrls(filled) : null };
+}
+
 export function arrivedUnpaidReminderText(name: string | null, dueAmount: number, template: string): string | null {
   const amount = Math.max(0, dueAmount);
   if (amount <= 0) return null;

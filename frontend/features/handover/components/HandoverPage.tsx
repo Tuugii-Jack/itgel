@@ -258,6 +258,9 @@ export function HandoverPage() {
 
           {search.scanning ? (
             <div className="mb-4">
+              <p className="mt-0 mb-3 text-[13px] leading-[1.4] text-muted">
+                Камер ажиллахгүй бол доор захиалгын кодыг гараар оруулна.
+              </p>
               <QrScanner onResult={search.lookup} />
               <Button full variant="outline" className="mt-3" onClick={() => search.setScanning(false)}>
                 Скан хаах

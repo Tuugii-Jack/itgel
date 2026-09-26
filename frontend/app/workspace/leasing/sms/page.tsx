@@ -36,20 +36,52 @@ export default function LeasingSmsPage() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{
+    sender: string | null;
+    text: string;
+    chars: number;
+    segments: number;
+    phones: string[];
+    previewToken: string;
+  } | null>(null);
 
   const parsed = useMemo(() => parsePhones(rawPhones), [rawPhones]);
   const overLimit = parsed.phones.length > MAX_PHONES;
   const phones = overLimit ? parsed.phones.slice(0, MAX_PHONES) : parsed.phones;
   const chars = [...text].length;
-  const canSend =
+  const canPreview =
     phones.length >= 1 && !overLimit && text.trim().length >= 1 && chars <= MAX_CHARS;
 
-  const send = async () => {
-    if (!canSend || busy) return;
+  const preview = async () => {
+    if (!canPreview || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await leasingApi.sendSms(phones, text.trim());
+      const data = await leasingApi.previewSms(phones, text.trim());
+      setDraft({
+        sender: data.sender,
+        text: data.text,
+        chars: data.chars,
+        segments: data.segments,
+        phones: data.phones,
+        previewToken: data.previewToken,
+      });
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : "Урьдчилан харж чадсангүй.";
+      setError(message);
+      toast.error(message);
+      setDraft(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const send = async () => {
+    if (!draft || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await leasingApi.sendSms(draft.phones, draft.text, draft.previewToken, crypto.randomUUID());
       const fail = result.failed.length;
       if (fail > 0) {
         setError(
@@ -59,6 +91,7 @@ export default function LeasingSmsPage() {
         );
         toast.error("Зарим SMS илгээгдсэнгүй.");
         setRawPhones(result.failed.map((f) => f.phone).join("\n"));
+        setDraft(null);
       } else {
         const note = smsToastForSend({
           sent: result.sent,
@@ -70,6 +103,7 @@ export default function LeasingSmsPage() {
         toast.success(note?.message ?? smsStatusLabel("queued"));
         setRawPhones("");
         setText("");
+        setDraft(null);
       }
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Илгээж чадсангүй.";
@@ -93,7 +127,10 @@ export default function LeasingSmsPage() {
         >
           <Textarea
             value={rawPhones}
-            onChange={setRawPhones}
+            onChange={(v) => {
+              setRawPhones(v);
+              setDraft(null);
+            }}
             placeholder={"99112233\n88112233"}
             rows={4}
             resize="y"
@@ -124,16 +161,40 @@ export default function LeasingSmsPage() {
         >
           <Textarea
             value={text}
-            onChange={(v) => setText([...v].slice(0, MAX_CHARS).join(""))}
+            onChange={(v) => {
+              setText([...v].slice(0, MAX_CHARS).join(""));
+              setDraft(null);
+            }}
             placeholder="Жишээ: itgel PH-XXXXXX төлбөрөө төлнө үү."
             rows={5}
             resize="y"
           />
         </Field>
         {error && <ErrorNote>{error}</ErrorNote>}
-        <Button full onClick={() => void send()} loading={busy} disabled={!canSend}>
-          {phones.length > 1 ? `${phones.length} дугаар руу илгээх` : "Илгээх"}
-        </Button>
+        {!draft ? (
+          <Button full onClick={() => void preview()} loading={busy} disabled={!canPreview}>
+            Урьдчилан харах
+          </Button>
+        ) : (
+          <div className="flex flex-col gap-3 rounded-[10px] border border-line bg-surface p-3">
+            <div className="text-[14px] font-medium">Илгээхээс өмнө шалгах</div>
+            <div className="text-[13px] text-ink-2">
+              Суваг: лизинг{draft.sender ? ` · ${draft.sender}` : ""}
+            </div>
+            <div className="text-[13px] leading-[1.5]">{draft.text}</div>
+            <div className="tnum text-[12px] text-muted">
+              {draft.chars} тэмдэгт · {draft.segments} SMS · {draft.phones.length} дугаар
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" full onClick={() => setDraft(null)} disabled={busy}>
+                Засах
+              </Button>
+              <Button full onClick={() => void send()} loading={busy}>
+                {draft.phones.length} дугаарт илгээх
+              </Button>
+            </div>
+          </div>
+        )}
       </Card>
     </div>
   );

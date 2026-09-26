@@ -6,6 +6,35 @@ export const adminReportsApi = {
     request<AdminSummary>("/admin/reports/summary", adminAuth).then(
       (r) => r.data,
     ),
+  todayWork: (query?: { day?: string; ownerAdminId?: string }) =>
+    request<{ day: string; cards: import("@/features/work/TodayWorkBoard").TodayCard[] }>(
+      "/admin/work/today",
+      { ...adminAuth, query },
+    ).then((r) => r.data),
+
+  todayWorkRows: (query: {
+    card: string;
+    day?: string;
+    ownerAdminId?: string;
+    page?: number;
+  }) =>
+    request<
+      {
+        id: string;
+        code?: string;
+        amount?: number;
+        label?: string;
+        href?: string;
+        at?: string | null;
+        purpose?: string;
+        status?: string;
+        error?: string;
+        createdAt?: string;
+      }[]
+    >("/admin/work/today", { ...adminAuth, query }).then((r) => ({
+      data: r.data,
+      meta: r.meta as { total: number; page: number; pageSize: number; pages: number },
+    })),
   revenue: (period: "3m" | "6m" | "1y", productIds?: string[]) =>
     request<RevenueReport>("/admin/reports/revenue", {
       ...adminAuth,

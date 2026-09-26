@@ -59,14 +59,27 @@ export const adminBatchesApi = {
       },
     ).then((r) => r.data),
 
-  previewBatchArrivalSms: (batchId: string) =>
-    request<ArrivalSmsPreview>(`/admin/batches/${batchId}/arrival-sms/preview`, adminAuth).then(
-      (r) => r.data,
-    ),
+  previewBatchArrivalSms: (
+    batchId: string,
+    body?: { commonText?: string; overrides?: { orderId: string; text: string }[] },
+  ) =>
+    request<ArrivalSmsPreview>(
+      body
+        ? `/admin/batches/${batchId}/arrival-sms/preview`
+        : `/admin/batches/${batchId}/arrival-sms/preview`,
+      body ? { ...adminAuth, method: "POST", body } : adminAuth,
+    ).then((r) => r.data),
 
   sendBatchArrivalSms: (
     batchId: string,
-    body?: { orderId?: string; resend?: boolean },
+    body?: {
+      orderId?: string;
+      resend?: boolean;
+      previewToken?: string;
+      sendKey: string;
+      commonText?: string;
+      overrides?: { orderId: string; text: string }[];
+    },
   ) =>
     request<{
       sent: number;

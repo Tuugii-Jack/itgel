@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FulfilmentChooser } from "@/components/FulfilmentChooser";
+import { PickupQrCard } from "@/components/shop/PickupQrCard";
 import { PaymentPanel } from "@/components/PaymentPanel";
 import { OrderContactCard } from "@/components/shop/OrderContactCard";
 import { Badge, Button, ErrorNote, Spinner } from "@/components/ui";
@@ -127,8 +128,9 @@ function TrackDetail({ code }: { code: string }) {
   }
 
   const dueHead = leasingDueHeadline(order);
-  const stages = buildOrderStages(order.status);
-  const eta = etaOf(order);
+  const next = order.nextAction;
+  const stages = next?.progress?.length ? next.progress : buildOrderStages(order.status);
+  const eta = etaOf(order, next);
   const goodsReady =
     order.canChooseFulfilment || order.items.some(itemNeedsFulfilment);
   const leasingHold = leasingHoldsGoods(order);
@@ -174,7 +176,10 @@ function TrackDetail({ code }: { code: string }) {
 
       {/* Гурван шатны зурвас ба ирэх огноо */}
       <div className="px-4 pt-6 lg:rounded-[12px] lg:border lg:border-line lg:bg-surface lg:px-6 lg:py-6 lg:pt-6">
-        <div className="grid grid-cols-3 gap-2 lg:gap-3">
+        <div
+          className="grid gap-2 lg:gap-3"
+          style={{ gridTemplateColumns: `repeat(${Math.max(stages.length, 1)}, minmax(0, 1fr))` }}
+        >
           {stages.map((stage) => (
             <div key={stage.key} className="flex flex-col gap-2">
               <div className={`h-1 rounded-full ${stage.reached ? "bg-ink" : "bg-line"}`} />
@@ -185,13 +190,43 @@ function TrackDetail({ code }: { code: string }) {
           ))}
         </div>
 
-        {/* Мобайл — тусдаа карт; laptop — ижил картын дотор, товч баруун талд */}
+        {next && (
+          <div className="mt-5 rounded-[12px] border border-line bg-bg p-4 lg:bg-transparent">
+            <div className="text-[15px] font-medium">{next.title}</div>
+            <p className="mt-1 mb-0 text-[14px] leading-[1.5] text-ink-2">{next.detail}</p>
+            {next.nextPayAmount != null && next.nextPayAmount > 0 && (
+              <div className="mt-2 tnum text-[14px] text-warn">
+                {money(next.nextPayAmount)}
+                {next.nextPayAt ? ` · ${dayLabel(next.nextPayAt)}` : ""}
+              </div>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {next.cta === "pay" && store && (unpaid || leasingHold) && (
+                <span className="text-[13px] text-muted">Төлбөрийг доор төлнө.</span>
+              )}
+              {next.cta === "pickup" && (
+                <span className="text-[13px] text-muted">Олголтын QR-ийг доор харна.</span>
+              )}
+              {next.cta === "fulfilment" && canCollect && (
+                <Button size="bar" onClick={() => setCollecting(true)}>
+                  Авах аргаа сонгох
+                </Button>
+              )}
+              {next.cta === "contact" && order.contact && (
+                <span className="text-[13px] text-muted">Холбоо барих мэдээлэл доор байна.</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {(etaFromShown(eta) || canCollect || (leasingHold && goodsReady)) && (
         <div
           className={`mt-5 rounded-[12px] border border-line bg-surface p-4 lg:mt-5 lg:flex lg:items-end lg:justify-between lg:gap-6 lg:rounded-none lg:border-0 lg:p-0 ${
             canCollect ? "cursor-pointer" : ""
           }`}
           onClick={canCollect ? () => setCollecting(true) : undefined}
         >
+          {etaFromShown(eta) && (
           <div className="flex flex-col gap-1">
             <span className="text-[13px] text-muted">{eta.label}</span>
             <span className="tnum text-[20px] lg:text-[24px]">{eta.value}</span>
@@ -201,6 +236,7 @@ function TrackDetail({ code }: { code: string }) {
                 : eta.note}
             </span>
           </div>
+          )}
 
           {leasingHold && goodsReady && (
             <div className="mt-4 text-[14px] font-medium text-danger lg:mt-0 lg:max-w-[240px] lg:text-right">
@@ -219,6 +255,7 @@ function TrackDetail({ code }: { code: string }) {
             </Button>
           )}
         </div>
+        )}
       </div>
 
       {/* Агуулахын хадгалалт — хүргэлтээр авна гэснээс хойш харагдахгүй */}
@@ -296,6 +333,12 @@ function TrackDetail({ code }: { code: string }) {
             onPayAttempt={markPayAttempt}
             feeHold={feeHold}
           />
+        </div>
+      )}
+
+      {next?.pickupQr && (
+        <div className="px-4 pt-6 lg:px-0 lg:pt-0">
+          <PickupQrCard value={next.pickupQr} code={order.code} />
         </div>
       )}
 
@@ -415,12 +458,17 @@ function TrackDetail({ code }: { code: string }) {
                   {item.cancelled || item.itemStatus === "cancelled" ? (
                     <Badge tone="danger">Цуцлагдсан</Badge>
                   ) : item.itemStatus === "handed_over" ? (
-                    <Badge tone="neutral">Авсан</Badge>
-                  ) : item.itemStatus === "arrived" ? (
-                    <Badge tone="ok">Ирсэн</Badge>
+                    <Badge tone="neutral">
+                      Авсан {item.handedOverQty ?? item.qty}/{item.qty}
+                    </Badge>
+                  ) : (item.pickableQty ?? 0) > 0 ? (
+                    <Badge tone="ok">
+                      Авах {item.pickableQty}/{item.qty}
+                      {(item.waitingQty ?? 0) > 0 ? ` · ирээгүй ${item.waitingQty}` : ""}
+                    </Badge>
                   ) : (item.arrivedQty ?? 0) > 0 ? (
                     <Badge tone="warn">
-                      {item.arrivedQty}/{item.qty} ирсэн
+                      Ирсэн {item.arrivedQty}/{item.qty} · олгосон {item.handedOverQty ?? 0}
                     </Badge>
                   ) : (
                     <Badge tone="warn">Хүлээж байна</Badge>
@@ -538,8 +586,11 @@ function TrackDetail({ code }: { code: string }) {
   );
 }
 
-/** Дизайны ETA карт — төлвөөс хамаарч гарчиг, утга, тайлбар өөрчлөгдөнө. */
-function etaOf(order: PublicOrder): { label: string; value: string; note: string } {
+/** Дизайны ETA карт — бодит огноо байвал л харуулна, зохиохгүй. */
+function etaOf(
+  order: PublicOrder,
+  next?: PublicOrder["nextAction"],
+): { label: string; value: string; note: string; hasDate: boolean } {
   if (order.status === "CANCELLED") {
     return {
       label: "Төлөв",
@@ -547,6 +598,7 @@ function etaOf(order: PublicOrder): { label: string; value: string; note: string
       note: order.refundPayoutOn
         ? refundPayoutLabel(order.refundPayoutOn, order.refundPaid)
         : "Энэ захиалга цуцлагдсан. Асуулт байвал бидэнтэй холбогдоно уу.",
+      hasDate: false,
     };
   }
   if (order.status === "HANDED_OVER") {
@@ -554,8 +606,21 @@ function etaOf(order: PublicOrder): { label: string; value: string; note: string
       label: "Хүлээлгэн өгсөн",
       value: "Дууссан",
       note: "Барааг хүлээлгэн өгсөн. Танд баярлалаа.",
+      hasDate: false,
     };
   }
+
+  const from = next?.etaFrom ?? null;
+  const to = next?.etaTo ?? null;
+  if (from || to) {
+    return {
+      label: "Ирэх төлөвлөгөө",
+      value: from && to && from !== to ? rangeLabel(from, to) : dayLabel((to ?? from)!),
+      note: "Энэ нь төлөвлөсөн огноо — ирснийг баталгаажуулаагүй.",
+      hasDate: true,
+    };
+  }
+
   if (order.status === "ARRIVED") {
     return {
       label: "Агуулахад",
@@ -563,20 +628,21 @@ function etaOf(order: PublicOrder): { label: string; value: string; note: string
       note: order.fulfilment
         ? "Авах аргаа сонгосон. Товлосон өдөр гарт очно."
         : "Бараа ирлээ. Авах аргаа сонгоно уу.",
+      hasDate: false,
     };
   }
 
-  const arrived = order.timeline.find((s) => s.key === "arrived");
-  const inTransit = order.timeline.find((s) => s.key === "in_transit");
-  const to = arrived?.estimatedAt ?? arrived?.at ?? null;
-  const from = inTransit?.estimatedAt ?? to;
-
   return {
     label: "Гарт очих",
-    value: from && to ? rangeLabel(from, to) : "Тодорхойгүй",
+    value: "",
     note:
       order.status === "NEW"
         ? "Төлбөр баталгаажмагц захиалга боловсруулагдана."
         : "Бараа агуулахад ирэхэд танд мэдэгдэнэ.",
+    hasDate: false,
   };
+}
+
+function etaFromShown(eta: { hasDate: boolean; value: string }): boolean {
+  return eta.hasDate && Boolean(eta.value);
 }

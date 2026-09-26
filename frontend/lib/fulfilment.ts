@@ -11,7 +11,7 @@ export function itemAccruesStorage(item: OrderItem): boolean {
     return false;
   }
   if (item.fulfilment === "DELIVERY") return false;
-  return item.itemStatus === "arrived" || (item.arrivedQty ?? 0) > 0;
+  return item.itemStatus === "arrived" || (item.pickableQty ?? 0) > 0 || (item.arrivedQty ?? 0) > (item.handedOverQty ?? 0);
 }
 
 export function orderAccruesStorage(order: { items: OrderItem[] }): boolean {
@@ -24,7 +24,7 @@ export function itemNeedsFulfilment(item: OrderItem): boolean {
     return false;
   }
   if (item.fulfilment) return false;
-  return item.itemStatus === "arrived" || (item.arrivedQty ?? 0) > 0;
+  return item.itemStatus === "arrived" || (item.pickableQty ?? 0) > 0 || (item.arrivedQty ?? 0) > (item.handedOverQty ?? 0);
 }
 
 export function orderHasPickup(order: {

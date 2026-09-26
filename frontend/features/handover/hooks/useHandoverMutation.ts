@@ -42,19 +42,29 @@ export function useHandoverMutation({
 }) {
   const toast = useToast();
 
-  const markReceived = async () => {
-    if (!activeCustomer || pickableSelected.length === 0) return;
+  const markReceived = async (lines?: { itemId: string; qty: number; expectedHandedQty: number }[]) => {
+    if (!activeCustomer) return;
+    const payload =
+      lines && lines.length > 0
+        ? lines
+        : pickableSelected.map((i) => ({
+            itemId: i.id,
+            qty: i.pickableQty ?? 1,
+            expectedHandedQty: i.handedOverQty ?? 0,
+          }));
+    if (payload.length === 0) return;
     if (dueForSelected > 0 && !payMethod) return;
     setBusy(true);
     setError(null);
     try {
       const result = await adminApi.handoverPartial({
-        itemIds: pickableSelected.map((i) => i.id),
+        items: payload,
         collectedAmount: dueForSelected > 0 ? dueForSelected : 0,
         method: dueForSelected > 0 ? (payMethod ?? undefined) : undefined,
+        idempotencyKey: crypto.randomUUID(),
       });
-      setDone(`${result.itemCount} бараа өгсөн`);
-      toast.success(`${result.itemCount} бараа хүлээлгэж өглөө.`);
+      setDone(`${result.pieceCount ?? result.itemCount} ширхэг өгсөн`);
+      toast.success(`${result.pieceCount ?? result.itemCount} ширхэг хүлээлгэж өглөө.`);
       setActiveCustomer(null);
       setCustomers(null);
       setCustomerQ("");
@@ -70,21 +80,33 @@ export function useHandoverMutation({
     }
   };
 
-  const complete = async () => {
+  const complete = async (lines?: { itemId: string; qty: number; expectedHandedQty: number }[]) => {
     if (!found) return;
     const shopDue = shopDueOf(found);
     if (shopDue > 0 && !payMethod) return;
+    const payload =
+      lines && lines.length > 0
+        ? lines
+        : (found.pickableItemIds ?? found.items.filter((i) => (i.pickableQty ?? 0) > 0).map((i) => i.id)).map((itemId) => {
+            const item = found.items.find((row) => row.id === itemId);
+            return {
+              itemId,
+              qty: item?.pickableQty ?? 1,
+              expectedHandedQty: item?.handedOverQty ?? 0,
+            };
+          });
+    if (payload.length === 0) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await adminApi.handoverComplete(
-        found.id,
-        shopDue > 0
-          ? { collectedAmount: shopDue, method: payMethod ?? "CASH" }
-          : { collectedAmount: 0 },
-      );
-      setDone(result.code);
-      toast.success(`${result.code} хүлээлгэж өглөө.`);
+      const result = await adminApi.handoverPartial({
+        items: payload,
+        collectedAmount: shopDue > 0 ? shopDue : 0,
+        method: shopDue > 0 ? (payMethod ?? undefined) : undefined,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      setDone(`${result.pieceCount ?? result.itemCount} ширхэг өгсөн`);
+      toast.success(`${found.code} · ${result.pieceCount ?? result.itemCount} ширхэг хүлээлгэж өглөө.`);
       setFound(null);
       setCode("");
       await loadPending();

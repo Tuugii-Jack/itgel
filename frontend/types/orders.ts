@@ -22,8 +22,12 @@ export interface OrderItem {
   size: string | null;
   color: string | null;
   qty: number;
-  /** Хэсэгчилсэн ирэлт — 0..qty. Бүтэн ирэхэд itemStatus = arrived. */
+  /** Хэсэгчилсэн ирэлт — 0..qty. */
   arrivedQty?: number;
+  /** Хэсэгчилсэн олголт — 0..qty. Огноог тоо мэт бүү ашигла. */
+  handedOverQty?: number;
+  pickableQty?: number;
+  waitingQty?: number;
   unitPrice: number;
   total: number;
   /** Мөрийн карго — тойргийн нэгж карго × ширхэг. Хүргэлтээр авахад төлнө. */
@@ -128,6 +132,18 @@ export interface PublicOrder {
   batch: BatchSummary | null;
   delivery: DeliveryInfo | null;
   timeline: TimelineStep[];
+  nextAction?: {
+    key: string;
+    title: string;
+    detail: string;
+    cta: "pay" | "contact" | "pickup" | "fulfilment" | null;
+    nextPayAmount: number | null;
+    nextPayAt: string | null;
+    etaFrom: string | null;
+    etaTo: string | null;
+    pickupQr: string | null;
+    progress: { key: string; label: string; reached: boolean; current: boolean }[];
+  };
 }
 
 export interface MyOrder {
@@ -160,6 +176,8 @@ export interface MyOrder {
   timeline: TimelineStep[];
   createdAt: string;
   handedOverAt: string | null;
+  contact?: PublicOrder["contact"];
+  nextAction?: PublicOrder["nextAction"];
 }
 
 export interface CreatedOrder {

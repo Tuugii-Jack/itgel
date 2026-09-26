@@ -163,11 +163,16 @@ export interface ArrivalSmsPreviewRecipient {
   name: string | null;
   phone: string;
   text: string;
+  chars?: number;
+  segments?: number;
 }
 
 export interface ArrivalSmsPreview {
+  sender?: string | null;
+  channel?: "shop" | "leasing";
   recipients: ArrivalSmsPreviewRecipient[];
   skipped: { orderId: string; code: string; reason: string }[];
+  previewToken?: string;
 }
 
 export interface BatchAuditRow {

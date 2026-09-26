@@ -2,6 +2,7 @@ import type { Order } from '@prisma/client';
 import { arrivalSmsEligibility, type ArrivalSmsItem } from '../../lib/arrivalSms.js';
 import { prisma } from '../../prisma.js';
 import { mailTemplates, sendMail } from '../../services/mail.js';
+import { assertSmsText } from '../../lib/smsCompose.js';
 import { smsTemplates } from '../../services/sms.js';
 import { dispatchSms, hasOpenDispatch } from '../../services/smsDispatch.js';
 
@@ -27,7 +28,7 @@ export async function notifyOrderConfirmed(order: Order): Promise<boolean> {
 /** Захиалга ирснийг мэдэгдэх SMS. Админ товчоор л илгээнэ. Хүлээн авсан үед arrivalNotifiedAt тавина. */
 export async function notifyArrival(
   order: Order & { items?: ArrivalSmsItem[] },
-  opts: { resend?: boolean } = {},
+  opts: { resend?: boolean; text?: string; confirmKey?: string } = {},
 ): Promise<{
   ok: boolean;
   skipped?: boolean;
@@ -48,6 +49,7 @@ export async function notifyArrival(
         arrivedQty: true,
         qty: true,
         handedOverAt: true,
+        handedOverQty: true,
       },
     }));
   const eligible = arrivalSmsEligibility({
@@ -65,14 +67,16 @@ export async function notifyArrival(
   const customer = await prisma.customer.findUnique({ where: { id: order.customerId } });
   if (!customer?.phone) return { ok: false, error: 'Утасны дугаар алга.' };
 
+  const text = opts.text ? assertSmsText(opts.text) : smsTemplates.arrived(order.code);
   const { send } = await dispatchSms({
     channel: 'shop',
     purpose: 'arrival',
     phone: customer.phone,
-    text: smsTemplates.arrived(order.code),
+    text,
     relatedType: 'order',
     relatedId: order.id,
     resend: opts.resend,
+    confirmKey: opts.confirmKey,
   });
 
   if (!send.accepted) {

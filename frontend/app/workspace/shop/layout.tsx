@@ -15,6 +15,10 @@ import { WorkspaceSectionLinks } from "@/features/auth/components/WorkspaceChoos
  */
 const NAV_GROUPS: { label: string; items: { href: string; label: string }[] }[] = [
   {
+    label: "Ажил",
+    items: [{ href: "/workspace/shop/today", label: "Өнөөдрийн ажил" }],
+  },
+  {
     label: "Захиалга",
     items: [
       { href: "/workspace/shop", label: "Захиалга" },
@@ -165,7 +169,7 @@ function Brand({
 }) {
   return (
     <Link
-      href="/workspace/shop"
+      href="/workspace/shop/today"
       className={`flex items-center no-underline ${compact ? "gap-2" : "gap-2.5"}`}
     >
       <Image
@@ -197,12 +201,12 @@ function Shell({ children }: { children: ReactNode }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const helper = Boolean(user && !isFullAdmin(user.role));
   const navGroups = helper
-    ? NAV_GROUPS.filter((g) => g.label === "Захиалга" || g.label === "Харилцагч")
+    ? NAV_GROUPS.filter((g) => g.label === "Ажил" || g.label === "Захиалга" || g.label === "Харилцагч")
     : NAV_GROUPS;
 
   useEffect(() => {
     if (!user || isFullAdmin(user.role)) return;
-    if (!helperAdminCanAccess(pathname)) router.replace("/workspace/shop");
+    if (!helperAdminCanAccess(pathname)) router.replace("/workspace/shop/today");
   }, [user, pathname, router]);
 
   if (loading) {

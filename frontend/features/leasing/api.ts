@@ -211,17 +211,59 @@ export const leasingApi = {
       body,
     }).then((r) => r.data),
 
-  previewOrderSms: (id: string) =>
-    request<{ text: string; phone: string | null; name: string | null; amount: number }>(
-      `/leasing/orders/${id}/sms`,
-      adminAuth,
-    ).then((r) => r.data),
+  previewOrderSms: (id: string, text?: string) =>
+    text
+      ? request<{
+          text: string;
+          phone: string | null;
+          name: string | null;
+          amount: number;
+          previewToken: string;
+          chars?: number;
+          segments?: number;
+        }>(`/leasing/orders/${id}/sms/preview`, {
+          ...adminAuth,
+          method: "POST",
+          body: { text },
+        }).then((r) => r.data)
+      : request<{
+          text: string;
+          phone: string | null;
+          name: string | null;
+          amount: number;
+          previewToken: string;
+          chars?: number;
+          segments?: number;
+        }>(`/leasing/orders/${id}/sms`, adminAuth).then((r) => r.data),
 
-  sendOrderSms: (id: string, kind: "pay_reminder" = "pay_reminder", text?: string) =>
+  sendOrderSms: (id: string, kind: "pay_reminder" = "pay_reminder", text?: string, previewToken?: string, sendKey?: string) =>
     request<{ ok: boolean; amount: number; smsStatus?: string }>(`/leasing/orders/${id}/sms`, {
       ...adminAuth,
       method: "POST",
-      body: { kind, ...(text != null ? { text } : {}) },
+      body: { kind, ...(text != null ? { text } : {}), previewToken, sendKey },
+    }).then((r) => r.data),
+
+  previewScheduleSms: (
+    kind: "due_today" | "overdue" | "arrived_unpaid",
+    orderIds: string[],
+    template?: string,
+    overrides?: { orderId: string; text: string }[],
+  ) =>
+    request<{
+      sender: string | null;
+      recipients: { orderId: string; code: string; name: string | null; phone: string; text: string; chars: number; segments: number }[];
+      skipped: { orderId: string; code: string; reason: string }[];
+      failed: { orderId: string; code: string; error: string }[];
+      previewToken: string;
+    }>("/leasing/orders/sms-reminders/preview", {
+      ...adminAuth,
+      method: "POST",
+      body: {
+        kind,
+        orderIds,
+        ...(template != null ? { template } : {}),
+        ...(overrides && overrides.length > 0 ? { overrides } : {}),
+      },
     }).then((r) => r.data),
 
   sendScheduleSms: (
@@ -229,6 +271,8 @@ export const leasingApi = {
     orderIds: string[],
     template?: string,
     overrides?: { orderId: string; text: string }[],
+    previewToken?: string,
+    sendKey?: string,
   ) =>
     request<{
       sent: number;
@@ -245,10 +289,50 @@ export const leasingApi = {
         orderIds,
         ...(template != null ? { template } : {}),
         ...(overrides && overrides.length > 0 ? { overrides } : {}),
+        previewToken,
+        sendKey,
       },
     }).then((r) => r.data),
 
-  sendSms: (phones: string | string[], text: string) =>
+  todayWork: () =>
+    request<{ day: string; cards: import("@/features/work/TodayWorkBoard").TodayCard[] }>(
+      "/leasing/work/today",
+      adminAuth,
+    ).then((r) => r.data),
+
+  todayWorkRows: (query: { card: string; day?: string; page?: number }) =>
+    request<{
+      id: string;
+      code?: string;
+      amount?: number;
+      label?: string;
+      href?: string;
+      at?: string | null;
+      purpose?: string;
+      status?: string;
+      error?: string;
+      createdAt?: string;
+    }[]>("/leasing/work/today", { ...adminAuth, query }).then((r) => ({
+      data: r.data,
+      meta: r.meta as { total: number; page: number; pageSize: number; pages: number },
+    })),
+
+  previewSms: (phones: string | string[], text: string) =>
+    request<{
+      sender: string | null;
+      text: string;
+      chars: number;
+      segments: number;
+      phones: string[];
+      invalid: string[];
+      previewToken: string;
+    }>("/leasing/sms/preview", {
+      ...adminAuth,
+      method: "POST",
+      body: { phones: Array.isArray(phones) ? phones : [phones], text },
+    }).then((r) => r.data),
+
+  sendSms: (phones: string | string[], text: string, previewToken?: string, sendKey?: string) =>
     request<{
       ok: boolean;
       phone: string;
@@ -264,6 +348,8 @@ export const leasingApi = {
       body: {
         phones: Array.isArray(phones) ? phones : [phones],
         text,
+        previewToken,
+        sendKey,
       },
     }).then((r) => r.data),
 

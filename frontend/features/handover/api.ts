@@ -26,19 +26,22 @@ export const adminHandoverApi = {
     }).then((r) => r.data),
 
   handoverPartial: (body: {
-    itemIds: string[];
+    items: { itemId: string; qty: number; expectedHandedQty: number }[];
     collectedAmount?: number;
     method?: HandoverPayMethod;
     note?: string;
+    idempotencyKey: string;
   }) =>
     request<{
       itemCount: number;
+      pieceCount: number;
       orderIds: string[];
       completedOrderIds: string[];
     }>("/admin/handover/partial", {
       ...adminAuth,
       method: "POST",
       body,
+      headers: { "Idempotency-Key": body.idempotencyKey },
     }).then((r) => r.data),
 
   handoverComplete: (

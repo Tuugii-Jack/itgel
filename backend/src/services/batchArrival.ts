@@ -11,6 +11,7 @@ import {
 import { skuKeyOf } from '../lib/skuStock.js';
 import { isProductPaid } from './money.js';
 import { promoteOrdersToArrived } from './orders.js';
+import { arrivedQtyOf, handedQtyOf, accountedQtyOf } from '../lib/itemQty.js';
 
 export type WaitingLine = {
   id: string;
@@ -18,6 +19,7 @@ export type WaitingLine = {
   orderCode?: string;
   qty: number;
   arrivedQty: number;
+  handedOverQty?: number;
   orderCreatedAt: Date;
 };
 
@@ -43,7 +45,7 @@ export function allocateFifo(items: WaitingLine[], incoming: number): {
   const allocations: Allocation[] = [];
   for (const item of sorted) {
     if (left <= 0) break;
-    const need = item.qty - item.arrivedQty;
+    const need = item.qty - Math.max(item.arrivedQty, item.handedOverQty ?? 0);
     if (need <= 0) continue;
     const take = Math.min(need, left);
     left -= take;
@@ -74,7 +76,10 @@ export function deallocateLifo(items: WaitingLine[], remove: number): {
   for (const item of sorted) {
     if (left <= 0) break;
     if (item.arrivedQty <= 0) continue;
-    const take = Math.min(item.arrivedQty, left);
+    const floor = Math.max(0, item.handedOverQty ?? 0);
+    const reducible = item.arrivedQty - floor;
+    if (reducible <= 0) continue;
+    const take = Math.min(reducible, left);
     left -= take;
     const next = item.arrivedQty - take;
     const row: Allocation = {
@@ -133,6 +138,7 @@ export async function summarizeRoundArrivals(
       qty: true,
       arrivedQty: true,
       handedOverAt: true,
+      handedOverQty: true,
       selections: true,
       size: true,
       color: true,
@@ -159,7 +165,7 @@ export async function summarizeRoundArrivals(
   const byRound = new Map<string, Map<string, Agg>>();
 
   for (const item of items) {
-    if (!item.handedOverAt && !isProductPaid(item.order)) continue;
+    if (handedQtyOf(item) === 0 && !isProductPaid(item.order)) continue;
     const selections = itemSelections(item);
     const key = variantKey(selections);
     let roundMap = byRound.get(item.roundId);
@@ -177,9 +183,9 @@ export async function summarizeRoundArrivals(
         waitingCustomers: new Set<string>(),
       } satisfies Agg);
     agg.orderedQty += item.qty;
-    agg.arrivedQty += item.handedOverAt ? item.qty : Math.min(item.arrivedQty, item.qty);
-    if (item.handedOverAt) agg.handedOverQty += item.qty;
-    if (!item.handedOverAt && item.arrivedQty < item.qty) {
+    agg.arrivedQty += accountedQtyOf(item);
+    agg.handedOverQty += handedQtyOf(item);
+    if (accountedQtyOf(item) < item.qty) {
       agg.waitingCustomers.add(item.order.customerId);
     }
     roundMap.set(key, agg);
@@ -264,8 +270,8 @@ async function demoteOrdersMissingArrival(
 }
 
 /**
- * Сонголт бүрийн ирсэн НИЙТ тоог тавина — зөвхөн багц зам дээр байхад.
- * Ихэсвэл FIFO-оор нэмнэ; багасгавал сүүлд хуваарилсан хүмүүсээс буцаана.
+ * Сонголт бүрийн ирсэн НИЙТ тоог тавина.
+ * Үлдсэн ачааны addQty-г агуулах/дууссан шатанд ч нэмнэ; багасгалт нь тусдаа засвар.
  */
 export type RegisterArrivalOpts = {
   expected?: { roundId: string; selections: Record<string, string>; arrivedQty: number }[];
@@ -297,14 +303,15 @@ export async function registerBatchArrivals(
       include: { rounds: { where: { deletedAt: null }, select: { id: true } } },
     });
     if (!batch) throw notFound('Багц олдсонгүй.');
-    if (batch.stage === 'DONE') {
-      throw conflict('Дууссан багцад ирсэн тоо бүртгэх боломжгүй.');
-    }
-    if (batch.stage !== 'IN_TRANSIT') {
-      throw conflict('Ирсэн тоог зөвхөн зам дээр байх үед бүртгэнэ. Агуулахад орсон бол засагдахгүй.');
-    }
     if (batch.rounds.length === 0) {
       throw conflict('Холбоос дутуу. Тойрог холбохгүйгээр ирэлт бүртгэхгүй.');
+    }
+    const addWave = Boolean(opts.expected && opts.expected.length > 0);
+    if (!addWave && batch.stage === 'DONE') {
+      throw conflict('Дууссан багцад нийт тоо засагдахгүй.');
+    }
+    if (!addWave && batch.stage !== 'IN_TRANSIT' && batch.stage !== 'AT_WAREHOUSE') {
+      throw conflict('Ирсэн тоог засах боломжгүй шат.');
     }
 
     const roundIds = new Set(batch.rounds.map((r) => r.id));
@@ -336,6 +343,7 @@ export async function registerBatchArrivals(
         arrivedQty: true,
         arrivedAt: true,
         handedOverAt: true,
+        handedOverQty: true,
         selections: true,
         size: true,
         color: true,
@@ -356,7 +364,7 @@ export async function registerBatchArrivals(
     type Row = (typeof items)[number];
     const byVariant = new Map<string, Row[]>();
     for (const item of items) {
-      if (!item.handedOverAt && !isProductPaid(item.order)) continue;
+      if (handedQtyOf(item) === 0 && !isProductPaid(item.order)) continue;
       const key = `${item.roundId}\0${variantKey(itemSelections(item))}`;
       const list = byVariant.get(key) ?? [];
       list.push(item);
@@ -369,6 +377,7 @@ export async function registerBatchArrivals(
       orderCode: row.order.code,
       qty: row.qty,
       arrivedQty: row.arrivedQty,
+      handedOverQty: handedQtyOf(row),
       orderCreatedAt: row.order.createdAt,
     });
 
@@ -376,10 +385,7 @@ export async function registerBatchArrivals(
       for (const line of lines) {
         const key = `${line.roundId}\0${variantKey(line.selections)}`;
         const pool = byVariant.get(key) ?? [];
-        const current = pool.reduce(
-          (s, i) => s + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
-          0,
-        );
+        const current = pool.reduce((s, i) => s + accountedQtyOf(i), 0);
         const expected = opts.expected.find(
           (row) =>
             row.roundId === line.roundId && variantKey(row.selections) === variantKey(line.selections),
@@ -398,18 +404,22 @@ export async function registerBatchArrivals(
     let allocated = 0;
     let released = 0;
     let unused = 0;
-    const fullyOrderIds = new Set<string>();
+    const arrivedOrderIds = new Set<string>();
     const maybeDemote = new Set<string>();
+    const waveLines: {
+      roundId: string;
+      selections: Record<string, string>;
+      addQty: number;
+      arrivedQty: number;
+    }[] = [];
+    const waveAllocations: { orderCode: string; add: number; selections: Record<string, string> }[] = [];
 
     for (const line of lines) {
       const key = `${line.roundId}\0${variantKey(line.selections)}`;
       const pool = byVariant.get(key) ?? [];
       const ordered = pool.reduce((s, i) => s + i.qty, 0);
-      const current = pool.reduce(
-        (s, i) => s + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
-        0,
-      );
-      const locked = pool.filter((i) => i.handedOverAt).reduce((s, i) => s + i.qty, 0);
+      const current = pool.reduce((s, i) => s + accountedQtyOf(i), 0);
+      const locked = pool.reduce((s, i) => s + handedQtyOf(i), 0);
       if (line.arrivedQty < locked) {
         throw conflict(
           `${formatSelectionsLabel(line.selections)}: ${locked} ш хүлээлгэн өгсөн тул ${line.arrivedQty} болгож болохгүй.`,
@@ -434,13 +444,21 @@ export async function registerBatchArrivals(
       const target = Math.min(ordered, line.arrivedQty);
       if (line.arrivedQty > ordered) unused += line.arrivedQty - ordered;
       const delta = target - current;
+      if (delta !== 0) {
+        waveLines.push({
+          roundId: line.roundId,
+          selections: line.selections,
+          addQty: delta,
+          arrivedQty: target,
+        });
+      }
       if (delta === 0) continue;
       if (delta < 0 && !opts.reason?.trim()) {
         throw badRequest('Ирсэн тоог багасгахдаа шалтгаан бичнэ.');
       }
 
       if (delta > 0) {
-        const waiting = pool.filter((i) => !i.handedOverAt && i.arrivedQty < i.qty).map(toLine);
+        const waiting = pool.filter((i) => accountedQtyOf(i) < i.qty).map(toLine);
         const { allocations, unused: leftover } = allocateFifo(waiting, delta);
         unused += leftover;
         for (const row of allocations) {
@@ -454,10 +472,15 @@ export async function registerBatchArrivals(
               ...(row.fullyArrived ? { arrivedAt: now } : {}),
             },
           });
-          if (row.fullyArrived) fullyOrderIds.add(row.orderId);
+          arrivedOrderIds.add(row.orderId);
+          waveAllocations.push({
+            orderCode: row.orderCode ?? row.orderId,
+            add: row.add,
+            selections: line.selections,
+          });
         }
       } else {
-        const unlocked = pool.filter((i) => i.arrivedQty > 0 && !i.handedOverAt).map(toLine);
+        const unlocked = pool.filter((i) => arrivedQtyOf(i) > handedQtyOf(i)).map(toLine);
         const { changes, shortfall } = deallocateLifo(unlocked, -delta);
         if (shortfall > 0) {
           throw conflict(
@@ -483,7 +506,7 @@ export async function registerBatchArrivals(
 
     const promoted = await promoteOrdersToArrived(
       tx,
-      [...fullyOrderIds],
+      [...arrivedOrderIds],
       actor,
       `Багц "${batch.name}" — ирсэн бараа бүртгэв`,
       now,
@@ -505,17 +528,22 @@ export async function registerBatchArrivals(
         entity: 'Batch',
         entityId: batch.id,
         after: {
+          mode: addWave ? 'add' : released > 0 ? 'correct' : 'add',
           allocated,
           released,
           unused,
           reason: opts.reason ?? null,
           ordersArrived: promoted.length,
           ordersReverted: reverted.length,
-          lines: lines.map((l) => ({
-            roundId: l.roundId,
-            selections: l.selections,
-            arrivedQty: l.arrivedQty,
-          })),
+          lines: waveLines.length
+            ? waveLines
+            : lines.map((l) => ({
+                roundId: l.roundId,
+                selections: l.selections,
+                addQty: 0,
+                arrivedQty: l.arrivedQty,
+              })),
+          allocations: waveAllocations,
         },
       },
       tx,
@@ -586,9 +614,6 @@ export async function previewBatchArrivalAdds(batchId: string, lines: ArrivalAdd
     include: { rounds: { where: { deletedAt: null }, select: { id: true } } },
   });
   if (!batch) throw notFound('Багц олдсонгүй.');
-  if (batch.stage !== 'IN_TRANSIT') {
-    throw conflict('Ирсэн тоог зөвхөн зам дээр байх үед бүртгэнэ.');
-  }
   if (batch.rounds.length === 0) {
     throw conflict('Холбоос дутуу. Тойрог холбохгүйгээр ирэлт бүртгэхгүй.');
   }
@@ -612,6 +637,7 @@ export async function previewBatchArrivalAdds(batchId: string, lines: ArrivalAdd
       qty: true,
       arrivedQty: true,
       handedOverAt: true,
+      handedOverQty: true,
       selections: true,
       size: true,
       color: true,
@@ -638,20 +664,17 @@ export async function previewBatchArrivalAdds(batchId: string, lines: ArrivalAdd
       (item) =>
         item.roundId === line.roundId &&
         variantKey(itemSelections(item)) === variantKey(line.selections) &&
-        (item.handedOverAt || isProductPaid(item.order)),
+        (handedQtyOf(item) > 0 || isProductPaid(item.order)),
     );
     const orderedQty = pool.reduce((s, i) => s + i.qty, 0);
-    const currentArrived = pool.reduce(
-      (s, i) => s + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
-      0,
-    );
+    const currentArrived = pool.reduce((s, i) => s + accountedQtyOf(i), 0);
     if (currentArrived + line.addQty > orderedQty) {
       throw badRequest(
         `${formatSelectionsLabel(line.selections)}: захиалснаас илүү тоо хуваарилагдахгүй.`,
       );
     }
     const waiting = pool
-      .filter((i) => !i.handedOverAt && i.arrivedQty < i.qty)
+      .filter((i) => accountedQtyOf(i) < i.qty)
       .map((i) => ({
         id: i.id,
         orderId: i.order.id,
