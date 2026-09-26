@@ -323,6 +323,7 @@ export function batchSummary(batch: Batch | null | undefined) {
     weightKg: batch.weightKg,
     etaFrom: toIso(batch.etaFrom),
     etaTo: toIso(batch.etaTo),
+    cargoRef: batch.cargoRef ?? null,
   };
 }
 

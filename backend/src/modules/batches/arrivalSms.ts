@@ -3,7 +3,83 @@ import { audit } from '../../lib/audit.js';
 import { isArrivalSmsEligible } from '../../lib/arrivalSms.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { findOrderIdsForBatch } from '../../services/batches.js';
+import { smsTemplates, type SmsLifecycleStatus } from '../../services/sms.js';
 import { notifyArrival } from '../orders/notify.js';
+
+export async function previewBatchArrivalSms(batchId: string) {
+  const batch = await prisma.batch.findFirst({
+    where: { id: batchId, deletedAt: null },
+    include: { rounds: { where: { deletedAt: null }, select: { id: true } } },
+  });
+  if (!batch) throw notFound('Багц олдсонгүй.');
+  if (batch.stage !== 'AT_WAREHOUSE' && batch.stage !== 'DONE') {
+    throw conflict('Багцыг агуулахад оруулсны дараа SMS илгээнэ.');
+  }
+  const roundIds = batch.rounds.map((r) => r.id);
+  const activeIds = await findOrderIdsForBatch(prisma, batch.id, roundIds, false);
+  const orders = await prisma.order.findMany({
+    where: { id: { in: activeIds }, deletedAt: null, status: { not: 'CANCELLED' } },
+    include: {
+      customer: { select: { name: true, phone: true } },
+      items: {
+        select: {
+          cancelledAt: true,
+          arrivedAt: true,
+          arrivedQty: true,
+          qty: true,
+          handedOverAt: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+  const latestSms = await prisma.smsDispatch.findMany({
+    where: { relatedType: 'order', relatedId: { in: orders.map((o) => o.id) }, purpose: 'arrival' },
+    orderBy: { createdAt: 'desc' },
+    select: { relatedId: true, status: true },
+  });
+  const latestByOrder = new Map<string, string>();
+  for (const row of latestSms) {
+    if (!row.relatedId || latestByOrder.has(row.relatedId)) continue;
+    latestByOrder.set(row.relatedId, row.status);
+  }
+
+  const recipients: {
+    orderId: string;
+    code: string;
+    name: string | null;
+    phone: string;
+    text: string;
+  }[] = [];
+  const skipped: { orderId: string; code: string; reason: string }[] = [];
+  for (const order of orders) {
+    if (!isArrivalSmsEligible(order)) {
+      skipped.push({ orderId: order.id, code: order.code, reason: 'Бараа ирээгүй эсвэл олгосон' });
+      continue;
+    }
+    if (!order.customer.phone) {
+      skipped.push({ orderId: order.id, code: order.code, reason: 'Утас алга' });
+      continue;
+    }
+    if (order.arrivalNotifiedAt) {
+      skipped.push({ orderId: order.id, code: order.code, reason: 'Аль хэдийн илгээсэн' });
+      continue;
+    }
+    const smsStatus = latestByOrder.get(order.id) as SmsLifecycleStatus | undefined;
+    if (smsStatus === 'queued' || smsStatus === 'pending' || smsStatus === 'unknown') {
+      skipped.push({ orderId: order.id, code: order.code, reason: 'Хүргэлт хүлээгдэж байна' });
+      continue;
+    }
+    recipients.push({
+      orderId: order.id,
+      code: order.code,
+      name: order.customer.name,
+      phone: order.customer.phone,
+      text: smsTemplates.arrived(order.code),
+    });
+  }
+  return { recipients, skipped };
+}
 
 export async function sendBatchArrivalSms(opts: {
   batchId: string;
@@ -60,8 +136,7 @@ export async function sendBatchArrivalSms(opts: {
       skipped.push(order.id);
       continue;
     }
-    const forceResend = Boolean(resend) || (forceSingle && Boolean(order.arrivalNotifiedAt));
-    const result = await notifyArrival(order, { resend: forceResend });
+    const result = await notifyArrival(order, { resend: Boolean(resend) && forceSingle });
     if (result.skipped) skipped.push(order.id);
     else if (result.ok) {
       sent.push(order.id);

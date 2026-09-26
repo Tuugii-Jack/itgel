@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Empty } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { phoneLabel } from "@/lib/format";
 import { smsStatusLabel, smsToastForSend } from "@/lib/smsStatus";
 import { useToast } from "@/lib/toast";
-import type { AdminBatchDetail } from "@/lib/types";
+import type { AdminBatchDetail, ArrivalSmsPreview } from "@/lib/types";
 
 export function ArrivalSmsPanel({
   batch,
@@ -17,21 +17,38 @@ export function ArrivalSmsPanel({
 }) {
   const toast = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
-  const eligible = batch.orders.filter((o) => o.status !== "CANCELLED");
-  const smsReady = eligible.filter((o) => o.arrivalSmsEligible !== false);
-  const pending = smsReady.filter((o) => {
-    const open = o.arrivalSmsStatus === "queued" || o.arrivalSmsStatus === "pending";
-    return !o.arrivalNotifiedAt && !open && o.customer.phone;
-  });
-  const missingPhone = smsReady.filter((o) => !o.customer.phone);
+  const [preview, setPreview] = useState<ArrivalSmsPreview | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
-  const send = async (orderId?: string) => {
+  useEffect(() => {
+    let cancelled = false;
+    void adminApi
+      .previewBatchArrivalSms(batch.id)
+      .then((data) => {
+        if (!cancelled) {
+          setPreview(data);
+          setPreviewError(null);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setPreviewError(e instanceof ApiError ? e.message : "Preview ачаалж чадсангүй.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [batch.id, batch.orders.length, batch.stage]);
+
+  const send = async (orderId?: string, resend = false) => {
     const key = orderId ?? "all";
+    if (busyId) return;
     setBusyId(key);
     try {
       const result = await adminApi.sendBatchArrivalSms(
         batch.id,
-        orderId ? { orderId } : undefined,
+        orderId ? { orderId, resend: resend || undefined } : undefined,
       );
       const fail = result.failed.length;
       if (fail > 0 && result.sent === 0) {
@@ -48,6 +65,7 @@ export function ArrivalSmsPanel({
         else if (note) toast.success(note.message);
         else toast.success("Илгээх захиалга алга.");
       }
+      setConfirming(false);
       onSent();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "SMS илгээж чадсангүй.");
@@ -56,65 +74,109 @@ export function ArrivalSmsPanel({
     }
   };
 
+  const recipients = preview?.recipients ?? [];
+  const skipped = preview?.skipped ?? [];
+
   return (
     <Card className="mt-4 p-4">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-[15px] font-medium">Бараа ирсэн SMS</div>
           <p className="mt-1 mb-0 text-[13px] text-ink-2">
-            Автоматаар явахгүй. Зөвхөн бараа нь ирсэн, хүлээлгэж өгөөгүй захиалгад товчоор илгээнэ.
+            Зөвхөн бодитоор ирсэн, хуваарилагдсан, олгоогүй захиалгад илгээнэ. Давхар дарахад автоматаар дахин явахгүй.
           </p>
         </div>
         <Button
           size="sm"
-          onClick={() => void send()}
-          loading={busyId === "all"}
-          disabled={pending.length === 0 || busyId !== null}
+          onClick={() => setConfirming(true)}
+          disabled={recipients.length === 0 || busyId !== null}
         >
-          Илгээгээгүй бүгдэд ({pending.length})
+          Бөөнөөр илгээх ({recipients.length})
         </Button>
       </div>
-      {missingPhone.length > 0 && (
-        <div className="mb-3 text-[13px] text-warn">
-          {missingPhone.length} захиалгад утас алга.
+
+      {previewError && <div className="mb-3 text-[13px] text-warn">{previewError}</div>}
+
+      {confirming && (
+        <div className="mb-3 rounded-[10px] border border-line bg-surface p-3">
+          <div className="text-[14px] font-medium">Илгээх preview</div>
+          <p className="mt-1 mb-2 text-[13px] text-muted">
+            {recipients.length} хүлээн авагч. Агуулга: itgel {"{код}"} бараа ирлээ.
+          </p>
+          {recipients.slice(0, 8).map((row) => (
+            <div key={row.orderId} className="tnum text-[13px] text-ink-2">
+              {row.code} · {row.name ?? "Нэргүй"} · {phoneLabel(row.phone)}
+            </div>
+          ))}
+          {recipients.length > 8 && (
+            <div className="mt-1 text-[12px] text-muted">+{recipients.length - 8} захиалга</div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
+              Болих
+            </Button>
+            <Button size="sm" onClick={() => void send()} loading={busyId === "all"}>
+              Илгээх
+            </Button>
+          </div>
         </div>
       )}
-      {eligible.length === 0 ? (
-        <Empty>Захиалга алга.</Empty>
+
+      {recipients.length === 0 && skipped.length === 0 ? (
+        <Empty>SMS илгээх захиалга алга.</Empty>
       ) : (
         <div className="flex flex-col gap-2">
-          {eligible.map((order) => {
-            const accepted = Boolean(order.arrivalNotifiedAt);
-            const phone = order.customer.phone;
-            const canSend = Boolean(phone) && order.arrivalSmsEligible !== false;
-            const statusText = order.arrivalSmsStatus
+          {recipients.map((row) => (
+            <div
+              key={row.orderId}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-line px-3 py-2"
+            >
+              <div className="min-w-0">
+                <div className="tnum text-[14px]">{row.code}</div>
+                <div className="truncate text-[13px] text-ink-2">
+                  {row.name ?? "Нэргүй"} · {phoneLabel(row.phone)}
+                </div>
+                <div className="truncate text-[12px] text-muted">{row.text}</div>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => void send(row.orderId)}
+                loading={busyId === row.orderId}
+                disabled={busyId !== null}
+              >
+                SMS илгээх
+              </Button>
+            </div>
+          ))}
+          {skipped.map((row) => {
+            const order = batch.orders.find((o) => o.id === row.orderId);
+            const statusText = order?.arrivalSmsStatus
               ? smsStatusLabel(order.arrivalSmsStatus, order.arrivalSmsError)
-              : accepted
-                ? smsStatusLabel("queued")
-                : "";
+              : "";
+            const already = row.reason === "Аль хэдийн илгээсэн";
             return (
               <div
-                key={order.id}
+                key={row.orderId}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-line px-3 py-2"
               >
                 <div className="min-w-0">
-                  <div className="tnum text-[14px]">{order.code}</div>
+                  <div className="tnum text-[14px]">{row.code}</div>
                   <div className="truncate text-[13px] text-ink-2">
-                    {order.customer.name ?? "Нэргүй"}
-                    {phone ? ` · ${phoneLabel(phone)}` : " · утас алга"}
+                    {row.reason}
                     {statusText ? ` · ${statusText}` : ""}
-                    {order.arrivalSmsEligible === false ? " · SMS илгээхгүй" : ""}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant={accepted ? "outline" : "primary"}
-                  onClick={() => void send(order.id)}
-                  loading={busyId === order.id}
-                  disabled={!canSend || busyId !== null}
-                >
-                  {accepted ? "Дахин илгээх" : "SMS илгээх"}
-                </Button>
+                {already && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void send(row.orderId, true)}
+                    loading={busyId === row.orderId}
+                    disabled={busyId !== null}
+                  >
+                    Дахин илгээх
+                  </Button>
+                )}
               </div>
             );
           })}

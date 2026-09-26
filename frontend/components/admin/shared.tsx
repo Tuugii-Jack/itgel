@@ -128,11 +128,15 @@ export function Metric({
   value,
   sub,
   tone,
+  onClick,
+  active,
 }: {
   label: string;
   value: string | number;
   sub?: string;
   tone?: Tone;
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const colors: Record<Tone, string> = {
     neutral: "text-ink",
@@ -141,15 +145,26 @@ export function Metric({
     info: "text-info",
     danger: "text-danger",
   };
-  return (
-    <div className="rounded-[12px] border border-line bg-bg p-4">
+  const className = `rounded-[12px] border p-4 text-left ${
+    active ? "border-ink bg-surface" : "border-line bg-bg"
+  } ${onClick ? "cursor-pointer hover:border-ink/30" : ""}`;
+  const inner = (
+    <>
       <div className="text-[13px] text-ink-2">{label}</div>
       <div className={`tnum mt-1 text-[24px] font-medium ${colors[tone ?? "neutral"]}`}>
         {value}
       </div>
       {sub && <div className="mt-0.5 text-[12px] text-muted">{sub}</div>}
-    </div>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {inner}
+      </button>
+    );
+  }
+  return <div className={className}>{inner}</div>;
 }
 
 export function Select({

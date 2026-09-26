@@ -1,17 +1,26 @@
 import { adminAuth, request, type Query } from "@/lib/api/client";
-import type { AdminBatch, AdminBatchDetail, BatchProduct, BatchSummary } from "@/types";
+import type {
+  AdminBatch,
+  AdminBatchDetail,
+  ArrivalPreview,
+  ArrivalSmsPreview,
+  BatchAuditRow,
+  BatchProduct,
+  BatchSummary,
+} from "@/types";
 
 export const adminBatchesApi = {
   batches: (query?: Query) =>
     request<AdminBatch[]>("/admin/batches", { ...adminAuth, query }),
 
-  batch: (id: string) =>
-    request<AdminBatchDetail>(`/admin/batches/${id}`, adminAuth).then(
+  batch: (id: string, query?: Query) =>
+    request<AdminBatchDetail>(`/admin/batches/${id}`, { ...adminAuth, query }).then(
       (r) => r.data,
     ),
 
   createBatch: (body: {
     name: string;
+    cargoRef?: string | null;
     deadline?: string | null;
     orderIds?: string[];
     weightKg?: number;
@@ -28,6 +37,7 @@ export const adminBatchesApi = {
     id: string,
     body: Partial<{
       name: string;
+      cargoRef: string | null;
       deadline: string | null;
       weightKg: number | null;
       etaFrom: string | null;
@@ -49,6 +59,11 @@ export const adminBatchesApi = {
       },
     ).then((r) => r.data),
 
+  previewBatchArrivalSms: (batchId: string) =>
+    request<ArrivalSmsPreview>(`/admin/batches/${batchId}/arrival-sms/preview`, adminAuth).then(
+      (r) => r.data,
+    ),
+
   sendBatchArrivalSms: (
     batchId: string,
     body?: { orderId?: string; resend?: boolean },
@@ -66,14 +81,40 @@ export const adminBatchesApi = {
       body: body ?? {},
     }).then((r) => r.data),
 
-  /** Сонголт бүрийн ирсэн нийт тоог тавина (засаж болно). */
-  registerBatchArrivals: (
+  previewBatchArrivals: (
     batchId: string,
     lines: {
       roundId: string;
       selections: Record<string, string>;
-      arrivedQty: number;
+      addQty: number;
     }[],
+  ) =>
+    request<ArrivalPreview>(`/admin/batches/${batchId}/arrivals/preview`, {
+      ...adminAuth,
+      method: "POST",
+      body: { lines },
+    }).then((r) => r.data),
+
+  /** Сонголт бүрийн ирсэн нийт тоог тавина, эсвэл энэ удаагийн addQty-г батална. */
+  registerBatchArrivals: (
+    batchId: string,
+    body: {
+      lines: {
+        roundId: string;
+        selections: Record<string, string>;
+        arrivedQty?: number;
+        addQty?: number;
+      }[];
+      expected?: { roundId: string; selections: Record<string, string>; arrivedQty: number }[];
+      reason?: string;
+      notes?: {
+        roundId: string;
+        selections: Record<string, string>;
+        kind: "DAMAGED" | "SHORT" | "EXCESS";
+        qty: number;
+        note: string;
+      }[];
+    },
   ) =>
     request<{
       allocated: number;
@@ -84,8 +125,11 @@ export const adminBatchesApi = {
     }>(`/admin/batches/${batchId}/arrivals`, {
       ...adminAuth,
       method: "POST",
-      body: { lines },
+      body,
     }).then((r) => r.data),
+
+  batchAudit: (batchId: string) =>
+    request<BatchAuditRow[]>(`/admin/batches/${batchId}/audit`, adminAuth).then((r) => r.data),
 
   revertBatchStage: (id: string) =>
     request<AdminBatch & { ordersMoved: number }>(

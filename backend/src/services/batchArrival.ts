@@ -8,12 +8,14 @@ import {
   itemSelections,
   variantKey,
 } from '../lib/options.js';
+import { skuKeyOf } from '../lib/skuStock.js';
 import { isProductPaid } from './money.js';
 import { promoteOrdersToArrived } from './orders.js';
 
 export type WaitingLine = {
   id: string;
   orderId: string;
+  orderCode?: string;
   qty: number;
   arrivedQty: number;
   orderCreatedAt: Date;
@@ -22,6 +24,7 @@ export type WaitingLine = {
 export type Allocation = {
   id: string;
   orderId: string;
+  orderCode?: string;
   add: number;
   fullyArrived: boolean;
 };
@@ -44,12 +47,14 @@ export function allocateFifo(items: WaitingLine[], incoming: number): {
     if (need <= 0) continue;
     const take = Math.min(need, left);
     left -= take;
-    allocations.push({
+    const row: Allocation = {
       id: item.id,
       orderId: item.orderId,
       add: take,
       fullyArrived: item.arrivedQty + take >= item.qty,
-    });
+    };
+    if (item.orderCode) row.orderCode = item.orderCode;
+    allocations.push(row);
   }
   return { allocations, unused: left };
 }
@@ -72,12 +77,14 @@ export function deallocateLifo(items: WaitingLine[], remove: number): {
     const take = Math.min(item.arrivedQty, left);
     left -= take;
     const next = item.arrivedQty - take;
-    changes.push({
+    const row: Allocation = {
       id: item.id,
       orderId: item.orderId,
       add: -take,
       fullyArrived: next >= item.qty,
-    });
+    };
+    if (item.orderCode) row.orderCode = item.orderCode;
+    changes.push(row);
   }
   return { changes, shortfall: left };
 }
@@ -260,15 +267,31 @@ async function demoteOrdersMissingArrival(
  * Сонголт бүрийн ирсэн НИЙТ тоог тавина — зөвхөн багц зам дээр байхад.
  * Ихэсвэл FIFO-оор нэмнэ; багасгавал сүүлд хуваарилсан хүмүүсээс буцаана.
  */
+export type RegisterArrivalOpts = {
+  expected?: { roundId: string; selections: Record<string, string>; arrivedQty: number }[];
+  reason?: string;
+  notes?: ArrivalNoteInput[];
+};
+
+export type ArrivalNoteInput = {
+  roundId: string;
+  selections: Record<string, string>;
+  kind: 'DAMAGED' | 'SHORT' | 'EXCESS';
+  qty: number;
+  note: string;
+};
+
 export async function registerBatchArrivals(
   batchId: string,
   lines: RegisterArrivalLine[],
   actor: string,
   now = new Date(),
+  opts: RegisterArrivalOpts = {},
 ): Promise<RegisterArrivalResult> {
   if (lines.length === 0) throw badRequest('Ирсэн тоо оруулна уу.');
 
   const result = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`batch-arrival:${batchId}`}))`;
     const batch = await tx.batch.findFirst({
       where: { id: batchId, deletedAt: null },
       include: { rounds: { where: { deletedAt: null }, select: { id: true } } },
@@ -279,6 +302,9 @@ export async function registerBatchArrivals(
     }
     if (batch.stage !== 'IN_TRANSIT') {
       throw conflict('Ирсэн тоог зөвхөн зам дээр байх үед бүртгэнэ. Агуулахад орсон бол засагдахгүй.');
+    }
+    if (batch.rounds.length === 0) {
+      throw conflict('Холбоос дутуу. Тойрог холбохгүйгээр ирэлт бүртгэхгүй.');
     }
 
     const roundIds = new Set(batch.rounds.map((r) => r.id));
@@ -316,6 +342,7 @@ export async function registerBatchArrivals(
         order: {
           select: {
             id: true,
+            code: true,
             createdAt: true,
             subtotal: true,
             paidAmount: true,
@@ -339,10 +366,34 @@ export async function registerBatchArrivals(
     const toLine = (row: Row): WaitingLine => ({
       id: row.id,
       orderId: row.orderId,
+      orderCode: row.order.code,
       qty: row.qty,
       arrivedQty: row.arrivedQty,
       orderCreatedAt: row.order.createdAt,
     });
+
+    if (opts.expected && opts.expected.length > 0) {
+      for (const line of lines) {
+        const key = `${line.roundId}\0${variantKey(line.selections)}`;
+        const pool = byVariant.get(key) ?? [];
+        const current = pool.reduce(
+          (s, i) => s + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
+          0,
+        );
+        const expected = opts.expected.find(
+          (row) =>
+            row.roundId === line.roundId && variantKey(row.selections) === variantKey(line.selections),
+        );
+        if (!expected || expected.arrivedQty !== current) {
+          throw conflict('Preview-ийн дараа өгөгдөл өөрчлөгдсөн. Дахин шалгана уу.', {
+            roundId: line.roundId,
+            selections: line.selections,
+            expected: expected?.arrivedQty ?? null,
+            current,
+          });
+        }
+      }
+    }
 
     let allocated = 0;
     let released = 0;
@@ -364,10 +415,29 @@ export async function registerBatchArrivals(
           `${formatSelectionsLabel(line.selections)}: ${locked} ш хүлээлгэн өгсөн тул ${line.arrivedQty} болгож болохгүй.`,
         );
       }
+      if (line.arrivedQty > ordered) {
+        const extra = line.arrivedQty - ordered;
+        const noted = (opts.notes ?? [])
+          .filter(
+            (note) =>
+              note.kind === 'EXCESS' &&
+              note.roundId === line.roundId &&
+              variantKey(note.selections) === variantKey(line.selections),
+          )
+          .reduce((sum, note) => sum + note.qty, 0);
+        if (noted < extra) {
+          throw badRequest(
+            `${formatSelectionsLabel(line.selections)}: захиалснаас ${extra} ш илүү. Илүү тоо борлуулах үлдэгдэлд нэмэгдэхгүй — зөрүүгээр бүртгэнэ.`,
+          );
+        }
+      }
       const target = Math.min(ordered, line.arrivedQty);
       if (line.arrivedQty > ordered) unused += line.arrivedQty - ordered;
       const delta = target - current;
       if (delta === 0) continue;
+      if (delta < 0 && !opts.reason?.trim()) {
+        throw badRequest('Ирсэн тоог багасгахдаа шалтгаан бичнэ.');
+      }
 
       if (delta > 0) {
         const waiting = pool.filter((i) => !i.handedOverAt && i.arrivedQty < i.qty).map(toLine);
@@ -426,6 +496,8 @@ export async function registerBatchArrivals(
       `Багц "${batch.name}" — ирсэн тоо зассан`,
     );
 
+    await writeArrivalNotes(tx, batch.id, actor, opts.notes);
+
     await audit(
       {
         actor,
@@ -436,6 +508,7 @@ export async function registerBatchArrivals(
           allocated,
           released,
           unused,
+          reason: opts.reason ?? null,
           ordersArrived: promoted.length,
           ordersReverted: reverted.length,
           lines: lines.map((l) => ({
@@ -452,4 +525,194 @@ export async function registerBatchArrivals(
   });
 
   return result;
+}
+
+async function writeArrivalNotes(
+  tx: Prisma.TransactionClient,
+  batchId: string,
+  actor: string,
+  notes: ArrivalNoteInput[] | undefined,
+) {
+  if (!notes?.length) return;
+  for (const note of notes) {
+    if (note.qty <= 0) throw badRequest('Зөрүүний тоо 0-ээс их байна.');
+    if (note.kind !== 'DAMAGED' && note.kind !== 'SHORT' && note.kind !== 'EXCESS') {
+      throw badRequest('Зөрүүний төрөл буруу.');
+    }
+    await tx.batchArrivalNote.create({
+      data: {
+        batchId,
+        roundId: note.roundId,
+        skuKey: skuKeyOf(note.selections),
+        selections: note.selections,
+        kind: note.kind,
+        qty: note.qty,
+        note: note.note.trim().slice(0, 300),
+        actor,
+      },
+    });
+  }
+}
+
+export type ArrivalAddLine = {
+  roundId: string;
+  selections: Record<string, string>;
+  addQty: number;
+};
+
+export type ArrivalPreviewOrder = {
+  orderId: string;
+  code: string;
+  add: number;
+  remainingAfter: number;
+  fullyArrived: boolean;
+};
+
+export type ArrivalPreviewLine = {
+  roundId: string;
+  selections: Record<string, string>;
+  label: string;
+  currentArrived: number;
+  orderedQty: number;
+  addQty: number;
+  allocations: ArrivalPreviewOrder[];
+  stillWaiting: { orderId: string; code: string; remaining: number }[];
+};
+
+export async function previewBatchArrivalAdds(batchId: string, lines: ArrivalAddLine[]) {
+  if (lines.length === 0) throw badRequest('Энэ удаа ирсэн тоо оруулна уу.');
+  const batch = await prisma.batch.findFirst({
+    where: { id: batchId, deletedAt: null },
+    include: { rounds: { where: { deletedAt: null }, select: { id: true } } },
+  });
+  if (!batch) throw notFound('Багц олдсонгүй.');
+  if (batch.stage !== 'IN_TRANSIT') {
+    throw conflict('Ирсэн тоог зөвхөн зам дээр байх үед бүртгэнэ.');
+  }
+  if (batch.rounds.length === 0) {
+    throw conflict('Холбоос дутуу. Тойрог холбохгүйгээр ирэлт бүртгэхгүй.');
+  }
+  const roundIds = new Set(batch.rounds.map((r) => r.id));
+  for (const line of lines) {
+    if (!roundIds.has(line.roundId)) throw badRequest('Энэ багцад байхгүй бараа байна.');
+    if (!Number.isInteger(line.addQty) || line.addQty < 0) {
+      throw badRequest('Энэ удаа ирсэн тоо сөрөг байж болохгүй.');
+    }
+  }
+
+  const items = await prisma.orderItem.findMany({
+    where: {
+      roundId: { in: lines.map((l) => l.roundId) },
+      cancelledAt: null,
+      order: eligibleOrderWhere(),
+    },
+    select: {
+      id: true,
+      roundId: true,
+      qty: true,
+      arrivedQty: true,
+      handedOverAt: true,
+      selections: true,
+      size: true,
+      color: true,
+      order: {
+        select: {
+          id: true,
+          code: true,
+          createdAt: true,
+          subtotal: true,
+          paidAmount: true,
+          refundedAmount: true,
+          leasingFee: true,
+        },
+      },
+    },
+  });
+
+  const preview: ArrivalPreviewLine[] = [];
+  const expected: { roundId: string; selections: Record<string, string>; arrivedQty: number }[] = [];
+
+  for (const line of lines) {
+    if (line.addQty === 0) continue;
+    const pool = items.filter(
+      (item) =>
+        item.roundId === line.roundId &&
+        variantKey(itemSelections(item)) === variantKey(line.selections) &&
+        (item.handedOverAt || isProductPaid(item.order)),
+    );
+    const orderedQty = pool.reduce((s, i) => s + i.qty, 0);
+    const currentArrived = pool.reduce(
+      (s, i) => s + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
+      0,
+    );
+    if (currentArrived + line.addQty > orderedQty) {
+      throw badRequest(
+        `${formatSelectionsLabel(line.selections)}: захиалснаас илүү тоо хуваарилагдахгүй.`,
+      );
+    }
+    const waiting = pool
+      .filter((i) => !i.handedOverAt && i.arrivedQty < i.qty)
+      .map((i) => ({
+        id: i.id,
+        orderId: i.order.id,
+        orderCode: i.order.code,
+        qty: i.qty,
+        arrivedQty: i.arrivedQty,
+        orderCreatedAt: i.order.createdAt,
+      }));
+    const { allocations } = allocateFifo(waiting, line.addQty);
+    const remainingById = new Map(waiting.map((w) => [w.orderId, w.qty - w.arrivedQty]));
+    for (const row of allocations) {
+      remainingById.set(row.orderId, (remainingById.get(row.orderId) ?? 0) - row.add);
+    }
+    preview.push({
+      roundId: line.roundId,
+      selections: line.selections,
+      label: formatSelectionsLabel(line.selections),
+      currentArrived,
+      orderedQty,
+      addQty: line.addQty,
+      allocations: allocations.map((row) => ({
+        orderId: row.orderId,
+        code: row.orderCode ?? row.orderId,
+        add: row.add,
+        remainingAfter: remainingById.get(row.orderId) ?? 0,
+        fullyArrived: row.fullyArrived,
+      })),
+      stillWaiting: [...remainingById.entries()]
+        .filter(([, remaining]) => remaining > 0)
+        .map(([orderId, remaining]) => {
+          const item = waiting.find((w) => w.orderId === orderId);
+          return { orderId, code: item?.orderCode ?? orderId, remaining };
+        }),
+    });
+    expected.push({ roundId: line.roundId, selections: line.selections, arrivedQty: currentArrived });
+  }
+
+  return {
+    fifoNote: 'Түрүүлж захиалсан захиалгад эхлээд хуваарилна. Энэ дарааллыг өөрчлөхгүй.',
+    lines: preview,
+    expected,
+  };
+}
+
+export async function confirmBatchArrivalAdds(
+  batchId: string,
+  input: {
+    lines: ArrivalAddLine[];
+    expected: { roundId: string; selections: Record<string, string>; arrivedQty: number }[];
+    notes?: ArrivalNoteInput[];
+  },
+  actor: string,
+) {
+  const preview = await previewBatchArrivalAdds(batchId, input.lines);
+  const setLines: RegisterArrivalLine[] = preview.lines.map((line) => ({
+    roundId: line.roundId,
+    selections: line.selections,
+    arrivedQty: line.currentArrived + line.addQty,
+  }));
+  return registerBatchArrivals(batchId, setLines, actor, new Date(), {
+    expected: input.expected,
+    notes: input.notes,
+  });
 }

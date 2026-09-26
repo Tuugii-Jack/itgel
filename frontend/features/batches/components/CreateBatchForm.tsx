@@ -9,6 +9,7 @@ import type { AdminBatch } from "@/lib/types";
 export function CreateBatchForm({ onCreated }: { onCreated: (batch: AdminBatch) => void }) {
   const toast = useToast();
   const [name, setName] = useState("");
+  const [cargoRef, setCargoRef] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,7 +17,10 @@ export function CreateBatchForm({ onCreated }: { onCreated: (batch: AdminBatch) 
     setBusy(true);
     setError(null);
     try {
-      const batch = await adminApi.createBatch({ name: name.trim() });
+      const batch = await adminApi.createBatch({
+        name: name.trim(),
+        cargoRef: cargoRef.trim() || undefined,
+      });
       onCreated({
         ...batch,
         orderCount: 0,
@@ -40,6 +44,10 @@ export function CreateBatchForm({ onCreated }: { onCreated: (batch: AdminBatch) 
         <div className="flex-1">
           <div className="mb-1.5 text-[13px] text-ink-2">Багцын нэр</div>
           <Input value={name} onChange={setName} placeholder="Жишээ: 8-р сарын ачаа" />
+        </div>
+        <div className="flex-1">
+          <div className="mb-1.5 text-[13px] text-ink-2">Карго / тээврийн лавлагаа</div>
+          <Input value={cargoRef} onChange={setCargoRef} placeholder="Заавал биш" />
         </div>
         <Button onClick={create} loading={busy} disabled={!name.trim()}>
           Үүсгэх

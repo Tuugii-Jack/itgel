@@ -7,21 +7,36 @@ import { CargoFeeEditor } from "@/components/admin/CargoFeeEditor";
 import {
   BATCH_STAGE_LABEL,
   Metric,
-  OrderBadge,
   ProductStatusBadge,
   Table,
   Td,
   Th,
 } from "@/components/admin/shared";
 import { Badge, Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
-import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import { useToast } from "@/lib/toast";
-import { dayLabel, money, rangeLabel } from "@/lib/format";
+import { dayLabel, rangeLabel } from "@/lib/format";
+import type { BatchProgress } from "@/lib/types";
 import { useBatchDetail } from "../hooks/useBatchDetail";
-import { ArrivalSmsPanel } from "./ArrivalSmsPanel";
 import { ClosedRoundPicker } from "./ClosedRoundPicker";
 import { EditBatchForm } from "./EditBatchForm";
+import { BatchHistoryPanel } from "./BatchHistoryPanel";
+import { BatchOrdersPanel } from "./BatchOrdersPanel";
 import { STAGES } from "./StageBar";
+
+const TABS = [
+  { id: "products", label: "Бараа" },
+  { id: "orders", label: "Холбогдох захиалга" },
+  { id: "history", label: "Үйлдлийн түүх" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
+const PROGRESS_TONE: Record<BatchProgress, "info" | "warn" | "ok" | "danger"> = {
+  in_transit: "info",
+  partial: "warn",
+  complete: "ok",
+  mismatch: "danger",
+};
 
 /** Нэг багцын дэлгэрэнгүй — бараа, захиалга, шат бүгд нэг дор. */
 export function BatchDetail({
@@ -38,6 +53,7 @@ export function BatchDetail({
   const toast = useToast();
   const [picking, setPicking] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [tab, setTab] = useState<TabId>("products");
   const {
     batch,
     setBatch,
@@ -45,6 +61,7 @@ export function BatchDetail({
     error,
     busyKey,
     load,
+    loadOrders,
     advance,
     revert,
     removeProduct,
@@ -77,10 +94,6 @@ export function BatchDetail({
   }
 
   const editable = batch.stage === "IN_TRANSIT";
-  const canOmit = editable;
-  const unpaidCount = batch.orders.filter(
-    (o) => (o.paidAmount ?? 0) < o.subtotal,
-  ).length;
 
   return (
     <div>
@@ -108,11 +121,18 @@ export function BatchDetail({
       <div className="mb-4">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="m-0 text-[20px] font-medium">{batch.name}</h1>
+          {batch.progress && (
+            <Badge tone={PROGRESS_TONE[batch.progress]}>
+              {batch.progressLabel ?? batch.progress}
+            </Badge>
+          )}
           <Badge tone={batch.stage === "DONE" ? "ok" : "info"}>
             {BATCH_STAGE_LABEL[batch.stage]}
           </Badge>
         </div>
         <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-ink-2">
+          {batch.cargoRef && <span>Карго: {batch.cargoRef}</span>}
+          <span className="tnum">Үүссэн: {dayLabel(batch.createdAt)}</span>
           {batch.deadline && (
             <span className="tnum">Захиалга хаагдах: {dayLabel(batch.deadline)}</span>
           )}
@@ -135,7 +155,6 @@ export function BatchDetail({
         />
       )}
 
-      {/* Шатны зам — аль шатанд явааг нэг харцаар. */}
       <Card className="mb-4 p-4">
         <div className="flex items-center">
           {STAGES.map((stage, i) => {
@@ -167,16 +186,29 @@ export function BatchDetail({
         </div>
       </Card>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Metric label="Бараа" value={batch.products.length} />
-        <Metric label="Захиалга" value={batch.orders.length} />
-        <Metric label="Нийт дүн" value={money(batch.totalValue)} />
-        <Metric label="Карго" value={money(batch.totalCargo ?? 0)} />
-        <Metric
-          label="Дутуу төлбөр"
-          value={money(batch.totalDue)}
-          tone={batch.totalDue > 0 ? "warn" : "ok"}
-        />
+      {(batch.unlinkedQty ?? 0) > 0 && (
+        <div className="mb-4">
+          <ErrorNote>
+            Холбоос дутуу: {batch.unlinkedQty} ш захиалсан барааны тойрог энэ багцад холбогдоогүй.
+            Ирсэн/дутууг 0 эсвэл бүрэн гэж тооцохгүй. Таамгаар тойрог холбохгүй. Ирэлт бүртгэхийн
+            өмнө «Бараа нэмэх»-ээр тойрог сонгоно.
+          </ErrorNote>
+        </div>
+      )}
+
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric label="Захиалсан ширхэг" value={`${batch.orderedQty ?? 0} ш`} />
+        <Metric label="Багцад холбосон" value={`${batch.linkedQty ?? 0} ш`} />
+        <Metric label="Ирсэн" value={`${batch.arrivedQty ?? 0} ш`} />
+        {(batch.unlinkedQty ?? 0) > 0 ? (
+          <Metric label="Холбоос дутуу" value={`${batch.unlinkedQty} ш`} tone="warn" />
+        ) : (
+          <Metric
+            label="Үлдсэн"
+            value={`${batch.remainingQty ?? 0} ш`}
+            tone={(batch.remainingQty ?? 0) > 0 ? "warn" : "ok"}
+          />
+        )}
       </div>
 
       {error && (
@@ -185,267 +217,165 @@ export function BatchDetail({
         </div>
       )}
 
-      {/* --- Багцын бараанууд --- */}
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="m-0 text-[16px] font-medium">Багцын бараа</h2>
-        {editable && (
-          <Button size="sm" onClick={() => setPicking((v) => !v)}>
-            {picking ? "Болих" : "Бараа нэмэх"}
-          </Button>
-        )}
+      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => {
+              setTab(item.id);
+              if (item.id === "orders") void loadOrders();
+            }}
+            className={`h-11 shrink-0 px-3 text-[14px] ${
+              tab === item.id
+                ? "border-b-2 border-ink font-medium text-ink"
+                : "cursor-pointer text-ink-2"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
-      {picking && (
-        <ClosedRoundPicker
+      {tab === "products" && (
+        <>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="m-0 text-[16px] font-medium">Багцын бараа</h2>
+            {editable && (
+              <Button size="sm" onClick={() => setPicking((v) => !v)}>
+                {picking ? "Болих" : "Бараа нэмэх"}
+              </Button>
+            )}
+          </div>
+
+          {picking && (
+            <ClosedRoundPicker
+              batch={batch}
+              onAdded={(products) => {
+                setBatch((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        products: [
+                          ...prev.products,
+                          ...products.filter(
+                            (p) => !prev.products.some((x) => x.roundId === p.roundId),
+                          ),
+                        ],
+                      }
+                    : prev,
+                );
+                toast.success(`${products.length} гаргалт багцад нэмэгдлээ.`);
+                void load(true);
+                onListChanged();
+              }}
+            />
+          )}
+
+          {batch.products.length === 0 ? (
+            <Empty>
+              {(batch.unlinkedQty ?? 0) > 0
+                ? "Захиалгатай боловч тойрог холбогдоогүй. Холбоос дутуу тул ирэлт бүртгэхгүй."
+                : editable
+                  ? "Бараа нэмээгүй байна. «Бараа нэмэх» товчоор хаагдсан гаргалтыг сараар сонгоорой."
+                  : "Энэ багцад бараа холбогдоогүй."}
+            </Empty>
+          ) : (
+            <Table>
+              <thead>
+                <tr>
+                  <Th>Бараа</Th>
+                  <Th className="text-right">Хүлээгдэж буй</Th>
+                  <Th className="text-right">Ирсэн</Th>
+                  <Th className="text-right">Дутуу</Th>
+                  <Th>Төлөв</Th>
+                  {editable && <Th />}
+                </tr>
+              </thead>
+              <tbody>
+                {batch.products.map((p) => {
+                  const arrived = (p.variants ?? []).reduce((s, v) => s + v.arrivedQty, 0);
+                  const remaining = (p.variants ?? []).reduce((s, v) => s + v.remainingQty, 0);
+                  return (
+                    <tr key={p.roundId}>
+                      <Td>
+                        <div className="flex items-center gap-2.5">
+                          <ProductImage
+                            src={p.image}
+                            alt={p.name}
+                            className="h-10 w-10 shrink-0 rounded-[8px]"
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate text-[14px]">{p.name}</div>
+                            <div className="text-[12px] text-muted">#{p.roundNo}-р гаргалт</div>
+                          </div>
+                        </div>
+                      </Td>
+                      <Td className="text-right">
+                        <span className="tnum">{p.orderedQty} ш</span>
+                      </Td>
+                      <Td className="text-right">
+                        <span className="tnum">{arrived} ш</span>
+                      </Td>
+                      <Td className="text-right">
+                        <span className={`tnum ${remaining > 0 ? "text-warn" : "text-ok"}`}>
+                          {remaining} ш
+                        </span>
+                      </Td>
+                      <Td>
+                        <ProductStatusBadge status={p.status} />
+                      </Td>
+                      {editable && (
+                        <Td className="text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => removeProduct(p.roundId, p.name)}
+                            loading={busyKey === `remove:${p.roundId}`}
+                          >
+                            Хасах
+                          </Button>
+                        </Td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </Table>
+          )}
+
+          <div className="mt-4">
+            <ArrivalRegister
+              batch={batch}
+              onSaved={() => {
+                void load(true);
+                onListChanged();
+              }}
+            />
+          </div>
+
+          <CargoFeeEditor
+            batch={batch}
+            onSaved={async () => {
+              await load(true);
+              onListChanged();
+            }}
+          />
+        </>
+      )}
+
+      {tab === "orders" && (
+        <BatchOrdersPanel
           batch={batch}
-          onAdded={(products) => {
-            setBatch((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    products: [
-                      ...prev.products,
-                      ...products.filter(
-                        (p) => !prev.products.some((x) => x.roundId === p.roundId),
-                      ),
-                    ],
-                  }
-                : prev,
-            );
-            toast.success(`${products.length} гаргалт багцад нэмэгдлээ.`);
-            void load(true);
-            onListChanged();
-          }}
+          busyKey={busyKey}
+          onOpenOrder={onOpenOrder}
+          onOmit={omitOrder}
+          onReinstate={reinstateOrder}
+          onSmsSent={() => void load(true, { withOrders: true })}
         />
       )}
 
-      {batch.products.length === 0 ? (
-        <Empty>
-          {editable
-            ? "Бараа нэмээгүй байна. «Бараа нэмэх» товчоор хаагдсан гаргалтыг сараар сонгоорой."
-            : "Энэ багцад бараа холбогдоогүй."}
-        </Empty>
-      ) : (
-        <Table>
-          <thead>
-            <tr>
-              <Th>Бараа</Th>
-              <Th className="text-right">Зарах үнэ</Th>
-              <Th>Хаагдсан</Th>
-              <Th className="text-right">Захиалга</Th>
-              <Th>Төлөв</Th>
-              {editable && <Th />}
-            </tr>
-          </thead>
-          <tbody>
-            {batch.products.map((p) => (
-              <tr key={p.roundId}>
-                <Td>
-                  <div className="flex items-center gap-2.5">
-                    <ProductImage
-                      src={p.image}
-                      alt={p.name}
-                      className="h-10 w-10 shrink-0 rounded-[8px]"
-                    />
-                    <div className="min-w-0">
-                      <div className="truncate text-[14px]">{p.name}</div>
-                      <div className="text-[12px] text-muted">#{p.roundNo}-р гаргалт</div>
-                    </div>
-                  </div>
-                </Td>
-                <Td className="text-right">
-                  <span className="tnum">{money(p.sellPrice)}</span>
-                </Td>
-                <Td>
-                  <span className="tnum text-[13px]">
-                    {p.closeAt ? dayLabel(p.closeAt) : "—"}
-                  </span>
-                </Td>
-                <Td className="text-right">
-                  <span className="tnum">
-                    {p.orderedQty} ш · {p.customerCount} хүн
-                  </span>
-                </Td>
-                <Td>
-                  <ProductStatusBadge status={p.status} />
-                </Td>
-                {editable && (
-                  <Td className="text-right">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => removeProduct(p.roundId, p.name)}
-                      loading={busyKey === `remove:${p.roundId}`}
-                    >
-                      Хасах
-                    </Button>
-                  </Td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-
-      <div className="mt-4">
-        <ArrivalRegister batch={batch} onSaved={() => load(true)} />
-      </div>
-
-      <CargoFeeEditor
-        batch={batch}
-        onSaved={async () => {
-          await load(true);
-          onListChanged();
-        }}
-      />
-
-      {(batch.stage === "AT_WAREHOUSE" || batch.stage === "DONE") && (
-        <ArrivalSmsPanel batch={batch} onSent={() => load(true)} />
-      )}
-
-      {/* --- Багцын захиалгууд --- */}
-      <h2 className="mt-6 mb-2 text-[16px] font-medium">Захиалгууд</h2>
-      {unpaidCount > 0 && (
-        <Card className="mb-3 border-warn bg-warn-bg p-3">
-          <div className="text-[13px] text-warn">
-            <span className="tnum font-medium">{unpaidCount}</span> захиалгын төлбөр дутуу
-            {editable && " — урагшлуулахгүй бол «Хасах»."}
-          </div>
-        </Card>
-      )}
-      {batch.orders.length === 0 ? (
-        <Empty>Захиалга алга. Хаагдсан гаргалт нэмэхэд захиалгууд энд орно.</Empty>
-      ) : (
-        <Table>
-          <thead>
-            <tr>
-              <Th>Код</Th>
-              <Th>Харилцагч</Th>
-              <Th className="text-right">Дүн</Th>
-              <Th>Төлбөр</Th>
-              <Th>Төлөв</Th>
-              {canOmit && <Th className="text-right" />}
-            </tr>
-          </thead>
-          <tbody>
-            {batch.orders.map((order) => (
-              <tr
-                key={order.id}
-                onClick={() => onOpenOrder(order.id)}
-                className="cursor-pointer transition-colors hover:bg-surface"
-              >
-                <Td>
-                  <span className="tnum text-[13px] underline underline-offset-2">
-                    {order.code}
-                  </span>
-                </Td>
-                <Td>
-                  <div className="text-[14px]">{order.customer.name ?? "Нэргүй"}</div>
-                  <div className="tnum text-[12px] text-muted">{order.customer.phone}</div>
-                </Td>
-                <Td className="text-right">
-                  <span className="tnum">{money(order.subtotal)}</span>
-                  <div className="text-[12px] text-muted">{order.itemCount} ш</div>
-                </Td>
-                <Td onClick={(e) => e.stopPropagation()}>
-                  <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                    {PAYMENT_LABEL_SHORT[order.paymentState]}
-                  </Badge>
-                  {order.dueAmount > 0 && (
-                    <div className="tnum mt-0.5 text-[12px] text-warn">
-                      үлдэгдэл {money(order.dueAmount)}
-                    </div>
-                  )}
-                </Td>
-                <Td>
-                  <OrderBadge status={order.status} />
-                </Td>
-                {canOmit && (
-                  <Td className="text-right" onClick={(e) => e.stopPropagation()}>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      loading={busyKey === `omit:${order.id}`}
-                      disabled={busyKey !== null}
-                      onClick={() => omitOrder(order)}
-                    >
-                      Хасах
-                    </Button>
-                  </Td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-
-      {/* --- Хассан захиалгууд --- */}
-      {(batch.omittedOrders?.length ?? 0) > 0 && (
-        <>
-          <h2 className="mt-6 mb-1 text-[16px] font-medium">Хассан захиалгууд</h2>
-          <p className="mt-0 mb-2 text-[13px] text-ink-2">
-            Төлбөр ороогүй тул багцаас хассан. Мөнгө орвол (хоцорсон ч) дахин оруулж бэлдэнэ.
-          </p>
-          <Table>
-            <thead>
-              <tr>
-                <Th>Код</Th>
-                <Th>Харилцагч</Th>
-                <Th className="text-right">Дүн</Th>
-                <Th>Төлбөр</Th>
-                <Th className="text-right" />
-              </tr>
-            </thead>
-            <tbody>
-              {batch.omittedOrders.map((order) => {
-                const canReinstate = order.dueAmount <= 0 && batch.stage !== "DONE";
-                return (
-                  <tr
-                    key={order.id}
-                    onClick={() => onOpenOrder(order.id)}
-                    className="cursor-pointer transition-colors hover:bg-surface"
-                  >
-                    <Td>
-                      <span className="tnum text-[13px] underline underline-offset-2">
-                        {order.code}
-                      </span>
-                    </Td>
-                    <Td>
-                      <div className="text-[14px]">{order.customer.name ?? "Нэргүй"}</div>
-                      <div className="tnum text-[12px] text-muted">{order.customer.phone}</div>
-                    </Td>
-                    <Td className="text-right">
-                      <span className="tnum">{money(order.subtotal)}</span>
-                    </Td>
-                    <Td onClick={(e) => e.stopPropagation()}>
-                      <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                        {PAYMENT_LABEL_SHORT[order.paymentState]}
-                      </Badge>
-                      {order.dueAmount > 0 ? (
-                        <div className="tnum mt-0.5 text-[12px] text-warn">
-                          үлдэгдэл {money(order.dueAmount)}
-                        </div>
-                      ) : (
-                        <div className="mt-0.5 text-[12px] text-ok">Төлбөр орсон — оруулж болно</div>
-                      )}
-                    </Td>
-                    <Td className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        size="sm"
-                        disabled={!canReinstate || busyKey !== null}
-                        loading={busyKey === `reinstate:${order.id}`}
-                        onClick={() => reinstateOrder(order)}
-                      >
-                        Дахин оруулах
-                      </Button>
-                    </Td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </Table>
-        </>
-      )}
+      {tab === "history" && <BatchHistoryPanel batch={batch} />}
     </div>
   );
 }

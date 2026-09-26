@@ -24,6 +24,7 @@ export function EditBatchForm({
   const [etaFrom, setEtaFrom] = useState(toDateInput(batch.etaFrom));
   const [etaTo, setEtaTo] = useState(toDateInput(batch.etaTo));
   const [weightKg, setWeightKg] = useState(batch.weightKg?.toString() ?? "");
+  const [cargoRef, setCargoRef] = useState(batch.cargoRef ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +38,7 @@ export function EditBatchForm({
         etaFrom: etaFrom || null,
         etaTo: etaTo || null,
         weightKg: weightKg ? Number(weightKg) : null,
+        cargoRef: cargoRef.trim() || null,
       });
       onSaved(updated);
     } catch (e) {
@@ -50,10 +52,14 @@ export function EditBatchForm({
 
   return (
     <Card className="mb-4 p-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <div className="mb-1.5 text-[13px] text-ink-2">Нэр</div>
           <Input value={name} onChange={setName} />
+        </div>
+        <div>
+          <div className="mb-1.5 text-[13px] text-ink-2">Карго лавлагаа</div>
+          <Input value={cargoRef} onChange={setCargoRef} placeholder="Заавал биш" />
         </div>
         <div>
           <div className="mb-1.5 text-[13px] text-ink-2">Захиалга хаагдах</div>

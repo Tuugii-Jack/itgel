@@ -8,8 +8,11 @@ import { unitCargoFee } from '../../services/cargoFee.js';
 import { computeTotals, paymentState, PAYMENT_STATE_LABEL } from '../../services/money.js';
 import { roundStats } from '../../services/roundStats.js';
 import { batchSummary, orderStatusLabel } from '../../services/serialize.js';
+import { EMPTY_BATCH_QTY, qtyByBatchIds } from './list.js';
+import { batchProgressLabel, batchProgressOf } from './progress.js';
 
-export async function loadBatchDetail(id: string) {
+export async function loadBatchDetail(id: string, opts: { includeOrders?: boolean } = {}) {
+  const includeOrders = opts.includeOrders !== false;
   const batch = await prisma.batch.findUnique({
     where: { id },
     include: {
@@ -35,15 +38,17 @@ export async function loadBatchDetail(id: string) {
   }
 
   const roundIds = batch.rounds.map((r) => r.id);
-  const [activeIds, omittedIds] = await Promise.all([
+  const [activeIds, omittedIds, qtyMap] = await Promise.all([
     findOrderIdsForBatch(prisma, batch.id, roundIds, false),
     findOrderIdsForBatch(prisma, batch.id, roundIds, true),
+    qtyByBatchIds([batch.id]),
   ]);
   const allIds = [...new Set([...activeIds, ...omittedIds])];
-  const [stats, arrivals, orderRows, arrivalDispatches] = await Promise.all([
+  const qty = qtyMap.get(batch.id) ?? EMPTY_BATCH_QTY;
+  const [stats, arrivals, orderRows, arrivalDispatches, arrivalNotes] = await Promise.all([
     roundStats(roundIds),
     summarizeRoundArrivals(prisma, roundIds),
-    allIds.length === 0
+    !includeOrders || allIds.length === 0
       ? Promise.resolve([])
       : prisma.order.findMany({
           where: { id: { in: allIds } },
@@ -63,13 +68,18 @@ export async function loadBatchDetail(id: string) {
           },
           orderBy: { createdAt: 'asc' },
         }),
-    allIds.length === 0
+    !includeOrders || allIds.length === 0
       ? Promise.resolve([])
       : prisma.smsDispatch.findMany({
           where: { relatedType: 'order', relatedId: { in: allIds }, purpose: 'arrival' },
           orderBy: { createdAt: 'desc' },
           select: { relatedId: true, status: true, error: true },
         }),
+    prisma.batchArrivalNote.findMany({
+      where: { batchId: batch.id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    }),
   ]);
 
   const arrivalSmsByOrder = new Map<string, { status: string; error: string | null }>();
@@ -80,6 +90,12 @@ export async function loadBatchDetail(id: string) {
 
   const serializeOrder = (order: (typeof orderRows)[number]) => {
     const state = paymentState(computeTotals(order));
+    const arrivedPieces = order.items.reduce(
+      (sum, i) => sum + (i.handedOverAt ? i.qty : Math.min(i.arrivedQty, i.qty)),
+      0,
+    );
+    const handedOverPieces = order.items.reduce((sum, i) => sum + (i.handedOverAt ? i.qty : 0), 0);
+    const itemCount = order.items.reduce((sum, i) => sum + i.qty, 0);
     return {
       id: order.id,
       code: order.code,
@@ -92,7 +108,13 @@ export async function loadBatchDetail(id: string) {
       paymentState: state,
       paymentStateLabel: PAYMENT_STATE_LABEL[state],
       batchOmittedAt: order.batchOmittedAt?.toISOString() ?? null,
-      itemCount: order.items.reduce((sum, i) => sum + i.qty, 0),
+      itemCount,
+      arrivedPieces,
+      handedOverPieces,
+      warehouseArrived: arrivedPieces > 0,
+      notified: Boolean(order.arrivalNotifiedAt),
+      handedOver: handedOverPieces > 0 && handedOverPieces >= itemCount,
+      handedOverPartial: handedOverPieces > 0 && handedOverPieces < itemCount,
       customer: { id: order.customer.id, name: order.customer.name, phone: order.customer.phone },
       arrivalNotifiedAt: order.arrivalNotifiedAt?.toISOString() ?? null,
       arrivalSmsStatus: arrivalSmsByOrder.get(order.id)?.status ?? null,
@@ -111,6 +133,14 @@ export async function loadBatchDetail(id: string) {
   const omittedOrders = orderRows
     .filter((o) => o.batchOmittedAt != null)
     .map(serializeOrder);
+
+  const remainingQty = Math.max(0, qty.linkedQty - qty.arrivedQty);
+  const progress = batchProgressOf({
+    stage: batch.stage,
+    orderedQty: qty.linkedQty,
+    arrivedQty: qty.arrivedQty,
+    unlinkedQty: qty.unlinkedQty,
+  });
 
   return {
     ...batchSummary(batch)!,
@@ -148,5 +178,22 @@ export async function loadBatchDetail(id: string) {
     totalCargo: orders.reduce((sum, o) => sum + o.cargoFee, 0),
     totalDue: orders.reduce((sum, o) => sum + Math.max(0, o.dueAmount), 0),
     createdAt: batch.createdAt.toISOString(),
+    orderedQty: qty.orderedQty,
+    linkedQty: qty.linkedQty,
+    unlinkedQty: qty.unlinkedQty,
+    arrivedQty: qty.arrivedQty,
+    remainingQty,
+    progress,
+    progressLabel: batchProgressLabel(progress, qty.unlinkedQty),
+    arrivalNotes: arrivalNotes.map((note) => ({
+      id: note.id,
+      roundId: note.roundId,
+      kind: note.kind,
+      qty: note.qty,
+      note: note.note,
+      actor: note.actor,
+      createdAt: note.createdAt.toISOString(),
+      selections: note.selections,
+    })),
   };
 }

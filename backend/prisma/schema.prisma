@@ -695,14 +695,37 @@ model Batch {
   weightKg  Int? // граммаар биш, бүхэл кг
   etaFrom   DateTime?
   etaTo     DateTime?
+  /// Карго/тээврийн лавлагаа — нэрээс тусдаа. Хуучин багцад хоосон.
+  cargoRef  String?
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   deletedAt DateTime?
 
-  orders Order[]
-  rounds ProductRound[]
+  orders       Order[]
+  rounds       ProductRound[]
+  arrivalNotes BatchArrivalNote[]
 
   @@index([stage])
+}
+
+/// Гэмтэл/дутуу/илүү — борлуулах үлдэгдэл, төлбөрт автоматаар нөлөөлөхгүй.
+model BatchArrivalNote {
+  id         String   @id @default(cuid())
+  batchId    String
+  roundId    String
+  skuKey     String   @default("")
+  selections Json     @default("{}")
+  /// DAMAGED | SHORT | EXCESS
+  kind       String
+  qty        Int
+  note       String   @default("")
+  actor      String
+  createdAt  DateTime @default(now())
+
+  batch Batch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+  @@index([roundId])
 }
 
 model Delivery {

@@ -10,9 +10,10 @@ import {
 } from '../../lib/orderStatus.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
-import { sendBatchArrivalSms } from '../../modules/batches/arrivalSms.js';
+import { sendBatchArrivalSms, previewBatchArrivalSms } from '../../modules/batches/arrivalSms.js';
 import { loadBatchDetail } from '../../modules/batches/detail.js';
 import { listEligibleMonths, listEligibleRounds } from '../../modules/batches/eligible.js';
+import { listBatches } from '../../modules/batches/list.js';
 import {
   advanceBatch,
   attachOrdersForRound,
@@ -24,7 +25,7 @@ import {
   resyncArrivalsForBatch,
   revertBatch,
 } from '../../services/batches.js';
-import { registerBatchArrivals } from '../../services/batchArrival.js';
+import { confirmBatchArrivalAdds, previewBatchArrivalAdds, registerBatchArrivals } from '../../services/batchArrival.js';
 import { roundStats } from '../../services/roundStats.js';
 import { finalizeRoundClose } from '../../services/orders.js';
 import { batchSummary } from '../../services/serialize.js';
@@ -37,6 +38,10 @@ const idParams = z.object({ id: z.string().min(1) });
 
 const listQuery = z.object({
   stage: z.enum(['IN_TRANSIT', 'AT_WAREHOUSE', 'DONE']).optional(),
+  progress: z.enum(['in_transit', 'partial', 'complete', 'mismatch']).optional(),
+  q: z.string().trim().max(80).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -46,43 +51,7 @@ adminBatchesRouter.get(
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
-    const where = { deletedAt: null, ...(q.stage ? { stage: q.stage } : {}) };
-
-    const [total, batches] = await Promise.all([
-      prisma.batch.count({ where }),
-      prisma.batch.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (q.page - 1) * q.pageSize,
-        take: q.pageSize,
-        include: {
-          _count: { select: { orders: { where: { deletedAt: null } } } },
-        },
-      }),
-    ]);
-
-    // Багц бүрийн нийт дүнг DB дээр нэгтгэнэ — захиалга бүрийг хариунд
-    // багтаавал том багцад хариу хэт томордог.
-    const sums = batches.length
-      ? await prisma.order.groupBy({
-          by: ['batchId'],
-          where: { batchId: { in: batches.map((b) => b.id) }, deletedAt: null },
-          _sum: { subtotal: true },
-        })
-      : [];
-    const sumByBatch = new Map(sums.map((s) => [s.batchId, s._sum.subtotal ?? 0]));
-
-    res.json({
-      data: batches.map((batch) => ({
-        ...batchSummary(batch)!,
-        orderCount: batch._count.orders,
-        totalValue: sumByBatch.get(batch.id) ?? 0,
-        nextStage: nextBatchStage(batch.stage),
-        previousStage: previousBatchStage(batch.stage),
-        createdAt: batch.createdAt.toISOString(),
-      })),
-      meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) },
-    });
+    res.json(await listBatches(q));
   }),
 );
 
@@ -115,9 +84,15 @@ adminBatchesRouter.get(
 
 adminBatchesRouter.get(
   '/:id',
-  validate({ params: idParams }),
+  validate({
+    params: idParams,
+    query: z.object({
+      slim: z.enum(['1', 'true']).optional(),
+    }),
+  }),
   asyncHandler(async (req, res) => {
-    res.json({ data: await loadBatchDetail(param(req, 'id')) });
+    const q = query<{ slim?: string }>(req);
+    res.json({ data: await loadBatchDetail(param(req, 'id'), { includeOrders: !q.slim }) });
   }),
 );
 
@@ -147,6 +122,44 @@ adminBatchesRouter.post(
   }),
 );
 
+adminBatchesRouter.get(
+  '/:id/arrival-sms/preview',
+  validate({ params: idParams }),
+  asyncHandler(async (req, res) => {
+    res.json({ data: await previewBatchArrivalSms(param(req, 'id')) });
+  }),
+);
+
+adminBatchesRouter.get(
+  '/:id/audit',
+  validate({
+    params: idParams,
+    query: z.object({
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const limit = query<{ limit: number }>(req).limit;
+    const logs = await prisma.auditLog.findMany({
+      where: { entity: 'Batch', entityId: param(req, 'id') },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    res.json({
+      data: logs.map((log) => ({
+        id: log.id,
+        actor: log.actor,
+        action: log.action,
+        entity: log.entity,
+        entityId: log.entityId,
+        before: log.before,
+        after: log.after,
+        createdAt: log.createdAt.toISOString(),
+      })),
+    });
+  }),
+);
+
 /**
  * POST /batches — шинэ багц (Зам дээр). Хаагдсан гаргалтыг дараа нь сараар нэмнэ.
  */
@@ -155,6 +168,7 @@ adminBatchesRouter.post(
   validate({
     body: z.object({
       name: z.string().trim().min(1).max(80),
+      cargoRef: z.string().trim().max(80).nullable().optional(),
       deadline: z.coerce.date().nullable().optional(),
       orderIds: z.array(z.string().min(1)).max(500).optional(),
       weightKg: z.coerce.number().int().min(0).max(100000).optional(),
@@ -165,6 +179,7 @@ adminBatchesRouter.post(
   asyncHandler(async (req, res) => {
     const body = req.body as {
       name: string;
+      cargoRef?: string | null;
       deadline?: Date | null;
       orderIds?: string[];
       weightKg?: number;
@@ -189,6 +204,7 @@ adminBatchesRouter.post(
       const created = await tx.batch.create({
         data: {
           name: body.name,
+          cargoRef: body.cargoRef || null,
           stage: 'IN_TRANSIT',
           deadline: body.deadline ?? null,
           weightKg: body.weightKg ?? null,
@@ -227,6 +243,7 @@ adminBatchesRouter.patch(
     params: idParams,
     body: z.object({
       name: z.string().trim().min(1).max(80).optional(),
+      cargoRef: z.string().trim().max(80).nullable().optional(),
       deadline: z.coerce.date().nullable().optional(),
       weightKg: z.coerce.number().int().min(0).max(100000).nullable().optional(),
       etaFrom: z.coerce.date().nullable().optional(),
@@ -541,10 +558,11 @@ adminBatchesRouter.delete(
 );
 
 /**
- * POST /batches/:id/arrivals — ирсэн НИЙТ тоог сонголт бүрээр тавина (засаж болно).
+ * POST /batches/:id/arrivals/preview — FIFO хуваарилалтыг батлахаас өмнө харуулна.
+ * SMS илгээхгүй, stock өөрчлөхгүй.
  */
 adminBatchesRouter.post(
-  '/:id/arrivals',
+  '/:id/arrivals/preview',
   validate({
     params: idParams,
     body: z.object({
@@ -553,7 +571,7 @@ adminBatchesRouter.post(
           z.object({
             roundId: z.string().min(1),
             selections: z.record(z.string(), z.string()).default({}),
-            arrivedQty: z.coerce.number().int().min(0).max(100_000),
+            addQty: z.coerce.number().int().min(0).max(100_000),
           }),
         )
         .min(1)
@@ -562,17 +580,105 @@ adminBatchesRouter.post(
   }),
   asyncHandler(async (req, res) => {
     const body = req.body as {
-      lines: { roundId: string; selections: Record<string, string>; arrivedQty?: number; qty?: number }[];
+      lines: { roundId: string; selections: Record<string, string>; addQty: number }[];
     };
-    const result = await registerBatchArrivals(
-      param(req, 'id'),
-      body.lines.map((l) => ({
-        roundId: l.roundId,
-        selections: l.selections,
-        arrivedQty: l.arrivedQty ?? l.qty ?? 0,
-      })),
-      actorOf(req),
-    );
+    res.json({ data: await previewBatchArrivalAdds(param(req, 'id'), body.lines) });
+  }),
+);
+
+/**
+ * POST /batches/:id/arrivals — ирсэн НИЙТ тоог тавина, эсвэл энэ удаагийн addQty-г батална.
+ */
+adminBatchesRouter.post(
+  '/:id/arrivals',
+  validate({
+    params: idParams,
+    body: z.object({
+      reason: z.string().trim().max(300).optional(),
+      expected: z
+        .array(
+          z.object({
+            roundId: z.string().min(1),
+            selections: z.record(z.string(), z.string()).default({}),
+            arrivedQty: z.coerce.number().int().min(0).max(100_000),
+          }),
+        )
+        .max(200)
+        .optional(),
+      notes: z
+        .array(
+          z.object({
+            roundId: z.string().min(1),
+            selections: z.record(z.string(), z.string()).default({}),
+            kind: z.enum(['DAMAGED', 'SHORT', 'EXCESS']),
+            qty: z.coerce.number().int().min(1).max(100_000),
+            note: z.string().trim().max(300).default(''),
+          }),
+        )
+        .max(50)
+        .optional(),
+      lines: z
+        .array(
+          z.object({
+            roundId: z.string().min(1),
+            selections: z.record(z.string(), z.string()).default({}),
+            arrivedQty: z.coerce.number().int().min(0).max(100_000).optional(),
+            addQty: z.coerce.number().int().min(0).max(100_000).optional(),
+          }),
+        )
+        .min(1)
+        .max(200),
+    }),
+  }),
+  asyncHandler(async (req, res) => {
+    const body = req.body as {
+      reason?: string;
+      expected?: { roundId: string; selections: Record<string, string>; arrivedQty: number }[];
+      notes?: {
+        roundId: string;
+        selections: Record<string, string>;
+        kind: 'DAMAGED' | 'SHORT' | 'EXCESS';
+        qty: number;
+        note: string;
+      }[];
+      lines: {
+        roundId: string;
+        selections: Record<string, string>;
+        arrivedQty?: number;
+        addQty?: number;
+        qty?: number;
+      }[];
+    };
+    const adds = body.lines.filter((l) => l.addQty != null);
+    if (adds.length > 0 && !(body.expected && body.expected.length > 0)) {
+      throw badRequest('Preview баталгаа алга. Эхлээд хуваарилалтыг шалгана уу.');
+    }
+    const result =
+      adds.length > 0
+        ? await confirmBatchArrivalAdds(
+            param(req, 'id'),
+            {
+              lines: body.lines.map((l) => ({
+                roundId: l.roundId,
+                selections: l.selections,
+                addQty: l.addQty ?? 0,
+              })),
+              expected: body.expected ?? [],
+              notes: body.notes,
+            },
+            actorOf(req),
+          )
+        : await registerBatchArrivals(
+            param(req, 'id'),
+            body.lines.map((l) => ({
+              roundId: l.roundId,
+              selections: l.selections,
+              arrivedQty: l.arrivedQty ?? l.qty ?? 0,
+            })),
+            actorOf(req),
+            new Date(),
+            { expected: body.expected, reason: body.reason, notes: body.notes },
+          );
     res.json({
       data: {
         allocated: result.allocated,
