@@ -283,9 +283,10 @@ export function startCron(): void {
     cron.schedule('0 3 * * *', () => void purgeDeletedOrders().catch(console.error), options),
   );
 
-  // 1 минут тутам — CallPro хүргэлтийн тайлан. SMS дахин илгээхгүй.
+  // Өдөрт нэг — CallPro хүргэлтийн тайлан. SMS дахин илгээхгүй.
+  // Vercel Hobby cron (`0 0 * * *`) production-д ажиллана; энэ нь зөвхөн удаан ажилладаг process-д.
   tasks.push(
-    cron.schedule('*/1 * * * *', () => void pollSmsDeliveries().catch(console.error), options),
+    cron.schedule('5 0 * * *', () => void pollSmsDeliveries().catch(console.error), options),
   );
   tasks.push(
     cron.schedule(

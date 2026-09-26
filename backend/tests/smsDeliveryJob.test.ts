@@ -131,7 +131,7 @@ describe('sms delivery job', () => {
 
   it('цонх дууссан ч delivered биш бол unknown', async () => {
     const createdAt = new Date('2026-09-15T00:00:00Z');
-    mocks.smsDispatch.findMany.mockResolvedValue([row({ createdAt, checkCount: 19 })]);
+    mocks.smsDispatch.findMany.mockResolvedValue([row({ createdAt, checkCount: 7 })]);
     mocks.delivery.mockResolvedValue({ status: 'pending' });
     const now = new Date(createdAt.getTime() + SMS_DELIVERY_WINDOW_MS + 1000);
     await pollSmsDeliveries(now);
@@ -139,6 +139,30 @@ describe('sms delivery job', () => {
       where: { id: 'd1' },
       data: expect.objectContaining({ status: 'unknown', nextCheckAt: null }),
     });
+  });
+
+  it('өдөр тутмын cron-оос өмнө мөр хаагдахгүй', async () => {
+    mocks.smsDispatch.findMany.mockResolvedValue([row({ checkCount: 0 })]);
+    mocks.delivery.mockResolvedValue({ status: 'queued' });
+    const now = new Date('2026-09-16T00:01:00Z');
+    await pollSmsDeliveries(now);
+    const data = mocks.smsDispatch.update.mock.calls[0]![0].data as { nextCheckAt: Date; status: string };
+    expect(data.status).toBe('queued');
+    expect(data.nextCheckAt.getTime()).toBeGreaterThan(now.getTime() + 5 * 60 * 60_000);
+    expect(data.nextCheckAt.getTime()).toBeLessThanOrEqual(now.getTime() + SMS_DELIVERY_WINDOW_MS);
+    expect(mocks.smsDispatch.findMany.mock.calls[0]![0].where.nextCheckAt).toEqual({ lte: now });
+  });
+
+  it('админ шалгалт дараагийн cron хүртэл хүлээлгэхгүй', async () => {
+    const now = new Date('2026-09-16T00:01:00Z');
+    mocks.smsDispatch.findMany.mockResolvedValue([
+      row({ nextCheckAt: new Date('2026-09-16T06:00:00Z') }),
+    ]);
+    mocks.delivery.mockResolvedValue({ status: 'delivered' });
+    const result = await pollSmsDeliveries(now, 8_000, { includeScheduled: true });
+    expect(result).toEqual({ checked: 1, delivered: 1 });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.smsDispatch.findMany.mock.calls[0]![0].where.nextCheckAt).toEqual({ not: null });
   });
 
   it('зэрэг worker нэг мөрийг хоёр удаа шалгахгүй', async () => {

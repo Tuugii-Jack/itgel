@@ -131,4 +131,52 @@ describe('dispatchSms', () => {
     expect(result.skipped).toBe(true);
     expect(mocks.send).not.toHaveBeenCalled();
   });
+
+  it('message_id-тай queued SMS-ийг дахин илгээхгүй', async () => {
+    mocks.smsDispatch.findFirst.mockResolvedValue(
+      row({ status: 'queued', providerMessageId: 'm1', acceptedAt: new Date() }),
+    );
+    const result = await dispatchSms({
+      channel: 'shop',
+      purpose: 'otp_login',
+      phone: '99112233',
+      text: 'код',
+      relatedType: 'phone_otp',
+      relatedId: 'otp-1',
+    });
+    expect(result.skipped).toBe(true);
+    expect(result.send.id).toBe('m1');
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('unknown ч message_id байвал дахин /send хийхгүй', async () => {
+    mocks.smsDispatch.findFirst.mockResolvedValue(
+      row({ status: 'unknown', providerMessageId: 'm1', acceptedAt: new Date() }),
+    );
+    const result = await dispatchSms({
+      channel: 'shop',
+      purpose: 'otp_login',
+      phone: '99112233',
+      text: 'код',
+      relatedType: 'phone_otp',
+      relatedId: 'otp-1',
+    });
+    expect(result.skipped).toBe(true);
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('unknown, message_id байхгүй бол дахин оролдож болно', async () => {
+    mocks.smsDispatch.findFirst.mockResolvedValue(
+      row({ status: 'unknown', providerMessageId: null }),
+    );
+    await dispatchSms({
+      channel: 'shop',
+      purpose: 'otp_login',
+      phone: '99112233',
+      text: 'код',
+      relatedType: 'phone_otp',
+      relatedId: 'otp-1',
+    });
+    expect(mocks.send).toHaveBeenCalledOnce();
+  });
 });

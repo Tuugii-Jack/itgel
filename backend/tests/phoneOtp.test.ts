@@ -144,6 +144,23 @@ describe('phone OTP', () => {
     expect(mocks.customer.create).not.toHaveBeenCalled();
   });
 
+  it('cooldown дотор дахин код авах нь SMS дахин илгээхгүй', async () => {
+    mocks.customer.findUnique.mockResolvedValue(null);
+    mocks.phoneOtp.findFirst.mockResolvedValue({
+      id: 'otp-old',
+      phone: '99112233',
+      code: '654321',
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+      name: null,
+    });
+    const result = await issuePhoneOtp({ phone: '99112233' });
+    expect(result.resendAfterSec).toBeGreaterThan(0);
+    expect(mocks.dispatchSms).not.toHaveBeenCalled();
+    expect(mocks.phoneOtp.create).not.toHaveBeenCalled();
+  });
+
   it('хүргэлт pending байхад зөв кодоор нэвтэрнэ', async () => {
     mocks.phoneOtp.findFirst.mockResolvedValue({
       id: 'otp-1',

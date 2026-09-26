@@ -21,6 +21,7 @@ export type SmsPurpose =
 export type SmsRelatedType = 'phone_otp' | 'order' | 'batch' | 'custom';
 
 const OPEN: SmsLifecycleStatus[] = OPEN_SMS_STATUSES;
+const SKIP_WITHOUT_RESEND: SmsLifecycleStatus[] = ['queued', 'pending', 'unknown'];
 
 export type DispatchSmsInput = {
   channel: SmsChannel;
@@ -80,23 +81,23 @@ export async function dispatchSms(input: DispatchSmsInput): Promise<DispatchSmsR
   }
 
   if (input.relatedType && input.relatedId && !input.resend) {
-    const open = await prisma.smsDispatch.findFirst({
+    const existing = await prisma.smsDispatch.findFirst({
       where: {
         relatedType: input.relatedType,
         relatedId: input.relatedId,
         purpose: input.purpose,
-        status: { in: OPEN },
+        status: { in: SKIP_WITHOUT_RESEND },
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (open) {
+    if (existing && (OPEN.includes(existing.status as SmsLifecycleStatus) || existing.providerMessageId)) {
       return {
-        dispatch: open,
+        dispatch: existing,
         send: {
-          accepted: Boolean(open.acceptedAt || open.providerMessageId),
-          status: open.status as SmsLifecycleStatus,
-          id: open.providerMessageId ?? undefined,
-          error: open.error ?? undefined,
+          accepted: Boolean(existing.acceptedAt || existing.providerMessageId),
+          status: existing.status as SmsLifecycleStatus,
+          id: existing.providerMessageId ?? undefined,
+          error: existing.error ?? undefined,
         },
         skipped: true,
       };

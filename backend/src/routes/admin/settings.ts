@@ -2,12 +2,17 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
-import { badRequest } from '../../lib/errors.js';
+import { badRequest, tooManyRequests } from '../../lib/errors.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, validate } from '../../middleware/validate.js';
+import { pollSmsDeliveries, SMS_DELIVERY_BUDGET_MS } from '../../services/smsDeliveryJob.js';
 import { getSettings, invalidateSettingsCache } from '../../services/settings.js';
+import { ipLimiters, RateLimiter } from '../../lib/rateLimit.js';
 
 export const adminSettingsRouter = Router();
+
+const smsDeliveryCheckLimiter = new RateLimiter(6, 10 * 60 * 1000);
+ipLimiters.push(smsDeliveryCheckLimiter);
 
 adminSettingsRouter.get(
   '/',
@@ -117,5 +122,30 @@ adminSettingsRouter.get(
     });
 
     res.json({ data: logs });
+  }),
+);
+
+/**
+ * POST /admin/settings/sms-delivery-check
+ * Зөвхөн хүргэлтийн GET. SMS дахин илгээхгүй. Өдөр тутмын cron-ийг бодит хугацааны хяналт гэж үзэхгүй.
+ */
+adminSettingsRouter.post(
+  '/sms-delivery-check',
+  asyncHandler(async (req, res) => {
+    const hit = smsDeliveryCheckLimiter.hit(actorOf(req));
+    if (!hit.allowed) {
+      throw tooManyRequests(
+        `Хүргэлт шалгах хязгаарт хүрлээ. ${hit.retryAfterSec} секундын дараа дахин оролдоно уу.`,
+      );
+    }
+    const result = await pollSmsDeliveries(new Date(), SMS_DELIVERY_BUDGET_MS, { includeScheduled: true });
+    await audit({
+      actor: actorOf(req),
+      action: 'SMS_DELIVERY_CHECK',
+      entity: 'SmsDispatch',
+      entityId: 'poll',
+      after: result,
+    });
+    res.json({ data: result });
   }),
 );

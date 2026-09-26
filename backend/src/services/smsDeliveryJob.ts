@@ -2,37 +2,43 @@ import type { SmsDispatch } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { smsProviderOf, type SmsLifecycleStatus } from './sms.js';
 
-/** Хүргэлт шалгах цонх. Энэ хугацаанд батлагдаагүй бол unknown — failed биш. */
-export const SMS_DELIVERY_WINDOW_MS = 24 * 60 * 60 * 1000;
-export const SMS_DELIVERY_MAX_CHECKS = 20;
+/** Хүргэлт шалгах цонх. Өдөр тутмын cron-оос өмнө хаагдахгүй. Батлагдаагүй бол unknown — failed биш. */
+export const SMS_DELIVERY_WINDOW_MS = 48 * 60 * 60 * 1000;
+export const SMS_DELIVERY_MAX_CHECKS = 8;
 export const SMS_DELIVERY_BATCH = 8;
 /** Нэг cron дуудлагад багтаан хуримтлагдсан мөрийг шалгана. Төлбөртэй plan шаардахгүй. */
 export const SMS_DELIVERY_BUDGET_MS = 8_000;
 
 const CHECKABLE: SmsLifecycleStatus[] = ['queued', 'pending', 'unknown'];
 
-const BACKOFF_MS = [
-  15_000, 30_000, 60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 30 * 60_000, 60 * 60_000,
-];
+/** Өдөрт нэг cron-д тааруулсан зай. Минут тутам backoff хэрэглэхгүй. */
+const BACKOFF_MS = [6 * 60 * 60_000, 12 * 60 * 60_000, 24 * 60 * 60_000];
 
 /**
  * Хадгалсан SmsDispatch-ийг үргэлжлүүлэн шалгана.
  * SMS дахин илгээхгүй. Timeout/5xx-ийг failed гэж үзэхгүй.
  */
+export type PollSmsDeliveriesOptions = {
+  /** true: дараагийн backoff хүлээлгүй шалгана. Cron-д хэрэглэхгүй. SMS дахин илгээхгүй. */
+  includeScheduled?: boolean;
+};
+
 export async function pollSmsDeliveries(
   now = new Date(),
   budgetMs = SMS_DELIVERY_BUDGET_MS,
+  options: PollSmsDeliveriesOptions = {},
 ): Promise<{ checked: number; delivered: number }> {
   const started = Date.now();
   let checked = 0;
   let delivered = 0;
+  const nextCheckAt = options.includeScheduled ? { not: null } : { lte: now };
 
   while (Date.now() - started < budgetMs) {
     const due = await prisma.smsDispatch.findMany({
       where: {
         status: { in: CHECKABLE },
         providerMessageId: { not: null },
-        nextCheckAt: { lte: now },
+        nextCheckAt,
         checkCount: { lt: SMS_DELIVERY_MAX_CHECKS },
       },
       orderBy: { nextCheckAt: 'asc' },
@@ -108,7 +114,10 @@ async function checkDispatch(row: SmsDispatch, now: Date): Promise<SmsLifecycleS
     return 'unknown';
   }
 
-  const delay = BACKOFF_MS[Math.min(nextCount, BACKOFF_MS.length) - 1] ?? 60 * 60_000;
+  const delay = BACKOFF_MS[Math.min(nextCount, BACKOFF_MS.length) - 1] ?? 24 * 60 * 60_000;
+  const windowEnd = new Date(row.createdAt.getTime() + SMS_DELIVERY_WINDOW_MS);
+  const scheduled = new Date(now.getTime() + delay);
+  const nextCheckAt = scheduled.getTime() > windowEnd.getTime() ? windowEnd : scheduled;
   const status: SmsLifecycleStatus =
     report.status === 'queued' || report.status === 'pending' ? report.status : 'unknown';
   await prisma.smsDispatch.update({
@@ -116,7 +125,7 @@ async function checkDispatch(row: SmsDispatch, now: Date): Promise<SmsLifecycleS
     data: {
       status,
       error: report.error ?? null,
-      nextCheckAt: new Date(now.getTime() + delay),
+      nextCheckAt,
     },
   });
   return status;

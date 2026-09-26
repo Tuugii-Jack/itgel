@@ -6,7 +6,9 @@ import {
   HttpSmsProvider,
   buildSmsProvider,
   callProDeliveryOutcome,
+  callProDetailUrl,
   callProSendOutcome,
+  callProSendUrl,
   parseSmsPhones,
   prepareCustomSms,
   smsPhoneOf,
@@ -82,9 +84,13 @@ describe('CallPro SMS contract', () => {
     expect(result.accepted).toBe(false);
   });
 
-  it('GET delivered:true бол delivered', async () => {
+  it('GET delivered event бол delivered', async () => {
     const fetchMock = vi.fn(async () =>
-      jsonRes({ uniqueId: 'm1', delivered: true, messages: [] }),
+      jsonRes({
+        uniqueId: 'm1',
+        delivered: true,
+        messages: [{ events: ['QUEUED', 'DELIVERED'] }],
+      }),
     );
     vi.stubGlobal('fetch', fetchMock);
     const result = await new CallProSmsProvider('k', '72123456').delivery('m1');
@@ -105,23 +111,47 @@ describe('CallPro SMS contract', () => {
     expect(result.status).toBe('unknown');
   });
 
-  it('холбоос эсвэл 500 алдаатай бол холбоосгүйгээр дахин илгээнэ', async () => {
+  it('CHANGED, RATE-ийг хүрсэн/хүрээгүй гэж таамаглахгүй', () => {
+    expect(
+      callProDeliveryOutcome({
+        messages: [{ events: ['QUEUED', 'CHANGED'] }],
+      }),
+    ).toEqual({ status: 'unknown' });
+    expect(
+      callProDeliveryOutcome({
+        messages: [{ events: ['QUEUED', 'RATE'] }],
+      }),
+    ).toEqual({ status: 'unknown' });
+    expect(
+      callProDeliveryOutcome({
+        messages: [{ events: ['QUEUED', 'DELIVERED', 'CHANGED'] }],
+      }),
+    ).toEqual({ status: 'unknown' });
+  });
+
+  it('send 5xx нь unknown, дахин /send хийхгүй', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonRes({ error: 'Internal server error' }, 500))
-      .mockResolvedValueOnce(jsonRes({ status: 'queued', message_id: 'm2' }));
+      .mockResolvedValueOnce(jsonRes({ error: 'Internal server error' }, 500));
     vi.stubGlobal('fetch', fetchMock);
     const result = await new CallProSmsProvider('k', '72123456').send({
       phone: '99112233',
       text: 'itgel PH-R9PZNW бараа ирлээ. https://itgelshop.mn/t/PH-R9PZNW',
     });
-    expect(result).toEqual({ accepted: true, status: 'queued', id: 'm2' });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body))).toEqual({
-      from: '72123456',
-      to: '99112233',
-      text: 'itgel PH-R9PZNW бараа ирлээ.',
-    });
+    expect(result).toMatchObject({ accepted: false, status: 'unknown' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('base URL /send-ээр төгсвөл давхар нэмэхгүй', () => {
+    expect(callProSendUrl('https://api-text.callpro.mn/v1/sms')).toBe(
+      'https://api-text.callpro.mn/v1/sms/send',
+    );
+    expect(callProSendUrl('https://api-text.callpro.mn/v1/sms/send')).toBe(
+      'https://api-text.callpro.mn/v1/sms/send',
+    );
+    expect(callProDetailUrl('https://api-text.callpro.mn/v1/sms/send', 'm1')).toBe(
+      'https://api-text.callpro.mn/v1/sms/m1',
+    );
   });
 
   it('success + delivered:false-ийг delivered гэж үзэхгүй', () => {
@@ -138,26 +168,54 @@ describe('CallPro SMS contract', () => {
   it('дутуу/танихгүй хариу unknown', () => {
     expect(callProDeliveryOutcome({})).toEqual({ status: 'unknown' });
     expect(callProDeliveryOutcome({ status: 'success' })).toEqual({ status: 'unknown' });
+    expect(callProDeliveryOutcome({ status: 'CHANGED' })).toEqual({ status: 'unknown' });
+    expect(callProDeliveryOutcome({ status: 'RATE' })).toEqual({ status: 'unknown' });
   });
 
-  it('олон хэсэг — бүх delivered:true үед л delivered', () => {
+  it('олон хэсэг — бүх DELIVERED үед л delivered', () => {
     expect(
       callProDeliveryOutcome({
         delivered: false,
-        messages: [{ delivered: true }, { delivered: true }],
-      }),
-    ).toEqual({ status: 'pending' });
-    expect(
-      callProDeliveryOutcome({
-        messages: [{ delivered: true }, { delivered: true }],
+        messages: [{ events: ['QUEUED', 'DELIVERED'] }, { events: ['QUEUED', 'DELIVERED'] }],
       }),
     ).toEqual({ status: 'delivered' });
     expect(
       callProDeliveryOutcome({
-        messages: [{ delivered: true }, { delivered: false }],
+        messages: [{ events: ['QUEUED'] }, { events: ['QUEUED', 'DELIVERED'] }],
       }),
-    ).toEqual({ status: 'pending' });
+    ).toEqual({ status: 'unknown' });
+    expect(
+      callProDeliveryOutcome({
+        messages: [{ events: ['QUEUED', 'UNDELIVERED'] }],
+      }),
+    ).toEqual({ status: 'failed', error: 'Хүргэлт амжилтгүй.' });
     expect(callProDeliveryOutcome({ messages: [{ id: 'a' }] })).toEqual({ status: 'unknown' });
+  });
+
+  it('queued → delivered, queued → undelivered', () => {
+    expect(
+      callProDeliveryOutcome({ messages: [{ events: [{ type: 'QUEUED' }, { type: 'DELIVERED' }] }] }),
+    ).toEqual({ status: 'delivered' });
+    expect(
+      callProDeliveryOutcome({ messages: [{ events: [{ event: 'QUEUED' }, { event: 'UNDELIVERED' }] }] }),
+    ).toEqual({ status: 'failed', error: 'Хүргэлт амжилтгүй.' });
+  });
+
+  it('зөрчилтэй DELIVERED+UNDELIVERED unknown', () => {
+    expect(
+      callProDeliveryOutcome({
+        messages: [{ events: ['QUEUED', 'DELIVERED'] }, { events: ['QUEUED', 'UNDELIVERED'] }],
+      }),
+    ).toEqual({ status: 'unknown' });
+  });
+
+  it('GET 401/404 нь failed биш', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ detail: 'Not found' }, 404)));
+    const missing = await new CallProSmsProvider('k', '72123456').delivery('m1');
+    expect(missing.status).toBe('unknown');
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ error: 'Unauthorized' }, 401)));
+    const denied = await new CallProSmsProvider('k', '72123456').delivery('m1');
+    expect(denied.status).toBe('unknown');
   });
 
   it('холбоос хасна', () => {
@@ -256,5 +314,36 @@ describe('SMS суваг', () => {
         sender: 'itgel',
       }),
     ).toBeInstanceOf(CallProSmsProvider);
+  });
+
+  it('шоп лизингийн URL-ийг дахин ашиглахгүй', async () => {
+    const fetchMock = vi.fn(async () => jsonRes({ status: 'queued', message_id: 'm1' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const shop = buildSmsProvider({
+      channel: 'shop',
+      provider: 'callpro',
+      apiKey: 'shop-key',
+      from: '72723038',
+      sender: 'itgel',
+    });
+    const leasing = buildSmsProvider({
+      channel: 'leasing',
+      provider: 'callpro',
+      apiKey: 'leasing-key',
+      from: '72111111',
+      sender: 'itgel',
+    });
+    await shop.send({ phone: '99112233', text: 'otp' });
+    await leasing.send({ phone: '88112233', text: 'pay' });
+    const shopBody = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    const leasingBody = JSON.parse(String((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].body));
+    expect(shopBody.from).toBe('72723038');
+    expect(leasingBody.from).toBe('72111111');
+    expect((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].headers).toEqual(
+      expect.objectContaining({ 'x-api-key': 'shop-key' }),
+    );
+    expect((fetchMock.mock.calls[1] as unknown as [string, RequestInit])[1].headers).toEqual(
+      expect.objectContaining({ 'x-api-key': 'leasing-key' }),
+    );
   });
 });

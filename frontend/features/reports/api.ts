@@ -71,6 +71,12 @@ export const adminReportsApi = {
       adminAuth,
     ).then((r) => r.data),
 
+  checkSmsDelivery: () =>
+    request<{ checked: number; delivered: number }>("/admin/settings/sms-delivery-check", {
+      ...adminAuth,
+      method: "POST",
+    }).then((r) => r.data),
+
   leasingSettlements: (query?: {
     day?: string;
     from?: string;

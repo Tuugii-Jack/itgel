@@ -49,6 +49,17 @@ export interface SmsProvider {
 export const CALLPRO_SMS_BASE_URL = 'https://api-text.callpro.mn/v1/sms';
 export const SMS_HTTP_TIMEOUT_MS = 8_000;
 
+/** POST /send — base аль хэдийн /send-ээр төгссөн бол давхар нэмэхгүй. */
+export function callProSendUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, '');
+  return /\/send$/i.test(base) ? base : `${base}/send`;
+}
+
+export function callProDetailUrl(baseUrl: string, messageId: string): string {
+  const base = baseUrl.replace(/\/+$/, '').replace(/\/send$/i, '');
+  return `${base}/${encodeURIComponent(messageId)}`;
+}
+
 export type SmsChannel = 'leasing' | 'shop';
 export type SmsProviderName = 'console' | 'http' | 'callpro';
 
@@ -72,6 +83,13 @@ export function smsResult(input: {
  * `success`/`successful`-ийг delivered гэж үзэхгүй.
  */
 export function callProSendOutcome(status: number, body: Record<string, unknown>): SmsSendResult {
+  if (status >= 500) {
+    return smsResult({
+      accepted: false,
+      status: 'unknown',
+      error: smsErrorFromBody(status, body),
+    });
+  }
   if (status < 200 || status >= 300) {
     return smsResult({
       accepted: false,
@@ -89,57 +107,116 @@ export function callProSendOutcome(status: number, body: Record<string, unknown>
     });
   }
 
-  if (body.delivered === true) {
-    return smsResult({ accepted: true, status: 'delivered', id });
-  }
-  if (body.delivered === false) {
-    const queued = body.status === 'queued';
-    return smsResult({ accepted: true, status: queued ? 'queued' : 'pending', id });
+  const named = lifecycleFromNamedStatus(body.status);
+  if (named === 'failed') {
+    return smsResult({ accepted: false, status: 'failed', id, error: smsErrorFromBody(status, body) });
   }
 
-  if (body.status === 'queued' || body.status == null || body.status === '') {
-    return smsResult({ accepted: true, status: 'queued', id });
-  }
+  return smsResult({ accepted: true, status: named === 'queued' ? 'queued' : 'pending', id });
+}
 
-  return smsResult({ accepted: true, status: 'pending', id });
+const CALLPRO_EVENT_QUEUED = new Set(['queued']);
+const CALLPRO_EVENT_DELIVERED = new Set(['delivered']);
+const CALLPRO_EVENT_UNDELIVERED = new Set(['undelivered']);
+const CALLPRO_EVENT_INCONCLUSIVE = new Set(['changed', 'rate']);
+
+function callProEventName(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  return value.trim().toLowerCase();
+}
+
+function eventsOfMessage(message: unknown): string[] | null {
+  if (!message || typeof message !== 'object') return null;
+  const events = (message as { events?: unknown }).events;
+  if (!Array.isArray(events)) return null;
+  const names: string[] = [];
+  for (const item of events) {
+    const name =
+      callProEventName(item) ??
+      (item && typeof item === 'object'
+        ? callProEventName((item as { type?: unknown }).type) ??
+          callProEventName((item as { event?: unknown }).event) ??
+          callProEventName((item as { name?: unknown }).name) ??
+          callProEventName((item as { status?: unknown }).status)
+        : null);
+    if (!name) return null;
+    names.push(name);
+  }
+  return names;
 }
 
 /**
- * CallPro GET /v1/sms/:id — төслийн одоогийн contract жишээ:
- * `{ uniqueId, delivered: true, messages: [] }`.
- * Delivered зөвхөн `delivered === true` (boolean). `delivered: false` нь failed биш.
- * `status: success` гэх мэт таамаг утгыг delivered гэж үзэхгүй.
- * Webhook schema батлагдаагүй тул webhook ашиглахгүй.
+ * CallPro GET /v1/sms/:id — `delivered` болон `messages[].events`.
+ * QUEUED = хүлээгдэж байна. DELIVERED = хүргэлт батлагдсан. UNDELIVERED = хүргэлт амжилтгүй.
+ * CHANGED, RATE-ийг хүрсэн/хүрээгүй гэж таамаглахгүй. delivered:false дангаараа failed биш.
+ * Олон сегмент бүгд DELIVERED байвал л delivered. Дутуу/зөрчилтэй хариу unknown.
  */
 export function callProDeliveryOutcome(body: Record<string, unknown>): SmsDeliveryReport {
-  const fromMessages = messagesDeliveredOf(body.messages);
-  if (body.delivered === false) {
-    return { status: body.status === 'queued' ? 'queued' : 'pending' };
+  const messages = Array.isArray(body.messages) ? body.messages : null;
+  if (messages && messages.length > 0) {
+    const perMessage: SmsLifecycleStatus[] = [];
+    for (const message of messages) {
+      const events = eventsOfMessage(message);
+      if (!events) return { status: 'unknown' };
+      perMessage.push(lifecycleFromEvents(events));
+    }
+    if (perMessage.some((status) => status === 'unknown')) return { status: 'unknown' };
+    if (perMessage.every((status) => status === 'delivered')) return { status: 'delivered' };
+    if (perMessage.every((status) => status === 'failed')) {
+      return { status: 'failed', error: 'Хүргэлт амжилтгүй.' };
+    }
+    if (perMessage.every((status) => status === 'queued' || status === 'pending')) {
+      return { status: perMessage.some((status) => status === 'pending') ? 'pending' : 'queued' };
+    }
+    return { status: 'unknown' };
   }
-  if (body.delivered === true) {
-    if (fromMessages === false) return { status: 'pending' };
+
+  const topEvents = eventsOfMessage(body);
+  if (topEvents && topEvents.length > 0) {
+    return { status: lifecycleFromEvents(topEvents), ...(lifecycleFromEvents(topEvents) === 'failed' ? { error: 'Хүргэлт амжилтгүй.' } : {}) };
+  }
+
+  const named = lifecycleFromNamedStatus(body.status);
+  if (named === 'delivered') {
+    if (body.delivered === false) return { status: 'unknown' };
     return { status: 'delivered' };
   }
-  if (fromMessages === true) return { status: 'delivered' };
-  if (fromMessages === false) return { status: 'pending' };
-  if (body.status === 'queued') return { status: 'queued' };
+  if (named === 'failed') return { status: 'failed', error: 'Хүргэлт амжилтгүй.' };
+  if (named === 'queued' || named === 'pending') return { status: named };
+
+  if (body.delivered === true) return { status: 'delivered' };
+  if (body.delivered === false) return { status: 'pending' };
   return { status: 'unknown' };
 }
 
-/** messages[] зөвхөн `delivered` boolean байвал. Дутуу/зөрчилтэй бол null. */
-function messagesDeliveredOf(messages: unknown): boolean | null {
-  if (!Array.isArray(messages) || messages.length === 0) return null;
-  const flags: boolean[] = [];
-  for (const item of messages) {
-    if (!item || typeof item !== 'object') return null;
-    const delivered = (item as { delivered?: unknown }).delivered;
-    if (delivered === true) flags.push(true);
-    else if (delivered === false) flags.push(false);
-    else return null;
+function lifecycleFromNamedStatus(status: unknown): SmsLifecycleStatus | null {
+  const name = callProEventName(status);
+  if (!name) return null;
+  if (CALLPRO_EVENT_DELIVERED.has(name)) return 'delivered';
+  if (CALLPRO_EVENT_UNDELIVERED.has(name)) return 'failed';
+  if (CALLPRO_EVENT_QUEUED.has(name)) return 'queued';
+  if (CALLPRO_EVENT_INCONCLUSIVE.has(name)) return 'unknown';
+  return null;
+}
+
+function lifecycleFromEvents(events: string[]): SmsLifecycleStatus {
+  if (events.length === 0) return 'unknown';
+  if (events.some((name) => CALLPRO_EVENT_INCONCLUSIVE.has(name))) return 'unknown';
+  const last = events[events.length - 1]!;
+  if (CALLPRO_EVENT_DELIVERED.has(last) && events.every((name) => CALLPRO_EVENT_QUEUED.has(name) || CALLPRO_EVENT_DELIVERED.has(name))) {
+    return 'delivered';
   }
-  if (flags.every(Boolean)) return true;
-  if (flags.some(Boolean)) return false;
-  return false;
+  if (CALLPRO_EVENT_UNDELIVERED.has(last) && events.every((name) => CALLPRO_EVENT_QUEUED.has(name) || CALLPRO_EVENT_UNDELIVERED.has(name))) {
+    return 'failed';
+  }
+  if (events.every((name) => CALLPRO_EVENT_QUEUED.has(name))) return 'queued';
+  if (CALLPRO_EVENT_DELIVERED.has(last) && events.some((name) => CALLPRO_EVENT_UNDELIVERED.has(name))) {
+    return 'unknown';
+  }
+  if (CALLPRO_EVENT_UNDELIVERED.has(last) && events.some((name) => CALLPRO_EVENT_DELIVERED.has(name))) {
+    return 'unknown';
+  }
+  return 'unknown';
 }
 
 /** CallPro 8 оронтой дугаар авна. +976 / зай / зураас хасна. */
@@ -274,18 +351,12 @@ export class CallProSmsProvider implements SmsProvider {
       return smsResult({ accepted: false, status: 'failed', error: 'CallPro илгээгч дугаар алга.' });
     }
 
-    const first = await this.postSend(from, to, message.text);
-    if (first.accepted) return first;
-
-    const withoutLinks = stripSmsUrls(message.text);
-    if (!withoutLinks || withoutLinks === message.text) return first;
-    const retry = await this.postSend(from, to, withoutLinks);
-    return retry.accepted ? retry : first;
+    return this.postSend(from, to, message.text);
   }
 
   private async postSend(from: string, to: string, text: string): Promise<SmsSendResult> {
     try {
-      const res = await fetchWithTimeout(`${this.baseUrl.replace(/\/$/, '')}/send`, {
+      const res = await fetchWithTimeout(callProSendUrl(this.baseUrl), {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -309,13 +380,16 @@ export class CallProSmsProvider implements SmsProvider {
     const id = messageId.trim();
     if (!id) return { status: 'unknown', error: 'message_id алга.' };
     try {
-      const res = await fetchWithTimeout(
-        `${this.baseUrl.replace(/\/$/, '')}/${encodeURIComponent(id)}`,
-        { method: 'GET', headers: { 'x-api-key': this.apiKey } },
-      );
+      const res = await fetchWithTimeout(callProDetailUrl(this.baseUrl, id), {
+        method: 'GET',
+        headers: { 'x-api-key': this.apiKey },
+      });
       const body = await readJson(res);
-      if (res.status === 401 || res.status === 402 || res.status === 403) {
-        return { status: 'failed', error: smsErrorFromBody(res.status, body) };
+      if (res.status === 401 || res.status === 403) {
+        return { status: 'unknown', error: smsErrorFromBody(res.status, body) };
+      }
+      if (res.status === 404) {
+        return { status: 'unknown', error: smsErrorFromBody(res.status, body) };
       }
       if (!res.ok) {
         return { status: 'unknown', error: smsErrorFromBody(res.status, body) };
@@ -433,14 +507,14 @@ export const leasingSms: SmsProvider = buildSmsProvider({
   sender: env.SMS_SENDER,
 });
 
-/** Дэлгүүрийн OTP + шоп админы бараа ирсэн SMS. Лизингийн түлхүүр ашиглахгүй. */
+/** Дэлгүүрийн OTP + шоп админы бараа ирсэн SMS. Лизингийн түлхүүр/илгээгч ашиглахгүй. */
 export const shopSms: SmsProvider = buildSmsProvider({
   channel: 'shop',
   provider: env.SHOP_SMS_PROVIDER ?? env.SMS_PROVIDER,
   apiKey: env.SHOP_SMS_API_KEY,
   from: env.SHOP_SMS_FROM,
-  apiUrl: env.SHOP_SMS_API_URL ?? env.SMS_API_URL,
-  sender: env.SMS_SENDER,
+  apiUrl: env.SHOP_SMS_API_URL,
+  sender: env.SHOP_SMS_FROM ?? env.SMS_SENDER,
 });
 
 /** Лизингийн SMS. Шоп OTP / бараа ирсэнд `shopSms`. */

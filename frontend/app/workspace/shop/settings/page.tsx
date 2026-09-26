@@ -15,7 +15,7 @@ import {
   Toggle,
 } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { ROLE_LABEL } from "@/lib/admin-role";
+import { ROLE_LABEL, isFullAdmin } from "@/lib/admin-role";
 import { dayTimeLabel } from "@/lib/format";
 import { AIMAGS } from "@/lib/locations";
 import { useToast } from "@/lib/toast";
@@ -31,6 +31,7 @@ export default function SettingsPage() {
   const [operators, setOperators] = useState<{ id: string; name: string; email: string; isActive: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [checkingDelivery, setCheckingDelivery] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,6 +108,24 @@ export default function SettingsPage() {
     }
   };
 
+  const checkDelivery = async () => {
+    if (checkingDelivery) return;
+    setCheckingDelivery(true);
+    setError(null);
+    try {
+      const result = await adminApi.checkSmsDelivery();
+      toast.success(
+        `Хүргэлт шалгалаа. ${result.checked} мөр, ${result.delivered} хүргэгдсэн. SMS дахин илгээгдээгүй.`,
+      );
+    } catch (e) {
+      const message = e instanceof ApiError ? e.message : "Хүргэлт шалгаж чадсангүй.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setCheckingDelivery(false);
+    }
+  };
+
   return (
     <div className="max-w-[760px]">
       <PageHead title="Тохиргоо" hint="Дэлгүүрийн мэдээлэл, төлбөр, хүргэлт" />
@@ -117,6 +136,24 @@ export default function SettingsPage() {
         </Card>
 
         <StaffAccountsCard />
+
+        {isFullAdmin(user?.role) && (
+          <Card className="flex flex-col gap-3 p-4">
+            <div className="text-[15px] font-medium">SMS хүргэлт</div>
+            <p className="m-0 text-[13px] text-ink-2">
+              Cron өдөрт нэг удаа төлөв шинэчилнэ. Энэ товч зөвхөн хүргэлтийн GET ажиллуулна, SMS дахин илгээхгүй.
+            </p>
+            <div>
+              <Button
+                variant="outline"
+                loading={checkingDelivery}
+                onClick={() => void checkDelivery()}
+              >
+                Хүргэлт шалгах
+              </Button>
+            </div>
+          </Card>
+        )}
 
         <Card className="flex flex-col gap-3 p-4">
           <div className="text-[15px] font-medium">Дэлгүүр</div>

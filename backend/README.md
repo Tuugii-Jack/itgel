@@ -118,7 +118,7 @@ Redis рүү шилжүүлнэ — интерфейс нь адил.
 | --- | --- |
 | Өдөр бүр 00:05 | `closeAt` хүрсэн барааг `CLOSED` (`autoCloseOnDeadline` асаалттай үед) |
 | Өдөр бүр 09:00 | 2+ хоног хүлээлгэн өгөөгүй захиалгын сануулга (audit log + console) |
-| Vercel Cron (Hobby: өдөрт 1) | CallPro SMS хүргэлтийн төлөв (`SmsDispatch`). SMS дахин илгээхгүй. `GET /api/cron/sms-delivery` + `CRON_SECRET`. Минут тутам шалгах бол Pro эсвэл гадаад scheduler. |
+| Vercel Cron (Hobby: өдөрт 1, `0 0 * * *`) | CallPro SMS хүргэлтийн төлөв (`SmsDispatch`). SMS дахин илгээхгүй. `GET /api/cron/sms-delivery` + `CRON_SECRET`. Админ `POST /api/admin/settings/sms-delivery-check` мөн зөвхөн GET шалгана. |
 
 Бараа ирсэн SMS автоматаар явахгүй — админ ачааны багцыг «Агуулахад» болгосны дараа товчоор илгээнэ.
 `CRON_ENABLED=false` болгож унтраана.
@@ -139,15 +139,16 @@ SMS_FROM=              # лизингийн special number, ж: 72xxxxxx
 
 ```bash
 SHOP_SMS_PROVIDER=callpro   # local: console гэж тодорхой заана
+SHOP_SMS_API_URL=https://api-text.callpro.mn/v1/sms
 SHOP_SMS_API_KEY=
-SHOP_SMS_FROM=
+SHOP_SMS_FROM=              # шопын special number, ж: 72723038
 ```
 
-Түлхүүр орсон суваг `POST https://api-text.callpro.mn/v1/sms/send` (`x-api-key`) ашиглана.
-`/send` 200 + `message_id` + `status: queued` нь хүлээн авсан гэсэн үг. Хүргэлтийг `GET /v1/sms/:message_id`-ийн `delivered === true` (boolean) дээр cron/job шалгана — HTTP хүсэлт дотор хүлээхгүй.
+Түлхүүр орсон суваг `POST https://api-text.callpro.mn/v1/sms/send` (`x-api-key`, JSON `{from,to,text}`) ашиглана. `SHOP_SMS_API_URL` аль хэдийн `/send`-ээр төгссөн бол давхар нэмэхгүй.
+`/send` 200 + `message_id` + `status: queued` нь хүлээн авсан гэсэн үг, утсанд хүрсэн гэсэн үг биш. Хүргэлтийг `GET /v1/sms/:message_id`-ийн `delivered` болон `messages[].events` (QUEUED / DELIVERED / UNDELIVERED) дээр cron/админ шалгана — HTTP хүсэлт дотор хүлээхгүй. CHANGED, RATE, `delivered:false`, 401/404/5xx/timeout-ийг failed гэж үзэхгүй.
 CallPro тохиргоо дутуу бол алдаа буцаана, console руу автоматаар шилжихгүй. Console зөвхөн `SMS_PROVIDER=console` / `SHOP_SMS_PROVIDER=console` үед, production дээр жинхэнэ илгээлт мэт амжилт буцаахгүй.
 
-Vercel Cron: `GET /api/cron/sms-delivery` (`backend/vercel.json`). Hobby дээр өдөрт нэг (`0 0 * * *`); илүү олон давтамж deploy-ыг унагаадаг. `CRON_SECRET` (Authorization: Bearer) production-д заавал. CallPro webhook schema батлагдаагүй тул webhook ашиглаагүй.
+Vercel Cron: `GET /api/cron/sms-delivery` (`backend/vercel.json`). Hobby дээр өдөрт нэг (`0 0 * * *`). Шалгах цонх 48 цаг; админ «Хүргэлт шалгах» товч мөн зөвхөн delivery GET ажиллуулна. CallPro webhook schema батлагдаагүй тул webhook ашиглаагүй.
 
 **Зураг** — presigned PUT URL. `POST /api/admin/products/:id/images` → `uploadUrl` руу файлаа
 шууд PUT хийж, дараа нь `PATCH /api/admin/products/:id/images` -ээр `publicUrl`-уудыг бүртгэнэ.
