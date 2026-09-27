@@ -14,14 +14,13 @@ import {
 } from "@/lib/checkoutIdempotency";
 import { patchCheckoutDraft, readCheckoutDraft } from "@/lib/checkoutDraft";
 import { money } from "@/lib/format";
-import { leasingFeeOf } from "@/lib/leasing";
 import { useSession } from "@/lib/session";
 import { useToast } from "@/lib/toast";
 import type { MyOrder, Store } from "@/lib/types";
 
 /**
- * Сагсны дараах алхам — нийт дүн, лизингийн мэдээллийг хараад
- * QPay эсвэл лизинг дээр нэг даралтаар захиалга бэлдэнэ. Төлбөр энд төлөгдөхгүй.
+ * Сагсны дараах алхам — нийт дүн, QPay эсвэл лизинг дээр нэг даралт.
+ * Лизингийн нөхцөл/хуваарь төлбөрийн дэлгэц дээр, лизинг сонгосны дараа. Төлбөр энд төлөгдөхгүй.
  */
 export default function CheckoutPage() {
   const cart = useCart();
@@ -64,7 +63,6 @@ export default function CheckoutPage() {
     .filter((l) => l.type === "order")
     .reduce((sum, l) => sum + l.price * l.qty, 0);
   const readyTotal = cart.subtotal - orderTotal;
-  const fee = canChooseLeasing ? leasingFeeOf(shopSubtotal, store?.leasing?.feeTiers) : 0;
 
   const persist = (patch: Parameters<typeof patchCheckoutDraft>[1]) => {
     if (!session.me) return;
@@ -213,11 +211,6 @@ export default function CheckoutPage() {
               <span>Нийт</span>
               <span>{money(cart.subtotal)}</span>
             </div>
-            {canChooseLeasing && fee > 0 && (
-              <p className="m-0 text-[13px] font-normal leading-[1.5] text-ink-2">
-                Лизингээр авбал эхлээд шимтгэл {money(fee)}. Шимтгэл төлөгдөх хүртэл захиалга баталгаажихгүй.
-              </p>
-            )}
           </div>
 
           {canChooseLeasing ? (
@@ -228,10 +221,7 @@ export default function CheckoutPage() {
                 onChange={(nextLeasing) => void placeOrder(nextLeasing)}
                 subtotal={shopSubtotal}
                 feeTiers={store?.leasing?.feeTiers}
-                payGaps={store?.leasing?.payGaps}
                 choiceHint={store?.leasing?.choiceHint}
-                termsTitle={store?.leasing?.termsTitle}
-                termsBody={store?.leasing?.termsBody}
               />
             </div>
           ) : (

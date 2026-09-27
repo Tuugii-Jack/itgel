@@ -81,7 +81,7 @@ export function PaymentPanel({
             <div className="mt-4">
               <PayMethodChoice
                 locked
-                compact
+                compact={!leasing}
                 leasing={leasing}
                 subtotal={order.subtotal}
                 feeTiers={store.leasing?.feeTiers}

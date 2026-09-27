@@ -17,7 +17,7 @@ import { money } from "@/lib/format";
 import type { LeasingPayPlan } from "@/lib/types";
 
 /**
- * Checkout: QPay/Лизинг үйлдлийн товч. Төлбөрийн самбар: сонгосон хэлбэрийн тайлбар.
+ * Checkout: QPay/Лизинг үйлдлийн товч. Нөхцөл/хуваарь зөвхөн лизинг сонгосны дараа.
  */
 export function PayMethodChoice({
   leasing,
@@ -58,12 +58,12 @@ export function PayMethodChoice({
       : storedHint,
     vars,
   );
-  const chosenLeasing = Boolean(leasing);
+  const chosenLeasing = leasing === true;
   const title = termsTitle?.trim() || DEFAULT_LEASING_TERMS_TITLE;
   const body = fillLeasingCopy(termsBody?.trim() || DEFAULT_LEASING_TERMS_BODY, vars);
-  const showLeasingPreview = !locked && !compact && subtotal > 0;
+  const showLeasingDetails = chosenLeasing && !compact && subtotal > 0;
   const plan =
-    showLeasingPreview
+    showLeasingDetails
       ? payPlan ??
         buildLeasingPayPlan({
           isLeasing: true,
@@ -79,6 +79,15 @@ export function PayMethodChoice({
   return (
     <div className="flex flex-col gap-2">
       <div className="text-[13px] text-ink-2">Төлбөрийн хэлбэр</div>
+      {showLeasingDetails && (
+        <div className="flex flex-col gap-2">
+          <div className="rounded-[8px] border border-line bg-surface px-3 py-2.5 text-[13px] leading-[1.6] text-ink-2">
+            <div className="mb-1 font-medium text-ink">{title}</div>
+            {body}
+          </div>
+          {plan && <LeasingPaySchedule plan={plan} />}
+        </div>
+      )}
       {locked ? (
         <p className="m-0 text-[14px] leading-[1.5] text-ink-2">
           {chosenLeasing ? (
@@ -94,15 +103,6 @@ export function PayMethodChoice({
         </p>
       ) : (
         <>
-          {showLeasingPreview && (
-            <div className="flex flex-col gap-2">
-              <div className="rounded-[8px] border border-line bg-surface px-3 py-2.5 text-[13px] leading-[1.6] text-ink-2">
-                <div className="mb-1 font-medium text-ink">{title}</div>
-                {body}
-              </div>
-              {plan && <LeasingPaySchedule plan={plan} />}
-            </div>
-          )}
           <p className="m-0 text-[13px] leading-[1.5] text-ink-2">
             Барааны үнийг одоо бүрэн төлнө.
           </p>
