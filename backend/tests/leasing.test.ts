@@ -417,4 +417,53 @@ describe('Лизингийн хуваарь', () => {
     expect(data.nextPayAmount).toBe(33_333);
     expect(data.payPlan?.nextAmount).toBe(33_333);
   });
+
+  it('шопын карго лизингийн хуваарьт давхар тооцогдохгүй', () => {
+    const plan = buildLeasingPayPlan({
+      isLeasing: true,
+      createdAt: new Date('2026-09-01T04:00:00.000Z'),
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 110_000,
+      refundedAmount: 0,
+      shopPaidAmount: 10_000,
+      payGaps: [5, 8, 8],
+      now: new Date('2026-09-01T04:00:00.000Z'),
+    });
+    expect(plan?.steps[0]?.status).toBe('paid');
+    expect(plan?.steps[0]?.paidAmount).toBe(10_000);
+    expect(plan?.steps.slice(1).reduce((sum, step) => sum + step.paidAmount, 0)).toBe(90_000);
+    expect(plan?.steps.reduce((sum, step) => sum + step.remaining, 0)).toBe(10_000);
+  });
+
+  it('карго төлөгдсөн ч үндсэн лизинг дутуу бол бараа барина', () => {
+    const order = {
+      isLeasing: true,
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      paidAmount: 110_000,
+      refundedAmount: 0,
+      shopPaidAmount: 10_000,
+      cargoFee: 10_000,
+      storageFee: 0,
+    };
+    expect(leasingHoldsGoods(order)).toBe(true);
+    expect(leasingView(order).principalDue).toBe(10_000);
+    const data = serializeLeasing(order);
+    expect(data.shopDueAmount).toBe(0);
+  });
+
+  it('энгийн захиалгын кассын үлдэгдлийг 0 болгож хаахгүй', () => {
+    const data = serializeLeasing({
+      isLeasing: false,
+      subtotal: 40_000,
+      paidAmount: 30_000,
+      refundedAmount: 0,
+      dueAmount: 10_000,
+      storageFee: 0,
+      cargoFee: 0,
+    });
+    expect(data.isLeasing).toBe(false);
+    expect(data.shopDueAmount).toBe(10_000);
+  });
 });

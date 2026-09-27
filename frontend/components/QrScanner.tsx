@@ -16,9 +16,12 @@ export function QrScanner({
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const onResultRef = useRef(onResult);
-  onResultRef.current = onResult;
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("Камер нээж байна…");
+
+  useEffect(() => {
+    onResultRef.current = onResult;
+  }, [onResult]);
 
   useEffect(() => {
     if (paused) return;

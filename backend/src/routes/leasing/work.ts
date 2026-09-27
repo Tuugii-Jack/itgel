@@ -8,6 +8,7 @@ export const leasingWorkRouter = Router();
 
 const todayQuery = z.object({
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  ownerAdminId: z.string().min(1).optional(),
   card: z
     .enum(['due_today', 'collected_today', 'unpaid_itgel', 'money_exception', 'sms_failed', 'sms_unknown'])
     .optional(),
@@ -26,6 +27,7 @@ leasingWorkRouter.get(
           role,
           actorId: req.auth!.sub,
           card: q.card as TodayCardKey,
+          ownerAdminId: q.ownerAdminId,
           page: q.page,
           day: q.day,
           portal: 'leasing',
@@ -37,6 +39,7 @@ leasingWorkRouter.get(
       data: await loadTodayWork({
         role,
         actorId: req.auth!.sub,
+        ownerAdminId: q.ownerAdminId,
         day: q.day,
         portal: 'leasing',
       }),

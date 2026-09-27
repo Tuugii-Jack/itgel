@@ -5,7 +5,7 @@ const db = vi.hoisted(() => {
     $queryRaw: vi.fn(),
     $executeRaw: vi.fn(),
     batch: { findFirst: vi.fn() },
-    order: { findMany: vi.fn(), update: vi.fn() },
+    order: { findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
     orderItem: { findMany: vi.fn(), update: vi.fn() },
     batchArrivalNote: { create: vi.fn() },
   };
@@ -79,6 +79,7 @@ beforeEach(() => {
   db.tx.batch.findFirst.mockResolvedValue({
     id: 'batch', name: 'Test batch', stage: 'IN_TRANSIT', rounds: [{ id: 'round' }],
   });
+  db.tx.order.updateMany.mockResolvedValue({ count: 1 });
   db.tx.order.findMany.mockImplementation(async ({ where }) => (
     where.items ? items.map((row) => ({ id: row.orderId })) : []
   ));

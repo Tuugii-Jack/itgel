@@ -166,11 +166,11 @@ describe('dispatchSms', () => {
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
-  it('unknown, message_id байхгүй бол дахин оролдож болно', async () => {
+  it('unknown, message_id байхгүй бол автоматаар дахин /send хийхгүй', async () => {
     mocks.smsDispatch.findFirst.mockResolvedValue(
       row({ status: 'unknown', providerMessageId: null }),
     );
-    await dispatchSms({
+    const result = await dispatchSms({
       channel: 'shop',
       purpose: 'otp_login',
       phone: '99112233',
@@ -178,7 +178,8 @@ describe('dispatchSms', () => {
       relatedType: 'phone_otp',
       relatedId: 'otp-1',
     });
-    expect(mocks.send).toHaveBeenCalledOnce();
+    expect(result.skipped).toBe(true);
+    expect(mocks.send).not.toHaveBeenCalled();
   });
 
   it('confirmKey нь preview биш, ижил баталгаажуулалтыг нэг dispatch болгоно', async () => {

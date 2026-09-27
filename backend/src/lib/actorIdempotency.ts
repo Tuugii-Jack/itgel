@@ -3,6 +3,10 @@ import type { Prisma } from '@prisma/client';
 import { conflict } from './errors.js';
 import { readCheckoutIdempotencyKey } from './checkoutIdempotency.js';
 
+function isUniqueConflict(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'P2002');
+}
+
 export function readActorIdempotencyKey(
   header: string | string[] | undefined,
   bodyKey?: string,
@@ -44,13 +48,25 @@ export async function beginActorIdempotency(
     }
     return { record: existing, created: false };
   }
-  const record = await tx.actorIdempotency.create({
-    data: {
-      kind: input.kind,
-      actorId: input.actorId,
-      idempotencyKey: input.key,
-      payloadHash: input.payloadHash,
-    },
-  });
-  return { record, created: true };
+  try {
+    const record = await tx.actorIdempotency.create({
+      data: {
+        kind: input.kind,
+        actorId: input.actorId,
+        idempotencyKey: input.key,
+        payloadHash: input.payloadHash,
+      },
+    });
+    return { record, created: true };
+  } catch (error) {
+    if (!isUniqueConflict(error)) throw error;
+    const raced = await loadActorIdempotency(tx, input);
+    if (!raced) throw error;
+    if (raced.payloadHash !== input.payloadHash) {
+      throw conflict('Энэ Idempotency-Key өөр хүсэлтэд ашиглагдсан.', {
+        code: 'IDEMPOTENCY_KEY_REUSED',
+      });
+    }
+    return { record: raced, created: false };
+  }
 }

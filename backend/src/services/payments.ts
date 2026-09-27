@@ -3,12 +3,13 @@ import { prisma } from '../prisma.js';
 import { audit } from '../lib/audit.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { assertRefundable, computeTotals, recalcOrderTotals, type OrderTotals } from './money.js';
-import { changeOrderStatus } from './orders.js';
+import { changeOrderStatus } from '../modules/orders/lifecycle.js';
 import { commitOrderReadyStock, releaseItemReadyStock } from './stockHold.js';
 import { createItgelSettlementsForOrder } from './itgelSettlement.js';
 import { syncOrderCargoFee } from './cargoFee.js';
 import { lockOrder } from '../lib/orderLock.js';
 import { leasingView } from '../lib/leasing.js';
+import { handedQtyOf } from '../lib/itemQty.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -184,14 +185,14 @@ export async function cancelOrderItem(input: {
     });
     if (!item) throw notFound('Захиалгын мөр олдсонгүй.');
     if (item.cancelledAt) throw conflict('Энэ мөр аль хэдийн цуцлагдсан байна.');
-    if (item.handedOverAt) {
+    if (handedQtyOf(item) > 0) {
       throw conflict('Хүлээлгэн өгсөн барааг цуцлах боломжгүй.');
     }
 
     const lineTotal = item.unitPrice * item.qty;
 
     const cancelled = await tx.orderItem.updateMany({
-      where: { id: item.id, cancelledAt: null, handedOverAt: null },
+      where: { id: item.id, cancelledAt: null, handedOverQty: 0, handedOverAt: null },
       data: { cancelledAt: new Date(), cancelReason: input.reason ?? null },
     });
     if (cancelled.count !== 1) {

@@ -143,7 +143,15 @@ export function PaymentDueCard({
         )}
         {delivery > 0 && <SumLine label="Хүргэлт" value={money(delivery)} />}
         {cargo > 0 && <SumLine label="Карго" value={money(cargo)} />}
-        {storage > 0 && <SumLine label="Агуулахын хураамж" value={money(storage)} />}
+        {storage > 0 && (
+          <>
+            <SumLine label="Агуулахын хураамж" value={money(storage)} />
+            <p className="m-0 text-[12px] leading-[1.4] text-muted">
+              Үнэгүй хоног барааны мөр бүтэн ирсэн өдрөөс. Олгоогүй үлдсэн ширхэгт одоогийн тариф.
+              Хэсэгчлэн олгоход хугацаа дахин эхлэхгүй.
+            </p>
+          </>
+        )}
         {paid > 0 && (
           <>
             <div className="my-1 h-px bg-line" />

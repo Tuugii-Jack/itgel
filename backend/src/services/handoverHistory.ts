@@ -1,5 +1,6 @@
 import { prisma } from '../prisma.js';
 import { addUbMonths, parseUbDay, startOfUbMonth, ubDateString } from '../lib/date.js';
+import { loadHandoverSales } from '../lib/handoverEvents.js';
 import { itemSelections } from '../lib/options.js';
 
 export const HANDOVER_PAY_NOTE = 'Хүлээлгэн өгөх үед авсан';
@@ -32,6 +33,14 @@ export type HandoverHistoryDay = {
   card: number;
   bank: number;
   rows: HandoverHistoryRow[];
+  unknownRecords: {
+    orderCode: string;
+    customerId: string;
+    name: string | null;
+    phone: string | null;
+    at: string;
+    label: string;
+  }[];
 };
 
 type Group = HandoverHistoryRow & { codes: Set<string>; pay: Set<string> };
@@ -44,6 +53,14 @@ type DayAcc = {
   bank: number;
   seenPay: Set<string>;
   groups: Map<string, Group>;
+  unknown: Map<string, {
+    orderCode: string;
+    customerId: string;
+    name: string | null;
+    phone: string | null;
+    at: string;
+    label: string;
+  }>;
 };
 
 function splitPay(method: string, amount: number): { cash: number; card: number; bank: number } {
@@ -82,25 +99,8 @@ export async function handoverHistory(year: number, month: number): Promise<{
   const from = startOfUbMonth(parseUbDay(`${year}-${String(month).padStart(2, '0')}-01`));
   const to = addUbMonths(from, 1);
 
-  const [items, payments] = await Promise.all([
-    prisma.orderItem.findMany({
-      where: { handedOverAt: { gte: from, lt: to }, cancelledAt: null },
-      select: {
-        nameSnapshot: true,
-        selections: true,
-        size: true,
-        color: true,
-        qty: true,
-        handedOverAt: true,
-        order: {
-          select: {
-            code: true,
-            customer: { select: { id: true, name: true, phone: true } },
-          },
-        },
-      },
-      orderBy: { handedOverAt: 'desc' },
-    }),
+  const [sales, payments] = await Promise.all([
+    loadHandoverSales({ from, to }),
     prisma.payment.findMany({
       where: {
         kind: 'PAYMENT',
@@ -134,6 +134,7 @@ export async function handoverHistory(year: number, month: number): Promise<{
       bank: 0,
       seenPay: new Set<string>(),
       groups: new Map(),
+      unknown: new Map(),
     };
     byDay.set(date, entry);
     return entry;
@@ -151,20 +152,79 @@ export async function handoverHistory(year: number, month: number): Promise<{
     return group;
   };
 
-  for (const item of items) {
-    if (!item.handedOverAt) continue;
-    const date = ubDateString(item.handedOverAt);
+  const events = sales.events;
+  const eventItems = events.length
+    ? await prisma.orderItem.findMany({
+        where: { id: { in: [...new Set(events.map((event) => event.itemId))] } },
+        select: {
+          id: true,
+          nameSnapshot: true,
+          selections: true,
+          size: true,
+          color: true,
+          order: {
+            select: {
+              code: true,
+              customer: { select: { id: true, name: true, phone: true } },
+            },
+          },
+        },
+      })
+    : [];
+  const itemById = new Map(eventItems.map((item) => [item.id, item]));
+
+  for (const event of events) {
+    const item = itemById.get(event.itemId);
+    if (!item) continue;
+    const date = ubDateString(event.at);
     const day = dayEntry(date);
-    day.itemCount += 1;
-    const group = customerGroup(day, item.order.customer, item.handedOverAt.toISOString());
+    day.itemCount += event.qty;
+    const group = customerGroup(day, item.order.customer, event.at.toISOString());
     group.codes.add(item.order.code);
-    group.items.push({
-      name: item.nameSnapshot,
-      selections: itemSelections(item),
-      size: item.size,
-      color: item.color,
-      qty: item.qty,
+    const existing = group.items.find(
+      (row) =>
+        row.name === item.nameSnapshot &&
+        row.size === item.size &&
+        row.color === item.color &&
+        JSON.stringify(row.selections) === JSON.stringify(itemSelections(item)),
+    );
+    if (existing) existing.qty += event.qty;
+    else {
+      group.items.push({
+        name: item.nameSnapshot,
+        selections: itemSelections(item),
+        size: item.size,
+        color: item.color,
+        qty: event.qty,
+      });
+    }
+  }
+
+  if (sales.unknown.length > 0) {
+    const unknownOrders = await prisma.order.findMany({
+      where: { id: { in: [...new Set(sales.unknown.map((row) => row.orderId))] } },
+      select: {
+        id: true,
+        code: true,
+        customer: { select: { id: true, name: true, phone: true } },
+      },
     });
+    const byOrder = new Map(unknownOrders.map((order) => [order.id, order]));
+    for (const row of sales.unknown) {
+      const order = byOrder.get(row.orderId);
+      if (!order) continue;
+      const date = ubDateString(row.at);
+      const day = dayEntry(date);
+      day.customers.add(order.customer.id);
+      day.unknown.set(`${order.id}:${row.at.toISOString()}`, {
+        orderCode: order.code,
+        customerId: order.customer.id,
+        name: order.customer.name,
+        phone: order.customer.phone,
+        at: row.at.toISOString(),
+        label: 'Хуучин бүртгэл / задаргаа тодорхойгүй',
+      });
+    }
   }
 
   for (const pay of payments) {
@@ -208,11 +268,13 @@ export async function handoverHistory(year: number, month: number): Promise<{
           orderCodes: [...g.codes].sort(),
         }))
         .sort((a, b) => b.at.localeCompare(a.at)),
+      unknownRecords: [...v.unknown.values()].sort((a, b) => b.at.localeCompare(a.at)),
     }));
 
   const allCustomers = new Set<string>();
   for (const day of days) {
     for (const row of day.rows) allCustomers.add(row.customerId);
+    for (const row of day.unknownRecords) allCustomers.add(row.customerId);
   }
 
   return {

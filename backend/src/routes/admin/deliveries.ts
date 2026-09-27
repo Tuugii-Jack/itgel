@@ -215,31 +215,46 @@ adminDeliveriesRouter.patch(
               .map((item) => item.id)
           : [];
       const toHand = deliveryIds.length > 0 ? deliveryIds : legacyIds;
-      if (toHand.length > 0) {
-        await handOverItems({
-          lines: toHand.map((itemId) => {
-            const item = before.order.items.find((row) => row.id === itemId)!;
-            return {
-              itemId,
-              qty: pickableQtyOf(item),
-              expectedHandedQty: handedQtyOf(item),
-            };
-          }),
-          actor,
-          note: 'Хүргэлтээр хүлээлгэн өгсөн',
-          idempotencyKey: `delivery-${before.id}`,
+      const payNote = `Хүргэлтээр авсан${after.courierName ? ` — ${after.courierName}` : before.courierName ? ` — ${before.courierName}` : ''}`;
+      try {
+        if (toHand.length > 0) {
+          await handOverItems({
+            lines: toHand.map((itemId) => {
+              const item = before.order.items.find((row) => row.id === itemId)!;
+              return {
+                itemId,
+                qty: pickableQtyOf(item),
+                expectedHandedQty: handedQtyOf(item),
+              };
+            }),
+            actor,
+            note: payNote,
+            idempotencyKey: `delivery-${before.id}`,
+            collection: {
+              method: 'CASH',
+              autoCollectDue: true,
+            },
+          });
+        } else {
+          const shopDue = shopDueAmount(before.order);
+          if (shopDue > 0) {
+            await recordPayment({
+              orderId: before.orderId,
+              kind: 'PAYMENT',
+              amount: shopDue,
+              method: 'CASH',
+              note: payNote,
+              actor,
+              payeeKind: 'SHOP',
+            });
+          }
+        }
+      } catch (error) {
+        await prisma.delivery.update({
+          where: { id: before.id },
+          data: { status: before.status },
         });
-      }
-      const shopDue = shopDueAmount(before.order);
-      if (shopDue > 0) {
-        await recordPayment({
-          orderId: before.orderId,
-          kind: 'PAYMENT',
-          amount: shopDue,
-          method: 'CASH',
-          note: `Хүргэлтээр авсан${after.courierName ? ` — ${after.courierName}` : before.courierName ? ` — ${before.courierName}` : ''}`,
-          actor,
-        });
+        throw error;
       }
     }
 

@@ -52,22 +52,6 @@ function withQueryTiming(client: PrismaClient): PrismaClient {
           }
         },
       },
-      async $queryRaw({ args, query }) {
-        const started = Date.now();
-        try {
-          return await query(args);
-        } finally {
-          addDbQuery(Date.now() - started);
-        }
-      },
-      async $executeRaw({ args, query }) {
-        const started = Date.now();
-        try {
-          return await query(args);
-        } finally {
-          addDbQuery(Date.now() - started);
-        }
-      },
     },
   });
   return timed as unknown as PrismaClient;
@@ -104,8 +88,6 @@ if (createdPrisma) {
 }
 
 if (!isProd) globalForPrisma.prisma = prisma;
-
-// Prod serverless дээр ч warm instance дахин ашиглана.
 globalForPrisma.prisma = prisma;
 
 export type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];

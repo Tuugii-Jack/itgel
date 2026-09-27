@@ -1,6 +1,7 @@
 import type { Prisma, Setting } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { diffUbDays } from '../lib/date.js';
+import { remainingStoredQtyOf } from '../lib/itemQty.js';
 import { getSettingsCached } from './settings.js';
 import { recalcOrderTotals } from './money.js';
 
@@ -11,6 +12,8 @@ export type StorageItemInput = {
   handedOverAt: Date | null;
   cancelledAt: Date | null;
   qty: number;
+  arrivedQty?: number | null;
+  handedOverQty?: number | null;
   fulfilment?: 'PICKUP' | 'DELIVERY' | null;
 };
 
@@ -30,6 +33,16 @@ export type StorageFeeBreakdown = {
   feePerDay: number;
 };
 
+const STORAGE_ITEM_SELECT = {
+  arrivedAt: true,
+  handedOverAt: true,
+  cancelledAt: true,
+  qty: true,
+  arrivedQty: true,
+  handedOverQty: true,
+  fulfilment: true,
+} as const;
+
 type OrderForStorage = {
   id: string;
   storageFee: number;
@@ -38,9 +51,12 @@ type OrderForStorage = {
 };
 
 /**
- * Ирснээс хойш `freeDays` үнэгүй; дараагийн хоног бүр `feePerDay × qty`.
- * Хэсэгчилэн авсан мөр (`handedOverAt`) болон хүргэлтээр сонгосон мөр
- * (`DELIVERY`) тооцогдохгүй — сонгосноос хойш агуулахын хураамж нэмэгдэхгүй.
+ * Үнэгүй хоног тухайн захиалгын барааны мөр бүтэн ирсэн `arrivedAt`-аас эхэлнэ.
+ * Хэсэгчлэн ирсэн (`arrivedAt` хоосон) мөрөнд хураамж нэмэхгүй.
+ * Үнэгүй хоног дууссаны дараа олгоогүй үлдсэн ширхэгт одоогийн `feePerDay`.
+ * Хэсэгчилсэн олголт үнэгүй хугацааг дахин эхлүүлэхгүй — цаг `arrivedAt` дээр үлдэнэ.
+ * Хүргэлтээр сонгосон мөр (`DELIVERY`) тооцогдохгүй.
+ * Давалгааны FIFO огноо зохиохгүй.
  */
 export function computeStorageFee(
   items: StorageItemInput[],
@@ -57,14 +73,16 @@ export function computeStorageFee(
   let freeDaysLeft: number | null = null;
 
   for (const item of items) {
-    if (!item.arrivedAt || item.handedOverAt || item.cancelledAt) continue;
+    if (!item.arrivedAt || item.cancelledAt) continue;
     if (item.fulfilment === 'DELIVERY') continue;
+    const remaining = remainingStoredQtyOf(item);
+    if (remaining <= 0) continue;
     const storedDays = Math.max(0, diffUbDays(now, item.arrivedAt));
     const freeLeft = Math.max(0, freeDays - storedDays);
     const billable = Math.max(0, storedDays - freeDays);
     if (freeDaysLeft === null || freeLeft < freeDaysLeft) freeDaysLeft = freeLeft;
-    billableItemDays += billable * item.qty;
-    fee += billable * feePerDay * item.qty;
+    billableItemDays += billable * remaining;
+    fee += billable * feePerDay * remaining;
   }
 
   return { fee, billableItemDays, freeDaysLeft, freeDays, feePerDay };
@@ -73,7 +91,7 @@ export function computeStorageFee(
 function deliveryChosen(items: StorageItemInput[]): boolean {
   return items.some(
     (item) =>
-      item.fulfilment === 'DELIVERY' && !item.cancelledAt && !item.handedOverAt,
+      item.fulfilment === 'DELIVERY' && !item.cancelledAt && remainingStoredQtyOf(item) > 0,
   );
 }
 
@@ -126,7 +144,7 @@ export async function syncOrdersStorageFees(
       storageFee: true,
       status: true,
       items: {
-        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true, fulfilment: true },
+        select: STORAGE_ITEM_SELECT,
       },
     },
   });
@@ -166,7 +184,7 @@ export async function syncOrderStorageFee(
       storageFee: true,
       status: true,
       items: {
-        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true, fulfilment: true },
+        select: STORAGE_ITEM_SELECT,
       },
     },
   });
@@ -200,14 +218,14 @@ export async function syncAllStorageFees(now = new Date()): Promise<number> {
     where: {
       deletedAt: null,
       status: { in: ['ARRIVED', 'IN_TRANSIT', 'IN_BATCH', 'CONFIRMED'] },
-      items: { some: { arrivedAt: { not: null }, handedOverAt: null, cancelledAt: null } },
+      items: { some: { arrivedAt: { not: null }, cancelledAt: null } },
     },
     select: {
       id: true,
       storageFee: true,
       status: true,
       items: {
-        select: { arrivedAt: true, handedOverAt: true, cancelledAt: true, qty: true, fulfilment: true },
+        select: STORAGE_ITEM_SELECT,
       },
     },
     take: 500,

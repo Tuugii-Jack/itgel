@@ -279,17 +279,17 @@ function TrackDetail({ code }: { code: string }) {
               </div>
               {order.storage.fee > 0 ? (
                 <p className="mt-1 mb-0 text-[14px] leading-[1.5] text-warn">
-                  Үнэгүй{" "}
+                  Энэ бараа бүтэн ирсэн өдрөөс үнэгүй{" "}
                   <span className="tnum">{order.storage.freeDays}</span> хоног
                   дууссан. Хураамж{" "}
                   <span className="tnum font-medium">{money(order.storage.fee)}</span>
                   {" "}(
                   <span className="tnum">{order.storage.feePerDay.toLocaleString("en-US")}</span>
-                  ₮/хоног × бараа). Үлдэгдэлд орсон — авахаасаа өмнө төлнө үү.
+                  ₮/хоног × аваагүй үлдсэн ширхэг). Үлдэгдэлд орсон — авахаасаа өмнө төлнө үү. Хэсэгчлэн авахад үнэгүй хугацаа дахин эхлэхгүй.
                 </p>
               ) : (
                 <p className="mt-1 mb-0 text-[14px] leading-[1.5] text-ink-2">
-                  Ирснээс хойш{" "}
+                  Энэ бараа бүтэн ирсэн өдрөөс{" "}
                   <span className="tnum">{order.storage.freeDays}</span> хоног
                   үнэгүй хадгална
                   {order.storage.freeDaysLeft != null ? (
@@ -302,11 +302,11 @@ function TrackDetail({ code }: { code: string }) {
                       хоног
                     </>
                   ) : null}
-                  . Дараа нь өдөр бүр{" "}
+                  . Хэсэгчлэн ирсэн үед хураамж нэмэгдэхгүй. Дараа нь өдөр бүр{" "}
                   <span className="tnum">
                     {order.storage.feePerDay.toLocaleString("en-US")}
                   </span>
-                  ₮ (барааны тоогоор) нэмэгдэнэ.
+                  ₮-ийг аваагүй үлдсэн ширхэгт нэмнэ. Хэсэгчлэн авахад үнэгүй хугацаа дахин эхлэхгүй.
                 </p>
               )}
             </div>

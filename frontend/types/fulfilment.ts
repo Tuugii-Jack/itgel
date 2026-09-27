@@ -97,6 +97,14 @@ export interface HandoverHistoryDay {
   card: number;
   bank: number;
   rows: HandoverHistoryRow[];
+  unknownRecords?: {
+    orderCode: string;
+    customerId: string;
+    name: string | null;
+    phone: string | null;
+    at: string;
+    label: string;
+  }[];
 }
 
 export interface HandoverHistory {

@@ -98,6 +98,14 @@ export function HistoryDayDetail({
             </Button>
           </Card>
         ))}
+        {(day.unknownRecords ?? []).map((row) => (
+          <Card key={`${row.orderCode}-${row.at}`} className="p-4">
+            <div className="text-[16px] font-medium">{row.name ?? "Нэргүй"}</div>
+            <div className="mt-0.5 text-[13px] text-ink-2">
+              {row.orderCode} · {row.label}
+            </div>
+          </Card>
+        ))}
       </div>
     </div>
   );

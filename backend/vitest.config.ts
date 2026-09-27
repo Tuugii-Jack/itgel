@@ -4,5 +4,6 @@ export default defineConfig({
   test: {
     setupFiles: ['./tests/setupIsolatedEnv.ts'],
     include: ['tests/**/*.test.ts'],
+    fileParallelism: false,
   },
 });

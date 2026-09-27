@@ -78,7 +78,7 @@ export interface DeliveryInfo {
 export interface StorageInfo {
   freeDays: number;
   feePerDay: number;
-  /** Идэвхтэй ирсэн барааны үнэгүй үлдсэн хоног (хамгийн бага). */
+  /** Бүтэн ирсэн, аваагүй мөрүүдийн үнэгүй үлдсэн хоногийн хамгийн бага. */
   freeDaysLeft: number | null;
   billableItemDays: number;
   fee: number;

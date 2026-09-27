@@ -8,7 +8,7 @@ const db = vi.hoisted(() => ({
     actorIdempotency: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
     order: {
       findFirst: vi.fn(), findUnique: vi.fn(), findUniqueOrThrow: vi.fn(),
-      update: vi.fn(), updateMany: vi.fn(),
+      findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn(),
     },
     orderItem: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), count: vi.fn() },
     productRound: {
@@ -100,6 +100,17 @@ beforeEach(() => {
   db.tx.order.findFirst.mockImplementation(async () => ({ ...order }));
   db.tx.order.findUnique.mockImplementation(async () => ({ ...order }));
   db.tx.order.findUniqueOrThrow.mockImplementation(async () => ({ ...order }));
+  db.tx.order.findMany.mockImplementation(async ({ where }: { where?: { id?: { in?: string[] } } }) => {
+    if (where?.id?.in && !where.id.in.includes(order.id)) return [];
+    return [{
+      ...order,
+      shopPaidAmount: 0,
+      writtenOffAmount: 0,
+      payeeKind: 'SHOP',
+      dueAmount: 0,
+      debtClosedAt: null,
+    }];
+  });
   db.tx.order.update.mockImplementation(async ({ data }) => Object.assign(order, data));
   db.tx.order.updateMany.mockResolvedValue({ count: 1 });
 

@@ -60,7 +60,6 @@ export function ArrivalRegister({
   );
   const canReceive = linked && remainingTotal > 0;
   const canCorrect = linked && (batch.stage === "IN_TRANSIT" || batch.stage === "AT_WAREHOUSE");
-  const canEdit = correcting ? canCorrect : canReceive;
   const products = batch.products.filter((p) => (p.variants?.length ?? 0) > 0);
   const firstVariant = products[0]?.variants?.[0];
 

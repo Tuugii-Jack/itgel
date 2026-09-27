@@ -243,9 +243,9 @@ export interface Store {
   leasingBank?: BankAccount | null;
   /** Мөнгө ороогүй захиалга хэдэн цагийн дараа цуцлагдах. 0 = цуцлахгүй. */
   unpaidCancelHours: number;
-  /** Агуулахад ирснээс хойш үнэгүй хадгалах хоног. */
+  /** Тухайн барааны мөр бүтэн ирсэн өдрөөс үнэгүй хадгалах хоног. */
   storageFreeDays: number;
-  /** Үнэгүй хоногоос хойш хоног бүрийн хураамж ₮. 0 = унтраана. */
+  /** Үнэгүй хоног дууссаны дараа олгоогүй үлдсэн ширхэгт хоног бүрийн хураамж ₮. 0 = унтраана. */
   storageFeePerDay: number;
   leasing?: {
     feeTiers: { minAmount: number; ratePercent: number }[];

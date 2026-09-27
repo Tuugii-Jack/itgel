@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { addUbMonths, startOfUbMonth, ubMonthKey } from '../../lib/date.js';
+import { loadHandoverPieceEvents } from '../../lib/handoverEvents.js';
 import { SHOP_SALES_ORDER_WHERE } from '../../lib/inventoryOwner.js';
 import { SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
@@ -42,21 +43,9 @@ adminReportsRouter.get(
     const from = periodFrom(period);
     const ids = parseProductIds(productIds);
 
-    const [soldItems, returnedItems] = await Promise.all([
-      prisma.orderItem.findMany({
-        where: {
-          cancelledAt: null,
-          handedOverAt: { gte: from },
-          ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
-          order: SHOP_SALES_ORDER_WHERE,
-        },
-        select: {
-          qty: true,
-          unitPrice: true,
-          handedOverAt: true,
-          orderId: true,
-        },
-      }),
+    const to = new Date();
+    const [events, returnedItems] = await Promise.all([
+      loadHandoverPieceEvents({ from, to }),
       prisma.orderItem.findMany({
         where: {
           cancelledAt: { gte: from },
@@ -70,6 +59,17 @@ adminReportsRouter.get(
         },
       }),
     ]);
+    const soldItems = events.length
+      ? await prisma.orderItem.findMany({
+          where: {
+            id: { in: [...new Set(events.map((event) => event.itemId))] },
+            ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
+            order: SHOP_SALES_ORDER_WHERE,
+          },
+          select: { id: true, qty: true, unitPrice: true, orderId: true },
+        })
+      : [];
+    const soldById = new Map(soldItems.map((item) => [item.id, item]));
 
     const buckets = new Map<
       string,
@@ -85,12 +85,13 @@ adminReportsRouter.get(
       });
     }
 
-    for (const item of soldItems) {
-      if (!item.handedOverAt) continue;
-      const bucket = buckets.get(ubMonthKey(item.handedOverAt));
+    for (const event of events) {
+      const item = soldById.get(event.itemId);
+      if (!item) continue;
+      const bucket = buckets.get(ubMonthKey(event.at));
       if (!bucket) continue;
-      bucket.sold += item.unitPrice * item.qty;
-      bucket.soldQty += item.qty;
+      bucket.sold += item.unitPrice * event.qty;
+      bucket.soldQty += event.qty;
       bucket.orders.add(item.orderId);
     }
     for (const item of returnedItems) {
@@ -147,22 +148,9 @@ adminReportsRouter.get(
     const from = periodFrom(period);
     const ids = parseProductIds(productIds);
 
-    const [soldItems, returnedItems] = await Promise.all([
-      prisma.orderItem.findMany({
-        where: {
-          cancelledAt: null,
-          handedOverAt: { gte: from },
-          ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
-          order: SHOP_SALES_ORDER_WHERE,
-        },
-        select: {
-          productId: true,
-          qty: true,
-          unitPrice: true,
-          nameSnapshot: true,
-          product: { select: { id: true, name: true, category: { select: { name: true } } } },
-        },
-      }),
+    const to = new Date();
+    const [events, returnedItems] = await Promise.all([
+      loadHandoverPieceEvents({ from, to }),
       prisma.orderItem.findMany({
         where: {
           cancelledAt: { gte: from },
@@ -178,6 +166,24 @@ adminReportsRouter.get(
         },
       }),
     ]);
+    const soldItems = events.length
+      ? await prisma.orderItem.findMany({
+          where: {
+            id: { in: [...new Set(events.map((event) => event.itemId))] },
+            ...(ids.size > 0 ? { productId: { in: [...ids] } } : {}),
+            order: SHOP_SALES_ORDER_WHERE,
+          },
+          select: {
+            id: true,
+            productId: true,
+            qty: true,
+            unitPrice: true,
+            nameSnapshot: true,
+            product: { select: { id: true, name: true, category: { select: { name: true } } } },
+          },
+        })
+      : [];
+    const soldById = new Map(soldItems.map((item) => [item.id, item]));
 
     const rows = new Map<
       string,
@@ -214,10 +220,12 @@ adminReportsRouter.get(
       return row;
     };
 
-    for (const item of soldItems) {
+    for (const event of events) {
+      const item = soldById.get(event.itemId);
+      if (!item) continue;
       const row = ensure(item);
-      row.soldQty += item.qty;
-      row.soldAmount += item.unitPrice * item.qty;
+      row.soldQty += event.qty;
+      row.soldAmount += item.unitPrice * event.qty;
     }
     for (const item of returnedItems) {
       const row = ensure(item);

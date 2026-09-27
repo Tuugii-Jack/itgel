@@ -52,7 +52,7 @@ export function TodayWorkBoard({ portal }: { portal: "shop" | "leasing" }) {
     try {
       const data =
         portal === "leasing"
-          ? await leasingApi.todayWork()
+          ? await leasingApi.todayWork({ ownerAdminId: ownerAdminId || undefined })
           : await adminApi.todayWork({ ownerAdminId: ownerAdminId || undefined });
       setDay(data.day);
       setCards(data.cards);
@@ -64,11 +64,11 @@ export function TodayWorkBoard({ portal }: { portal: "shop" | "leasing" }) {
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   useEffect(() => {
-    if (!isOwner(user?.role) || portal !== "shop") return;
+    if (!isOwner(user?.role)) return;
     void adminApi.leasingSettlementOperators().then((list) => {
       setOwners(list.map((op) => ({ id: op.id, name: op.name })));
     }).catch(() => undefined);
-  }, [portal, user?.role]);
+  }, [user?.role]);
 
   const loadRows = useCallback(async (key: string, nextPage = 1) => {
     setRowsError(null);
@@ -76,7 +76,12 @@ export function TodayWorkBoard({ portal }: { portal: "shop" | "leasing" }) {
     try {
       const result =
         portal === "leasing"
-          ? await leasingApi.todayWorkRows({ card: key, day: day ?? undefined, page: nextPage })
+          ? await leasingApi.todayWorkRows({
+              card: key,
+              day: day ?? undefined,
+              ownerAdminId: ownerAdminId || undefined,
+              page: nextPage,
+            })
           : await adminApi.todayWorkRows({
               card: key,
               day: day ?? undefined,
@@ -103,7 +108,7 @@ export function TodayWorkBoard({ portal }: { portal: "shop" | "leasing" }) {
         title="Өнөөдрийн ажил"
         hint={day ? `Asia/Ulaanbaatar · ${day}` : "Өнөөдрийн хийх зүйлс"}
       />
-      {isOwner(user?.role) && portal === "shop" && (
+      {isOwner(user?.role) && (
         <label className="mb-4 flex max-w-md flex-col gap-1 text-[12px] text-muted">
           Эзэн
           <select

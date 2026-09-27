@@ -399,6 +399,7 @@ export function buildLeasingPayPlan(input: {
   leasingFee?: number | null;
   paidAmount: number;
   refundedAmount: number;
+  shopPaidAmount?: number | null;
   payGaps?: number[] | null;
   now?: Date;
 }): LeasingPayPlan | null {
@@ -431,7 +432,10 @@ export function buildLeasingPayPlan(input: {
     });
   }
 
-  let leftover = Math.max(0, input.paidAmount - input.refundedAmount);
+  let leftover = Math.max(
+    0,
+    input.paidAmount - input.refundedAmount - Math.max(0, input.shopPaidAmount ?? 0),
+  );
   const steps: LeasingPlanStep[] = raw.map((step) => {
     const paidAmount = Math.min(leftover, step.amount);
     leftover -= paidAmount;
@@ -523,7 +527,7 @@ export function serializeLeasing(
     leasingPrincipalPaid: view.principalPaid,
     leasingPrincipalDue: view.principalDue,
     leasingDueAmount: view.feeDue + view.principalDue,
-    shopDueAmount: view.isLeasing ? shopDueAmount : 0,
+    shopDueAmount,
     unpaidCargoFee: view.isLeasing
       ? Math.min(Math.max(0, order.cargoFee ?? 0), shopDueAmount)
       : Math.max(0, order.cargoFee ?? 0),

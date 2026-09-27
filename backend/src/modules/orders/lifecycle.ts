@@ -11,6 +11,7 @@ import { audit } from '../../lib/audit.js';
 import { conflict } from '../../lib/errors.js';
 import { lockOrder } from '../../lib/orderLock.js';
 import { canTransition, ORDER_STATUS_LABEL, previousInFlow, stepsToStatus } from '../../lib/orderStatus.js';
+import { handedQtyOf, isFullyHanded } from '../../lib/itemQty.js';
 import { isProductPaid } from '../../services/money.js';
 import { releaseOrderReadyStock, reholdOrderReadyStock } from '../../services/stockHold.js';
 import { notifyOrderConfirmed } from './notify.js';
@@ -61,10 +62,11 @@ export async function changeOrderStatus(
     }
 
     if (to === 'CANCELLED') {
-      const delivered = await tx.orderItem.count({
-        where: { orderId, cancelledAt: null, handedOverAt: { not: null } },
+      const live = await tx.orderItem.findMany({
+        where: { orderId, cancelledAt: null },
+        select: { qty: true, arrivedQty: true, handedOverQty: true, handedOverAt: true, cancelledAt: true },
       });
-      if (delivered > 0) {
+      if (live.some((item) => handedQtyOf(item) > 0)) {
         throw conflict('Зарим барааг хүлээлгэн өгсөн тул үлдсэн барааг мөрөөр нь цуцална уу.');
       }
     }
@@ -135,11 +137,15 @@ export async function changeOrderStatus(
       await markReadyItemsArrived(tx, orderId, now);
     }
     if (to === 'HANDED_OVER') {
-      await stampItemsFullyArrived(tx, { orderId, cancelledAt: null, handedOverAt: null }, now);
-      await tx.orderItem.updateMany({
-        where: { orderId, cancelledAt: null, handedOverAt: null },
-        data: { handedOverAt: now },
+      const live = await tx.orderItem.findMany({
+        where: { orderId, cancelledAt: null },
+        select: { qty: true, arrivedQty: true, handedOverQty: true, handedOverAt: true, cancelledAt: true },
       });
+      if (live.length === 0 || live.some((item) => !isFullyHanded(item))) {
+        throw conflict('Ширхэг дутуу олгосон байна. Олголтын хуудсаар үлдсэнийг өгнө үү.', {
+          code: 'HANDOVER_QTY_INCOMPLETE',
+        });
+      }
     }
 
     // Захиалга бүтнээрээ цуцлагдвал бэлэн барааны үлдэгдлийг буцаана.
@@ -171,8 +177,9 @@ export async function changeOrderStatus(
 }
 
 /**
- * Тойрог хаагдахад барааны үнэ төлөгдөөгүй захиалгыг цуцална.
- * Карго/агуулахын үлдэгдэл энд хамаарахгүй.
+ * Тойрог хаагдахад зөвхөн баталгаажаагүй, мөнгө огт ороогүй захиалгыг цуцална.
+ * ARRIVED / хэсэгчилсэн олголт / хэсэгчилсэн төлбөр / лизингийн шимтгэл төлсөн
+ * захиалгыг хугацаа өнгөрснөөр устгахгүй. Карго/агуулахын үлдэгдэл энд хамаарахгүй.
  */
 export async function cancelUnpaidOrdersForRound(
   roundId: string,
@@ -182,7 +189,9 @@ export async function cancelUnpaidOrdersForRound(
   const candidates = await prisma.order.findMany({
     where: {
       deletedAt: null,
-      status: { notIn: ['CANCELLED', 'HANDED_OVER'] },
+      status: 'NEW',
+      paidAmount: 0,
+      payments: { none: { kind: 'PAYMENT' } },
       items: { some: { roundId, cancelledAt: null } },
     },
     select: { id: true, code: true, subtotal: true, paidAmount: true, refundedAmount: true, leasingFee: true },
@@ -309,6 +318,10 @@ export async function revertOrderStatus(
 
     const from = order.status;
     const data: Prisma.OrderUpdateInput = { status: to };
+    const qtyBefore = await tx.orderItem.findMany({
+      where: { orderId, cancelledAt: null },
+      select: { id: true, qty: true, arrivedQty: true, handedOverQty: true, handedOverAt: true, cancelledAt: true },
+    });
 
     // Одоогийн төлвийн огноог цэвэрлэнэ.
     const clearField = STATUS_TIMESTAMP[from];
@@ -316,15 +329,29 @@ export async function revertOrderStatus(
 
     // Мөрийн нийцүүлэлт
     if (from === 'HANDED_OVER') {
-      await tx.orderItem.updateMany({
+      const live = await tx.orderItem.findMany({
         where: { orderId, cancelledAt: null },
-        data: { handedOverAt: null },
+        select: { qty: true, arrivedQty: true, handedOverQty: true, handedOverAt: true, cancelledAt: true },
       });
+      if (live.some((item) => handedQtyOf(item) > 0)) {
+        throw conflict('Олгосон барааны түүхийг төлөв буцаалтаар устгахгүй. Бараа буцаалтын хуудсаар бүртгэнэ.', {
+          code: 'HANDOVER_REVERT_BLOCKED',
+        });
+      }
     }
     if (from === 'ARRIVED') {
+      const live = await tx.orderItem.findMany({
+        where: { orderId, cancelledAt: null },
+        select: { qty: true, arrivedQty: true, handedOverQty: true, handedOverAt: true, cancelledAt: true },
+      });
+      if (live.some((item) => handedQtyOf(item) > 0)) {
+        throw conflict('Олгосон ширхэгтэй захиалгын ирсэн төлвийг буцаахгүй. Бараа буцаалтын хуудсаар бүртгэнэ.', {
+          code: 'ARRIVAL_REVERT_BLOCKED',
+        });
+      }
       // Аваагүй мөрүүдийн arrivedAt-ийг арилгана (буцааж «хүлээж» болгоно).
       await tx.orderItem.updateMany({
-        where: { orderId, cancelledAt: null, handedOverAt: null },
+        where: { orderId, cancelledAt: null, handedOverQty: 0, handedOverAt: null },
         data: { arrivedAt: null, arrivedQty: 0 },
       });
       data.arrivalNotifiedAt = null;
@@ -335,6 +362,7 @@ export async function revertOrderStatus(
         where: {
           orderId,
           cancelledAt: null,
+          handedOverQty: 0,
           handedOverAt: null,
           round: { closeAt: null },
         },
@@ -350,14 +378,36 @@ export async function revertOrderStatus(
 
     const next = await tx.order.update({ where: { id: orderId }, data });
 
+    const qtyAfter = await tx.orderItem.findMany({
+      where: { orderId, cancelledAt: null },
+      select: { id: true, qty: true, arrivedQty: true, handedOverQty: true },
+    });
+
     await audit(
       {
         actor: options.actor,
         action: 'STATUS_REVERT',
         entity: 'Order',
         entityId: orderId,
-        before: { status: from },
-        after: { status: to, reason: options.reason ?? 'Админ буцаасан' },
+        before: {
+          status: from,
+          items: qtyBefore.map((item) => ({
+            id: item.id,
+            qty: item.qty,
+            arrivedQty: item.arrivedQty,
+            handedOverQty: handedQtyOf(item),
+          })),
+        },
+        after: {
+          status: to,
+          reason: options.reason ?? 'Админ буцаасан',
+          items: qtyAfter.map((item) => ({
+            id: item.id,
+            qty: item.qty,
+            arrivedQty: item.arrivedQty,
+            handedOverQty: item.handedOverQty,
+          })),
+        },
       },
       tx,
     );

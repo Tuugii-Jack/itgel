@@ -1,9 +1,11 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../prisma.js';
 import { endOfUbDay, parseUbDay, startOfUbDay, ubDateString } from '../../lib/date.js';
 import type { AdminRoleName } from '../../lib/adminRoles.js';
-import { canAccessLeasing, canAccessStaff, canViewAllSettlements, canWriteShop } from '../../lib/adminRoles.js';
+import { canAccessLeasing, canAccessStaff, canViewAllSettlements, canWriteShop, isOwnerRole } from '../../lib/adminRoles.js';
 import { SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import { buildLeasingPayPlan } from '../../lib/leasing.js';
+import { leasingVisibleOrderWhere, type LeasingAuth } from '../../lib/leasingAccess.js';
 import { pickableQtyOf } from '../../lib/itemQty.js';
 import { qtyByBatchIds } from '../batches/list.js';
 import { daySummary } from '../../services/itgelSettlement.js';
@@ -34,6 +36,109 @@ function smsChannelFor(portal: 'shop' | 'leasing'): 'shop' | 'leasing' {
   return portal;
 }
 
+function todayLeasingAuth(input: {
+  role: AdminRoleName;
+  actorId: string;
+  ownerAdminId?: string | null;
+}): LeasingAuth | null {
+  if (!canAccessLeasing(input.role)) return null;
+  if (input.role === 'OWNER' && input.ownerAdminId?.trim()) {
+    return { sub: input.ownerAdminId.trim(), role: 'LEASING' };
+  }
+  return { sub: input.actorId, role: input.role };
+}
+
+function smsUncertainSql() {
+  return Prisma.sql`(s.status = 'unknown' OR (s.status = 'pending' AND s.attempt > 1))`;
+}
+
+function leasingOrderVisibleSql(auth: LeasingAuth) {
+  if (isOwnerRole(auth.role)) {
+    return Prisma.sql`(
+      (o."isLeasing" = true AND NOT (o.status = 'NEW' AND o."paidAmount" = 0))
+      OR (o."payeeKind" = 'LEASING' AND o."isLeasing" = false)
+    )`;
+  }
+  return Prisma.sql`(
+    (
+      o."isLeasing" = true
+      AND NOT (o.status = 'NEW' AND o."paidAmount" = 0)
+      AND o."leasingOperatorAdminId" = ${auth.sub}
+    )
+    OR (
+      o."payeeKind" = 'LEASING'
+      AND o."isLeasing" = false
+      AND EXISTS (
+        SELECT 1
+        FROM "OrderItem" i
+        JOIN "ProductRound" r ON r.id = i."roundId"
+        WHERE i."orderId" = o.id
+          AND i."cancelledAt" IS NULL
+          AND r."ownerKind" = 'LEASING'
+          AND r."ownerAdminId" = ${auth.sub}
+      )
+    )
+  )`;
+}
+
+function leasingSmsStatusSql(status: 'failed' | 'unknown') {
+  return status === 'failed' ? Prisma.sql`s.status = 'failed'` : smsUncertainSql();
+}
+
+async function countLeasingSms(auth: LeasingAuth, status: 'failed' | 'unknown'): Promise<number> {
+  const rows = await prisma.$queryRaw<{ n: bigint }[]>`
+    SELECT COUNT(*)::bigint AS n
+    FROM "SmsDispatch" s
+    INNER JOIN "Order" o ON o.id = s."relatedId" AND o."deletedAt" IS NULL
+    WHERE s.channel = 'leasing'
+      AND s."relatedType" = 'order'
+      AND s.purpose NOT IN ('otp_login', 'otp_change')
+      AND ${leasingSmsStatusSql(status)}
+      AND ${leasingOrderVisibleSql(auth)}
+  `;
+  return Number(rows[0]?.n ?? 0);
+}
+
+async function listLeasingSms(
+  auth: LeasingAuth,
+  status: 'failed' | 'unknown',
+  skip: number,
+  take: number,
+) {
+  return prisma.$queryRaw<{
+    id: string;
+    purpose: string;
+    status: string;
+    relatedId: string | null;
+    relatedType: string | null;
+    createdAt: Date;
+    error: string | null;
+  }[]>`
+    SELECT s.id, s.purpose, s.status, s."relatedId" AS "relatedId", s."relatedType" AS "relatedType",
+           s."createdAt" AS "createdAt", s.error
+    FROM "SmsDispatch" s
+    INNER JOIN "Order" o ON o.id = s."relatedId" AND o."deletedAt" IS NULL
+    WHERE s.channel = 'leasing'
+      AND s."relatedType" = 'order'
+      AND s.purpose NOT IN ('otp_login', 'otp_change')
+      AND ${leasingSmsStatusSql(status)}
+      AND ${leasingOrderVisibleSql(auth)}
+    ORDER BY s."createdAt" DESC
+    OFFSET ${skip} LIMIT ${take}
+  `;
+}
+
+function shopSmsUnknownWhere(channel: 'shop' | 'leasing') {
+  return {
+    channel,
+    purpose: { notIn: ['otp_login' as const, 'otp_change' as const] },
+    OR: [
+      { status: 'unknown' as const },
+      { status: 'pending' as const, attempt: { gt: 1 } },
+    ],
+  };
+}
+
 export async function loadTodayWork(input: {
   role: AdminRoleName;
   actorId: string;
@@ -52,8 +157,11 @@ export async function loadTodayWork(input: {
       : input.role === 'LEASING'
         ? input.actorId
         : undefined;
+  const leasingAuth = leasing ? todayLeasingAuth(input) : null;
+  const leasingOrderWhere = leasingAuth ? leasingVisibleOrderWhere(leasingAuth) : undefined;
   const smsChannel = smsChannelFor(input.portal);
   const gaps = leasing ? await currentLeasingPayGaps() : [];
+  const dayKey = ubDateString(from);
 
   const tasks: Promise<TodayCard | null>[] = [];
 
@@ -65,8 +173,7 @@ export async function loadTodayWork(input: {
             deletedAt: null,
             isLeasing: true,
             status: { not: 'CANCELLED' },
-            dueAmount: { gt: 0 },
-            debtClosedAt: null,
+            ...(leasingOrderWhere ?? {}),
           },
           select: {
             createdAt: true,
@@ -74,6 +181,7 @@ export async function loadTodayWork(input: {
             leasingFee: true,
             paidAmount: true,
             refundedAmount: true,
+            shopPaidAmount: true,
             isLeasing: true,
           },
         });
@@ -82,8 +190,8 @@ export async function loadTodayWork(input: {
         let remaining = 0;
         let count = 0;
         for (const order of orders) {
-          const plan = buildLeasingPayPlan({ ...order, payGaps: gaps });
-          const steps = plan?.steps.filter((s) => s.status === 'due_today') ?? [];
+          const plan = buildLeasingPayPlan({ ...order, payGaps: gaps, now: from });
+          const steps = plan?.steps.filter((s) => s.dueDay === dayKey) ?? [];
           if (steps.length === 0) continue;
           count += 1;
           for (const step of steps) {
@@ -117,6 +225,7 @@ export async function loadTodayWork(input: {
             kind: 'PAYMENT',
             createdAt: { gte: from, lte: to },
             ...payee,
+            ...(leasingOrderWhere ? { order: leasingOrderWhere } : {}),
           },
           _sum: { amount: true },
           _count: true,
@@ -235,28 +344,55 @@ export async function loadTodayWork(input: {
   }
 
   if (smsChannel) {
-    tasks.push(
-      prisma.smsDispatch
-        .count({ where: { channel: smsChannel, status: 'failed', purpose: { notIn: ['otp_login', 'otp_change'] } } })
-        .then((count) => ({
+    if (smsChannel === 'leasing' && leasingAuth) {
+      tasks.push(
+        countLeasingSms(leasingAuth, 'failed').then((count) => ({
           key: 'sms_failed' as const,
           label: 'Амжилтгүй SMS',
           count,
           amount: null,
-          href: smsChannel === 'shop' ? '/workspace/shop/today?card=sms_failed' : '/workspace/leasing/today?card=sms_failed',
+          href: '/workspace/leasing/today?card=sms_failed',
         })),
-    );
-    tasks.push(
-      prisma.smsDispatch
-        .count({ where: { channel: smsChannel, status: 'unknown', purpose: { notIn: ['otp_login', 'otp_change'] } } })
-        .then((count) => ({
+      );
+      tasks.push(
+        countLeasingSms(leasingAuth, 'unknown').then((count) => ({
           key: 'sms_unknown' as const,
           label: 'Төлөв тодорхойгүй SMS',
           count,
           amount: null,
-          href: smsChannel === 'shop' ? '/workspace/shop/today?card=sms_unknown' : '/workspace/leasing/today?card=sms_unknown',
+          href: '/workspace/leasing/today?card=sms_unknown',
         })),
-    );
+      );
+    } else {
+      tasks.push(
+        prisma.smsDispatch
+          .count({
+            where: {
+              channel: smsChannel,
+              status: 'failed',
+              purpose: { notIn: ['otp_login', 'otp_change'] },
+            },
+          })
+          .then((count) => ({
+            key: 'sms_failed' as const,
+            label: 'Амжилтгүй SMS',
+            count,
+            amount: null,
+            href: '/workspace/shop/today?card=sms_failed',
+          })),
+      );
+      tasks.push(
+        prisma.smsDispatch
+          .count({ where: shopSmsUnknownWhere(smsChannel) })
+          .then((count) => ({
+            key: 'sms_unknown' as const,
+            label: 'Төлөв тодорхойгүй SMS',
+            count,
+            amount: null,
+            href: '/workspace/shop/today?card=sms_unknown',
+          })),
+      );
+    }
   }
 
   const resolved = await Promise.all(tasks);
@@ -293,14 +429,39 @@ export async function loadTodayCardRows(input: {
       : input.role === 'LEASING'
         ? input.actorId
         : undefined;
+  const leasingAuth = leasing ? todayLeasingAuth(input) : null;
+  const leasingOrderWhere = leasingAuth ? leasingVisibleOrderWhere(leasingAuth) : undefined;
+  const dayKey = ubDateString(from);
 
   if ((input.card === 'sms_failed' || input.card === 'sms_unknown') && smsChannel) {
     const status = input.card === 'sms_failed' ? 'failed' : 'unknown';
-    const where = {
-      channel: smsChannel,
-      status,
-      purpose: { notIn: ['otp_login', 'otp_change'] },
-    };
+    if (smsChannel === 'leasing' && leasingAuth) {
+      const [total, rows] = await Promise.all([
+        countLeasingSms(leasingAuth, status),
+        listLeasingSms(leasingAuth, status, skip, pageSize),
+      ]);
+      return {
+        card: input.card,
+        meta: pageMeta(total, page, pageSize),
+        data: rows.map((row) => ({
+          id: row.id,
+          purpose: row.purpose,
+          status: row.status,
+          relatedId: row.relatedId,
+          relatedType: row.relatedType,
+          createdAt: row.createdAt.toISOString(),
+          error: row.error,
+        })),
+      };
+    }
+    const where =
+      status === 'failed'
+        ? {
+            channel: smsChannel,
+            status: 'failed' as const,
+            purpose: { notIn: ['otp_login' as const, 'otp_change' as const] },
+          }
+        : shopSmsUnknownWhere(smsChannel);
     const [total, rows] = await Promise.all([
       prisma.smsDispatch.count({ where }),
       prisma.smsDispatch.findMany({
@@ -389,8 +550,7 @@ export async function loadTodayCardRows(input: {
         deletedAt: null,
         isLeasing: true,
         status: { not: 'CANCELLED' },
-        dueAmount: { gt: 0 },
-        debtClosedAt: null,
+        ...(leasingOrderWhere ?? {}),
       },
       select: {
         id: true,
@@ -400,14 +560,15 @@ export async function loadTodayCardRows(input: {
         leasingFee: true,
         paidAmount: true,
         refundedAmount: true,
+        shopPaidAmount: true,
         isLeasing: true,
         dueAmount: true,
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
     const matched = orders.flatMap((order) => {
-      const plan = buildLeasingPayPlan({ ...order, payGaps: gaps });
-      const steps = plan?.steps.filter((s) => s.status === 'due_today') ?? [];
+      const plan = buildLeasingPayPlan({ ...order, payGaps: gaps, now: from });
+      const steps = plan?.steps.filter((s) => s.dueDay === dayKey) ?? [];
       if (steps.length === 0) return [];
       return [{
         id: order.id,
@@ -434,6 +595,7 @@ export async function loadTodayCardRows(input: {
       kind: 'PAYMENT' as const,
       createdAt: { gte: from, lte: to },
       ...payee,
+      ...(leasingOrderWhere ? { order: leasingOrderWhere } : {}),
     };
     const [total, rows] = await Promise.all([
       prisma.payment.count({ where }),

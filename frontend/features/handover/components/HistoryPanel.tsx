@@ -88,6 +88,9 @@ export function HistoryPanel({
                 </div>
                 <div className="mt-1 text-[12px] text-muted">
                   {d.customerCount} хүн · {d.itemCount} бараа
+                  {(d.unknownRecords?.length ?? 0) > 0
+                    ? ` · ${d.unknownRecords?.length} хуучин бүртгэл`
+                    : ""}
                 </div>
               </button>
             ))}

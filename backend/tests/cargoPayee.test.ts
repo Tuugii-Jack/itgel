@@ -31,6 +31,22 @@ describe('лизингийн карго — Итгэл', () => {
     expect(shopDueAmount(principal)).toBe(8_000);
   });
 
+  it('карго шопод төлөгдсөн, үндсэн лизинг дутуу — дахин карго нэхэхгүй', () => {
+    const mixed = {
+      isLeasing: true,
+      payeeKind: 'LEASING',
+      subtotal: 100_000,
+      leasingFee: 10_000,
+      storageFee: 0,
+      cargoFee: 10_000,
+      paidAmount: 110_000,
+      refundedAmount: 0,
+      shopPaidAmount: 10_000,
+    };
+    expect(shopDueAmount(mixed)).toBe(0);
+    expect(unpaidCargoFee(mixed)).toBe(0);
+  });
+
   it('бэлэн дахин борлуулалтад SHOP карго 0', () => {
     expect(
       shopDueAmount({

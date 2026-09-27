@@ -333,6 +333,15 @@ export function FulfilmentChooser({
         >
           <span className="mt-1.5 block text-[14px] leading-[1.5] text-ink-2">{store.address}</span>
           <span className="mt-0.5 block text-[14px] text-ink-2">{store.workHours}</span>
+          {store.storageFeePerDay > 0 ? (
+            <span className="mt-1.5 block text-[13px] leading-[1.45] text-ink-2">
+              Бараа бүтэн ирснээс{" "}
+              <span className="tnum">{store.storageFreeDays}</span> хоног үнэгүй.
+              Дараа нь аваагүй үлдсэн ширхэгт өдөр бүр{" "}
+              <span className="tnum">{store.storageFeePerDay.toLocaleString("en-US")}</span>
+              ₮. Хэсэгчлэн авахад үнэгүй хугацаа дахин эхлэхгүй.
+            </span>
+          ) : null}
         </FulfilmentOptionCard>
 
         <FulfilmentOptionCard

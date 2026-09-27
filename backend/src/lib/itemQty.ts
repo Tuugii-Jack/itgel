@@ -32,6 +32,15 @@ export function handedQtyOf(item: QtyItem): number {
   return 0;
 }
 
+/** Агуулахад үлдсэн ширхэг. arrivedAt-ийг тоо мэт ашиглахгүй; arrivedQty байхгүй хуучин мөрийг л бүтэн гэж үзнэ. */
+export function remainingStoredQtyOf(item: QtyItem): number {
+  if (item.cancelledAt) return 0;
+  const arrived =
+    item.arrivedQty != null ? arrivedQtyOf(item) : item.arrivedAt ? orderedQtyOf(item) : 0;
+  const handed = handedQtyOf({ ...item, arrivedQty: arrived });
+  return Math.max(0, arrived - handed);
+}
+
 export function pickableQtyOf(item: QtyItem): number {
   if (item.cancelledAt) return 0;
   return Math.max(0, arrivedQtyOf(item) - handedQtyOf(item));

@@ -51,8 +51,7 @@ export async function qtyByBatchIds(batchIds: string[]): Promise<Map<string, Bat
            ), 0)::bigint AS "unlinkedQty",
            COALESCE(SUM(
              CASE WHEN r."batchId" = o."batchId" AND r."deletedAt" IS NULL THEN
-               CASE WHEN i."handedOverAt" IS NOT NULL THEN i.qty
-                    ELSE LEAST(i."arrivedQty", i.qty) END
+               LEAST(i."arrivedQty", i.qty)
              ELSE 0 END
            ), 0)::bigint AS "arrivedQty"
     FROM "Order" o

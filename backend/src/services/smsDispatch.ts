@@ -92,7 +92,7 @@ export async function dispatchSms(input: DispatchSmsInput): Promise<DispatchSmsR
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (existing && (OPEN.includes(existing.status as SmsLifecycleStatus) || existing.providerMessageId)) {
+    if (existing) {
       return {
         dispatch: existing,
         send: {
@@ -126,21 +126,59 @@ export async function dispatchSms(input: DispatchSmsInput): Promise<DispatchSmsR
           skipped: true,
         };
       }
-      const send = await provider.send({ phone, text: input.text });
+      const claimed = await prisma.$queryRaw<SmsDispatch[]>`
+        UPDATE "SmsDispatch"
+        SET status = 'pending',
+            attempt = attempt + 1,
+            "updatedAt" = NOW()
+        WHERE id = ${existingConfirm.id}
+          AND status = 'failed'
+        RETURNING *
+      `;
+      const row = claimed[0];
+      if (!row) {
+        const current = await prisma.smsDispatch.findUnique({ where: { id: existingConfirm.id } });
+        const latest = current ?? existingConfirm;
+        return {
+          dispatch: latest,
+          send: {
+            accepted: Boolean(latest.acceptedAt || latest.providerMessageId),
+            status: latest.status as SmsLifecycleStatus,
+            id: latest.providerMessageId ?? undefined,
+            error: latest.error ?? undefined,
+          },
+          skipped: true,
+        };
+      }
+      let send: SmsSendResult;
+      try {
+        send = await provider.send({ phone, text: input.text });
+      } catch (error) {
+        await prisma.smsDispatch.update({
+          where: { id: row.id },
+          data: {
+            status: 'failed',
+            error: error instanceof Error ? error.message : 'send failed',
+            providerMessageId: row.providerMessageId,
+            acceptedAt: row.acceptedAt,
+            deliveredAt: row.deliveredAt,
+          },
+        });
+        throw error;
+      }
       const nextCheckAt =
         send.accepted && provider.tracksDelivery && send.id && send.status !== 'delivered'
           ? new Date()
           : null;
       const dispatch = await prisma.smsDispatch.update({
-        where: { id: existingConfirm.id },
+        where: { id: row.id },
         data: {
           status: send.status,
-          providerMessageId: send.id ?? null,
+          providerMessageId: send.id ?? row.providerMessageId,
           error: send.error ?? null,
-          acceptedAt: send.accepted ? new Date() : existingConfirm.acceptedAt,
-          deliveredAt: send.status === 'delivered' ? new Date() : existingConfirm.deliveredAt,
+          acceptedAt: send.accepted ? new Date() : row.acceptedAt,
+          deliveredAt: send.status === 'delivered' ? new Date() : row.deliveredAt,
           nextCheckAt,
-          attempt: existingConfirm.attempt + 1,
         },
       });
       return { dispatch, send };

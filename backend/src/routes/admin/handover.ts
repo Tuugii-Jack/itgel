@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { ORDER_STATUS_LABEL } from '../../lib/orderStatus.js';
 import { parsePickupLookup } from '../../lib/pickupQr.js';
@@ -12,10 +11,9 @@ import { handedQtyOf, pickableQtyOf } from '../../lib/itemQty.js';
 import { readActorIdempotencyKey } from '../../lib/actorIdempotency.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, param, query, validate } from '../../middleware/validate.js';
-import { handOverItems } from '../../services/orders.js';
-import { recordPayment } from '../../services/payments.js';
+import { handOverItems, HANDOVER_MONEY_SELECT } from '../../services/orders.js';
 import { isProductPaid, shopDueAmount } from '../../services/money.js';
-import { HANDOVER_PAY_NOTE, handoverHistory } from '../../services/handoverHistory.js';
+import { handoverHistory } from '../../services/handoverHistory.js';
 import { adminOrderItem, publicOrderItem } from '../../services/serialize.js';
 import { syncOrderCargoFee, syncOrdersCargoFees } from '../../services/cargoFee.js';
 import { syncOrderStorageFee, syncOrdersStorageFees } from '../../services/storageFee.js';
@@ -74,17 +72,7 @@ adminHandoverRouter.get(
     // Зөвхөн мөнгөний багана шинэчлэгдсэн байж болно — бүтэн include дахин татахгүй.
     const money = await prisma.order.findUniqueOrThrow({
       where: { id: order.id },
-      select: {
-        storageFee: true,
-        cargoFee: true,
-        dueAmount: true,
-        paidAmount: true,
-        refundedAmount: true,
-        subtotal: true,
-        isLeasing: true,
-        payeeKind: true,
-        leasingFee: true,
-      },
+      select: HANDOVER_MONEY_SELECT,
     });
     const fresh = { ...order, ...money };
 
@@ -311,80 +299,14 @@ adminHandoverRouter.post(
     await syncOrdersStorageFees(uniqueOrderIds);
     await syncOrdersCargoFees(uniqueOrderIds);
 
-    const dueByOrder = new Map<string, number>();
-    for (const orderId of uniqueOrderIds) {
-      const order = await prisma.order.findUniqueOrThrow({
-        where: { id: orderId },
-        select: {
-          isLeasing: true,
-          payeeKind: true,
-          subtotal: true,
-          leasingFee: true,
-          storageFee: true,
-          cargoFee: true,
-          paidAmount: true,
-          refundedAmount: true,
-        },
-      });
-      if (leasingHoldsGoods(order)) {
-        throw conflict('Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.', {
-          code: 'LEASING_BALANCE_DUE',
-          orderId,
-        });
-      }
-      if (isLeasingResale(order) && !isProductPaid(order)) {
-        throw conflict('Лизингийн бэлэн барааны төлбөр дутуу. Лизингийн QPay-ээр төлнө.', {
-          code: 'LEASING_RESALE_UNPAID',
-          orderId,
-        });
-      }
-      dueByOrder.set(orderId, shopDueAmount(order));
-    }
-    const totalDue = [...dueByOrder.values()].reduce((a, b) => a + b, 0);
-    if (totalDue > 0) {
-      const collected = body.collectedAmount ?? 0;
-      if (collected < totalDue) {
-        throw conflict(`Дэлгүүрийн үлдэгдэл ${totalDue}₮ бүрэн төлөгдөөгүй байна.`, {
-          dueAmount: totalDue,
-          collected,
-        });
-      }
-    }
-
     const result = await handOverItems({
       lines: body.items,
       actor,
       note: body.note,
       idempotencyKey,
-    });
-
-    // Төлбөр — захиалга бүрд due-г нэг удаа.
-    if (totalDue > 0) {
-      for (const [orderId, due] of dueByOrder) {
-        if (due <= 0) continue;
-        await recordPayment({
-          orderId,
-          kind: 'PAYMENT',
-          amount: due,
-          method: body.method ?? 'CASH',
-          note: body.note ?? HANDOVER_PAY_NOTE,
-          actor,
-        });
-      }
-    }
-
-    await audit({
-      actor,
-      action: 'HANDOVER_PARTIAL',
-      entity: 'OrderItem',
-      entityId: itemIds[0]!,
-      after: {
-        items: body.items,
-        orderIds: result.orderIds,
-        completedOrderIds: result.completedOrderIds,
-        pieceCount: result.pieceCount,
-        method: body.method ?? null,
-        note: body.note,
+      collection: {
+        collectedAmount: body.collectedAmount,
+        method: body.method,
       },
     });
 
@@ -436,26 +358,6 @@ adminHandoverRouter.post(
       throw conflict('Авах боломжтой (ирсэн) бараа алга.');
     }
 
-    if (leasingHoldsGoods(order)) {
-      throw conflict('Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.', {
-        code: 'LEASING_BALANCE_DUE',
-      });
-    }
-    if (isLeasingResale(order) && !isProductPaid(order)) {
-      throw conflict('Лизингийн бэлэн барааны төлбөр дутуу. Лизингийн QPay-ээр төлнө.', {
-        code: 'LEASING_RESALE_UNPAID',
-      });
-    }
-
-    const shopDue = shopDueAmount(order);
-    const collected = collectedAmount ?? shopDue;
-    if (shopDue > 0 && collected < shopDue) {
-      throw conflict(`Дэлгүүрийн үлдэгдэл ${shopDue}₮ бүрэн төлөгдөөгүй байна.`, {
-        dueAmount: shopDue,
-        collected,
-      });
-    }
-
     const actor = actorOf(req);
     const idempotencyKey = readActorIdempotencyKey(req.headers['idempotency-key'], bodyKey);
 
@@ -469,24 +371,12 @@ adminHandoverRouter.post(
       actor,
       note,
       idempotencyKey,
+      collection: {
+        collectedAmount,
+        method,
+        autoCollectDue: true,
+      },
     });
-
-    // Хэрэв бүх мөр авсан бол handOverItems аль хэдийн HANDED_OVER болгосон.
-    // Хэрэв зөвхөн ирсэнүүдийг өгсөн ч захиалга бүрэн дуусаагүй бол OK.
-
-    if (shopDue > 0) {
-      await recordPayment({
-        orderId: order.id,
-        kind: 'PAYMENT',
-        amount: shopDue,
-        method: method ?? 'CASH',
-        note: note ?? HANDOVER_PAY_NOTE,
-        actor,
-      });
-    }
-
-    // Хуучин урсгал: бүх мөр ирсэн байвал бүтнээр HANDED_OVER — handOverItems хийнэ.
-    // Хэрэв order бүрэн өгөгдөөгүй ч админ «бүгдийг» дарсан бол хүлээж буй мөр үлдэнэ.
 
     const updated = await prisma.order.findUniqueOrThrow({
       where: { id: order.id },

@@ -294,13 +294,13 @@ export const leasingApi = {
       },
     }).then((r) => r.data),
 
-  todayWork: () =>
+  todayWork: (query?: { day?: string; ownerAdminId?: string }) =>
     request<{ day: string; cards: import("@/features/work/TodayWorkBoard").TodayCard[] }>(
       "/leasing/work/today",
-      adminAuth,
+      { ...adminAuth, query },
     ).then((r) => r.data),
 
-  todayWorkRows: (query: { card: string; day?: string; page?: number }) =>
+  todayWorkRows: (query: { card: string; day?: string; page?: number; ownerAdminId?: string }) =>
     request<{
       id: string;
       code?: string;

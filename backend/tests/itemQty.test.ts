@@ -4,6 +4,7 @@ import {
   handedQtyOf,
   itemQtyStatusOf,
   pickableQtyOf,
+  remainingStoredQtyOf,
   waitingQtyOf,
 } from '../src/lib/itemQty.js';
 
@@ -49,5 +50,17 @@ describe('мөрийн ширхэг', () => {
     expect(
       handedQtyOf({ qty: 3, arrivedQty: 3, handedOverQty: 0, handedOverAt: null }),
     ).toBe(0);
+  });
+
+  it('хадгалалтад үлдсэн ширхэг = ирсэн − олгосон', () => {
+    expect(
+      remainingStoredQtyOf({
+        qty: 10,
+        arrivedQty: 10,
+        arrivedAt: new Date(),
+        handedOverQty: 2,
+        handedOverAt: new Date(),
+      }),
+    ).toBe(8);
   });
 });
