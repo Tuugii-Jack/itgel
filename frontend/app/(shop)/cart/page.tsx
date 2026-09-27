@@ -13,7 +13,7 @@ import {
 } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useCart, type CartLine } from "@/lib/cart";
-import { readCheckoutDraft, writeCheckoutDraft } from "@/lib/checkoutDraft";
+import { patchCheckoutDraft, readCheckoutDraft } from "@/lib/checkoutDraft";
 import { useSession } from "@/lib/session";
 import { money, relativeDay } from "@/lib/format";
 import { formatMnPhone } from "@/lib/phone";
@@ -112,10 +112,7 @@ export default function CartPage() {
       toast.error("Үлдэгдэлгүй бэлэн барааг сагснаас хасна уу.");
       return;
     }
-    writeCheckoutDraft({
-      customerId: session.me.id,
-      note: note.trim(),
-    });
+    patchCheckoutDraft(session.me.id, { note: note.trim() });
     router.push("/checkout");
   };
 

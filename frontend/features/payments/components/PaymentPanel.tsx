@@ -1,22 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { useOnKeyChange } from "@/lib/syncKey";
 import { PayMethodChoice } from "@/components/PayMethodChoice";
 import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import { Card, Divider } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
 import { money } from "@/lib/format";
 import { orderAccruesStorage } from "@/lib/fulfilment";
 import { leasingFeeCaption, leasingFeeOf, leasingPercentTag, isLeasingSplitPay } from "@/lib/leasing";
-import { useToast } from "@/lib/toast";
 import type { PublicOrder, Store } from "@/lib/types";
 import { PaymentRow as Row } from "./PaymentRow";
 import { QpayPay } from "./QpayPay";
 
 /**
- * Захиалга өгсний дараах төлбөр — төлөөгүй үед сагстай ижил QPay | Лизинг.
- * Лизинг төлөгдсөний дараа үлдэгдэл. Хоёр QPay данс холилдохгүй.
+ * Захиалга өгсний дараах төлбөр. QPay | Лизинг радио энд дахин гарахгүй —
+ * хэлбэрийг checkout-ийн эхний алхам эсвэл захиалгын isLeasing-аар харуулна.
  */
 export function PaymentPanel({
   order,
@@ -38,13 +34,7 @@ export function PaymentPanel({
   const leasingPaid = Boolean(order.isLeasing && (order.leasingFeePaid || netPaid > 0));
   const leasingPayee = order.payeeKind === "LEASING" || Boolean(order.isLeasing);
   const resale = order.payeeKind === "LEASING" && !order.isLeasing;
-  const [leasing, setLeasing] = useState(Boolean(order.isLeasing));
-  const [switching, setSwitching] = useState(false);
-  const toast = useToast();
-
-  useOnKeyChange(String(Boolean(order.isLeasing)), () => {
-    setLeasing(Boolean(order.isLeasing));
-  });
+  const leasing = Boolean(order.isLeasing);
 
   const cargoDue = order.unpaidCargoFee ?? 0;
   const shopQpay = store.qpay ?? { enabled: false, ready: false };
@@ -65,23 +55,6 @@ export function PaymentPanel({
     : 0;
   const firstPay = leasing ? fee : order.subtotal;
   const feeLabel = leasingFeeCaption(fee, order.subtotal);
-
-  const applyMethod = async (next: boolean) => {
-    if (next === order.isLeasing || switching) return;
-    setLeasing(next);
-    setSwitching(true);
-    try {
-      await api.setOrderPayMethod(order.code, { leasing: next });
-      onClaimed?.();
-    } catch (e) {
-      setLeasing(Boolean(order.isLeasing));
-      const message =
-        e instanceof ApiError ? e.message : "Төлбөрийн хэлбэр солигдсонгүй.";
-      toast.error(message);
-    } finally {
-      setSwitching(false);
-    }
-  };
 
   return (
     <Card className="w-full p-4">
@@ -104,21 +77,21 @@ export function PaymentPanel({
               <Row label="Одоо төлөх" value={money(order.subtotal)} big />
             )}
           </div>
-          {!feeHold && !resale && (
-          <div className="mt-4">
-            <PayMethodChoice
-              leasing={leasing}
-              onChange={(v) => void applyMethod(v)}
-              disabled={switching}
-              subtotal={order.subtotal}
-              feeTiers={store.leasing?.feeTiers}
-              payGaps={store.leasing?.payGaps}
-              payPlan={order.isLeasing ? order.payPlan : null}
-              choiceHint={store.leasing?.choiceHint}
-              termsTitle={store.leasing?.termsTitle}
-              termsBody={store.leasing?.termsBody}
-            />
-          </div>
+          {!resale && (
+            <div className="mt-4">
+              <PayMethodChoice
+                locked
+                compact
+                leasing={leasing}
+                subtotal={order.subtotal}
+                feeTiers={store.leasing?.feeTiers}
+                payGaps={store.leasing?.payGaps}
+                payPlan={order.isLeasing ? order.payPlan : null}
+                choiceHint={store.leasing?.choiceHint}
+                termsTitle={store.leasing?.termsTitle}
+                termsBody={store.leasing?.termsBody}
+              />
+            </div>
           )}
           <p className="mt-3 mb-0 text-[13px] leading-[1.6] text-ink-2">
             {feeHold
@@ -183,40 +156,34 @@ export function PaymentPanel({
       )}
 
       <Divider className="my-3" />
-      {switching ? (
-        <div className="py-6 text-center text-[13px] text-muted">
-          Төлбөрийн хэлбэр шинэчилж байна…
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          {showLeasingQr && (
+      <div className="flex flex-col gap-4">
+        {showLeasingQr && (
+          <QpayPay
+            order={order}
+            store={store}
+            ready={qpay.ready}
+            hideAmounts={unpaid}
+            onPaid={onClaimed}
+            onPayAttempt={onPayAttempt}
+          />
+        )}
+        {showCargoQr && (
+          <div className="rounded-[8px] border border-line p-3">
+            <div className="mb-2 text-[14px] font-medium">Карго — Итгэл</div>
+            <p className="mt-0 mb-3 text-[13px] leading-[1.5] text-ink-2">
+              Карго төлбөр Итгэлийн QPay-ээр орно. Лизингийн үндсэн төлбөрт тооцогдохгүй.
+            </p>
             <QpayPay
               order={order}
               store={store}
-              ready={qpay.ready}
-              hideAmounts={unpaid}
+              ready={shopQpay.ready}
+              purpose="CARGO"
               onPaid={onClaimed}
               onPayAttempt={onPayAttempt}
             />
-          )}
-          {showCargoQr && (
-            <div className="rounded-[8px] border border-line p-3">
-              <div className="mb-2 text-[14px] font-medium">Карго — Итгэл</div>
-              <p className="mt-0 mb-3 text-[13px] leading-[1.5] text-ink-2">
-                Карго төлбөр Итгэлийн QPay-ээр орно. Лизингийн үндсэн төлбөрт тооцогдохгүй.
-              </p>
-              <QpayPay
-                order={order}
-                store={store}
-                ready={shopQpay.ready}
-                purpose="CARGO"
-                onPaid={onClaimed}
-                onPayAttempt={onPayAttempt}
-              />
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
     </Card>
   );
 }

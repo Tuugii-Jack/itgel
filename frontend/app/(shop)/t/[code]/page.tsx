@@ -20,6 +20,10 @@ import {
   itemNeedsFulfilment,
 } from "@/lib/fulfilment";
 import { PollRetryNote } from "@/components/PollRetryNote";
+import { useSession } from "@/lib/session";
+import { useCart } from "@/lib/cart";
+import { consumeCheckoutPending } from "@/lib/checkoutDraft";
+import { clearCheckoutIdempotencyKey } from "@/lib/checkoutIdempotency";
 import { usePolling } from "@/lib/usePolling";
 import { isTrackPaymentOpen, shouldPollPayment } from "@/lib/orderPolling";
 import { trackedOrderAfterError } from "@/lib/trackedOrders";
@@ -44,6 +48,8 @@ export default function TrackPage() {
 
 function TrackDetail({ code }: { code: string }) {
   const { store, setChromeHidden, trackedOrders, syncOrder } = useTrackShell();
+  const session = useSession();
+  const cart = useCart();
   const [order, setOrder] = useState<PublicOrder | null>(() => trackedOrders.peek(code));
   const mounted = useRef(false);
   /** Дизайны 06 дэлгэц — «Ирсэн барааг авах» дарсны дараа нээгдэнэ. */
@@ -98,6 +104,14 @@ function TrackDetail({ code }: { code: string }) {
   const polling = Boolean(
     order && store && shouldPollPayment(order, { prepayAttemptAtPaid }),
   );
+
+  useEffect(() => {
+    if (!session.me || !order || unpaid) return;
+    if (consumeCheckoutPending(session.me.id, order.code)) {
+      cart.clear();
+      clearCheckoutIdempotencyKey();
+    }
+  }, [session.me, order, unpaid, cart]);
 
   // Төлбөр хүлээгдэж байхад төлөвийг автоматаар шинэчилнэ —
   // админ бүртгэмэгц «Төлөгдсөн» гэж харагдана.

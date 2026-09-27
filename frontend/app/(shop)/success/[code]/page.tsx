@@ -16,6 +16,9 @@ import { awaitingPayment } from "@/lib/payment";
 import { orderAccruesStorage } from "@/lib/fulfilment";
 import { PollRetryNote } from "@/components/PollRetryNote";
 import { useSession } from "@/lib/session";
+import { useCart } from "@/lib/cart";
+import { clearCheckoutIdempotencyKey } from "@/lib/checkoutIdempotency";
+import { consumeCheckoutPending, patchCheckoutDraft } from "@/lib/checkoutDraft";
 import { shouldPollSuccess } from "@/lib/orderPolling";
 import { usePolling } from "@/lib/usePolling";
 import {
@@ -46,6 +49,7 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
     [alsoParam],
   );
   const session = useSession();
+  const cart = useCart();
   const [order, setOrder] = useState<PublicOrder | null>(null);
   const [extraOrders, setExtraOrders] = useState<PublicOrder[]>([]);
   const [store, setStore] = useState<Store | null>(null);
@@ -115,6 +119,14 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
     onStopped: setPollStopped,
   });
 
+  useEffect(() => {
+    if (!session.me || !order || pending) return;
+    if (consumeCheckoutPending(session.me.id, order.code)) {
+      cart.clear();
+      clearCheckoutIdempotencyKey();
+    }
+  }, [session.me, order, pending, cart]);
+
   function retryPoll() {
     setPollStopped(null);
     setPollRestart((n) => n + 1);
@@ -177,6 +189,7 @@ export default function SuccessPage({ params }: { params: Promise<{ code: string
           store={store}
           onClaimed={() => { void load().catch(() => {}); }}
           feeHold={feeHold}
+          customerId={session.me.id}
         />
       ) : (
         <Confirmed order={order} extraOrders={extraOrders} store={store} trackUrl={trackUrl} />
@@ -193,16 +206,30 @@ function Pending({
   store,
   onClaimed,
   feeHold,
+  customerId,
 }: {
   order: PublicOrder;
   extraOrders?: PublicOrder[];
   store: Store | null;
   onClaimed: () => void;
   feeHold?: boolean;
+  customerId: string;
 }) {
   return (
     <div className="px-4 pt-8 lg:mx-auto lg:max-w-[1000px] lg:px-10">
-      <div className="text-[20px] font-medium lg:text-[24px]">
+      <Link
+        href="/checkout"
+        className="text-[13px] text-ink-2 no-underline"
+        onClick={() => {
+          patchCheckoutDraft(customerId, {
+            step: "choose",
+            payMethod: order.isLeasing ? "leasing" : "qpay",
+          });
+        }}
+      >
+        ← Буцах
+      </Link>
+      <div className="mt-3 text-[20px] font-medium lg:text-[24px]">
         {feeHold
           ? "Шимтгэл төлнө үү"
           : extraOrders.length > 0
