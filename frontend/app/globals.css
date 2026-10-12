@@ -143,6 +143,20 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.workspace-dialog::backdrop { background: rgb(28 25 23 / 35%); }
+.workspace-ui :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-secondary);
+  outline-offset: 3px;
+}
+.workspace-table thead { position: sticky; top: 0; z-index: 2; }
+.workspace-table tbody tr:hover { background: var(--color-surface); }
+.workspace-table tbody tr:has(input[type="checkbox"]:checked) { background: var(--color-primary-soft); }
+.workspace-table { overscroll-behavior: contain; scrollbar-width: thin; }
+@media (max-width: 640px) {
+  .workspace-ui :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) { font-size: 16px; }
+  .workspace-ui main :is(button, select, input:not([type="checkbox"]):not([type="radio"])) { min-height: 44px; }
+}
+
 .screen,
 .page {
   width: 100%;

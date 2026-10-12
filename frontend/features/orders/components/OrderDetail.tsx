@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ORDER_STATUS_LABEL, OrderBadge, PageHead, LeasingBadge, LeasingGoodsBadge } from "@/components/admin/shared";
 import { OrderQpayCard } from "@/components/admin/OrderQpay";
 import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
@@ -46,7 +45,6 @@ export function OrderDetail({
   canWrite?: boolean;
   workspace?: "shop" | "leasing";
 }) {
-  const router = useRouter();
   const {
     order,
     ledger,
@@ -84,7 +82,10 @@ export function OrderDetail({
     workspace: workspaceProp,
   });
 
-  if (loading || !order || !ledger) {
+  if (!loading && error && (!order || !ledger || order.id !== orderId)) {
+    return <Card className="max-w-[860px] p-5"><ErrorNote>{error}</ErrorNote><div className="mt-4 flex gap-2"><Button variant="outline" onClick={() => void load()}>Дахин оролдох</Button><Button variant="ghost" onClick={onClose}>Буцах</Button></div></Card>;
+  }
+  if (loading || !order || !ledger || order.id !== orderId) {
     return (
       <div className="flex justify-center py-16">
         <Spinner className="text-muted" />
@@ -101,18 +102,8 @@ export function OrderDetail({
         hint={
           <span>
             <Link
-              href={`/workspace/shop/customers?id=${order.customer.id}`}
+              href={`/workspace/${leasingPortal ? "leasing" : "shop"}/customers?id=${encodeURIComponent(order.customer.id)}`}
               className="text-ink no-underline hover:underline"
-              onClick={(e) => {
-                // Customers page opens detail via local state — deep-link via sessionStorage.
-                e.preventDefault();
-                try {
-                  sessionStorage.setItem("itgel.admin.openCustomer", order.customer.id);
-                } catch {
-                  /* ignore */
-                }
-                router.push("/workspace/shop/customers");
-              }}
             >
               {customerNameLabel(order.customer.name)}
             </Link>
@@ -168,17 +159,8 @@ export function OrderDetail({
         {order.batch &&
           (canWriteStatus ? (
           <Link
-            href="/workspace/shop/batches"
+            href={`/workspace/shop/batches?batch=${encodeURIComponent(order.batch.id)}`}
             className="no-underline"
-            onClick={(e) => {
-              e.preventDefault();
-              try {
-                sessionStorage.setItem("itgel.admin.openBatch", order.batch!.id);
-              } catch {
-                /* ignore */
-              }
-              router.push("/workspace/shop/batches");
-            }}
           >
             <Badge tone="info">{order.batch.name}</Badge>
           </Link>
@@ -314,7 +296,7 @@ export function OrderDetail({
               </div>
               {order.status === "ARRIVED" && (
                 <Link
-                  href="/workspace/shop/handover"
+                  href={`/workspace/shop/handover?code=${encodeURIComponent(order.code)}`}
                   className="inline-flex h-9 items-center justify-center rounded-[8px] bg-ink px-3 text-[13px] text-white no-underline"
                 >
                   Хүлээлгэн өгөх
@@ -335,6 +317,7 @@ export function OrderDetail({
 
           {canWritePayments && totals.dueAmount > 0 && (
             <RecordPayment
+              key={`payment-${order.id}`}
               suggested={
                 order.isLeasing && (order.nextPayAmount ?? 0) > 0
                   ? (order.nextPayAmount ?? totals.dueAmount)
@@ -350,6 +333,7 @@ export function OrderDetail({
 
           {canWritePayments && ledger.maxRefundable > 0 && (
             <RecordRefund
+              key={`refund-${order.id}`}
               max={ledger.maxRefundable}
               disabled={busy}
               loading={busyKey === "refund"}

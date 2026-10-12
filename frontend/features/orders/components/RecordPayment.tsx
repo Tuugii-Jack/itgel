@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Select } from "@/components/admin/shared";
 import { Button, Card, Field, Input } from "@/components/ui";
 import type { PaymentMethod } from "@/lib/types";
+import { money } from "@/lib/format";
+import { parseMoneyInput } from "@/lib/moneyInput";
 
 const METHODS: { value: PaymentMethod; label: string }[] = [
   { value: "BANK_TRANSFER", label: "Шилжүүлэг" },
@@ -31,20 +33,33 @@ export function RecordPayment({
   const [amount, setAmount] = useState(String(suggested));
   const [method, setMethod] = useState<PaymentMethod>("BANK_TRANSFER");
   const [reference, setReference] = useState("");
+  const submitting = useRef(false);
+  const parsed = parseMoneyInput(amount);
+  const submit = async () => {
+    if (submitting.current || disabled || loading || parsed === null) return;
+    submitting.current = true;
+    try { await onSubmit({ amount: parsed, method, reference: reference.trim() || undefined }); }
+    finally { submitting.current = false; }
+  };
 
   return (
-    <Card className="flex flex-col gap-3 p-4">
+    <form onSubmit={(event) => { event.preventDefault(); void submit(); }}><Card className="flex flex-col gap-3 p-4">
       <div className="text-[15px] font-medium">Төлбөр бүртгэх</div>
       <p className="m-0 text-[13px] text-ink-2">
-        Данс шалгаад мөнгө орсныг энд бичнэ. Захиалга үүнээс өмнө баталгаажихгүй.
+        Дансанд мөнгө орсныг шалгаад, төлсөн дүн болон аргыг бүртгэнэ.
       </p>
       <Field label="Дүн">
         <Input
           value={amount}
-          onChange={(v) => setAmount(v.replace(/\D/g, ""))}
+          onChange={setAmount}
           inputMode="numeric"
+          aria-invalid={parsed === null && amount.length > 0}
         />
       </Field>
+      <div className="flex items-center justify-between gap-2 text-[12px]">
+        <span className={parsed === null && amount ? "text-danger" : "text-ink-2"}>{parsed !== null ? money(parsed) : amount ? "Дүнг бүхэл төгрөгөөр оруулна уу." : "Төлсөн дүнг оруулна уу."}</span>
+        {suggested > 0 && <button type="button" disabled={disabled || loading} onClick={() => setAmount(String(suggested))} className="text-secondary underline">Санал болгосон дүн</button>}
+      </div>
       <Field label="Арга">
         <Select
           value={method}
@@ -58,18 +73,12 @@ export function RecordPayment({
       </Field>
       <Button
         full
-        disabled={disabled || !amount || Number(amount) <= 0}
+        type="submit"
+        disabled={disabled || parsed === null}
         loading={loading}
-        onClick={() =>
-          onSubmit({
-            amount: Number(amount),
-            method,
-            reference: reference.trim() || undefined,
-          })
-        }
       >
-        Бүртгэх
+        {parsed !== null ? `${money(parsed)} бүртгэх` : "Төлбөр бүртгэх"}
       </Button>
-    </Card>
+    </Card></form>
   );
 }

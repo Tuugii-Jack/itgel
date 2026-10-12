@@ -2,7 +2,7 @@
 
 import { deferEffect } from "@/lib/deferEffect";
 import { useOnKeyChange } from "@/lib/syncKey";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ORDER_STATUS_LABEL } from "@/components/admin/shared";
 import { adminApi, ApiError, leasingApi } from "@/lib/api";
 import { isFullAdmin } from "@/lib/admin-role";
@@ -47,6 +47,7 @@ export function useOrderDetail({
   canWrite?: boolean;
   workspace?: "shop" | "leasing";
 }) {
+  const loadGen = useRef(0);
   const [order, setOrder] = useState<AdminOrderDetail | null>(null);
   const [ledger, setLedger] = useState<PaymentLedger | null>(null);
   const [qpay, setQpay] = useState<AdminOrderQpay | null>(null);
@@ -79,6 +80,7 @@ export function useOrderDetail({
   const [smsTick, setSmsTick] = useState(0);
 
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
     setLoading(true);
     setError(null);
     try {
@@ -87,13 +89,15 @@ export function useOrderDetail({
         api.ledger(orderId),
         api.orderQpay(orderId).catch(() => null),
       ]);
+      if (gen !== loadGen.current) return;
       setOrder(o);
       setLedger(l);
       setQpay(q);
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
+      if (gen === loadGen.current) setLoading(false);
     }
   }, [orderId, api]);
 

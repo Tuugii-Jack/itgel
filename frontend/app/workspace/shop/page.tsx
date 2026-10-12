@@ -2,7 +2,10 @@
 
 import { deferEffect } from "@/lib/deferEffect";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { SearchField } from "@/components/admin/SearchField";
+import { WorkspaceDialog } from "@/components/admin/WorkspaceDialog";
+import { updateWorkspaceQuery, useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   BATCH_STAGE_LABEL,
   Metric,
@@ -15,7 +18,7 @@ import {
   Td,
   Th,
 } from "@/components/admin/shared";
-import { Badge, Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
 import { adminApi, ApiError } from "@/lib/api";
@@ -52,13 +55,18 @@ export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [pageMeta, setPageMeta] = useState({ page: 1, pages: 1, total: 0 });
   const [batches, setBatches] = useState<AdminBatch[]>([]);
-  const [status, setStatus] = useState("");
-  const [batch, setBatch] = useState("");
-  const [showDeleted, setShowDeleted] = useState(false);
-  const [search, setSearch] = useState("");
+  const [status, setStatus] = useWorkspaceQuery("status");
+  const [batch, setBatch] = useWorkspaceQuery("batch");
+  const [claimed] = useWorkspaceQuery("claimed");
+  const [deleted, setDeleted] = useWorkspaceQuery("deleted");
+  const showDeleted = deleted === "1";
+  const setShowDeleted = (value: boolean) => setDeleted(value ? "1" : null);
+  const [search, setSearch] = useWorkspaceQuery("q", "", true);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [cancelIds, setCancelIds] = useState<string[]>([]);
+  const [openId, setOpenId] = useWorkspaceQuery("order");
+  const loadGen = useRef(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   /** Аль үйлдэл явж байгааг заана — тухайн товч л spinner-тэй харагдана. */
@@ -81,13 +89,17 @@ export default function AdminOrdersPage() {
         batch: batch || undefined,
         q: query || undefined,
         deleted: showDeleted ? true : undefined,
+        claimed: claimed === "1" ? true : undefined,
         page,
         pageSize: ORDERS_PAGE_SIZE,
       }),
-    [status, batch, query, showDeleted],
+    [status, batch, query, showDeleted, claimed],
   );
 
   const load = useCallback(async () => {
+    const gen = ++loadGen.current;
+    setSelected(new Set());
+    setMoreLoading(false);
     setError(null);
     setRefreshing(true);
     try {
@@ -96,6 +108,7 @@ export default function AdminOrdersPage() {
         fetchOrders(1),
         adminApi.batches({ pageSize: 100 }),
       ]);
+      if (gen !== loadGen.current) return;
       setSummary(s);
       setOrders(list.data);
       setPageMeta({
@@ -106,10 +119,10 @@ export default function AdminOrdersPage() {
       setBatches(b.data);
       setSelected(new Set());
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (gen === loadGen.current) { setLoading(false); setRefreshing(false); }
     }
   }, [fetchOrders]);
 
@@ -118,19 +131,23 @@ export default function AdminOrdersPage() {
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
   const loadMore = async () => {
+    if (moreLoading) return;
+    const gen = loadGen.current;
     setMoreLoading(true);
     try {
       const list = await fetchOrders(pageMeta.page + 1);
-      setOrders((prev) => [...prev, ...list.data]);
+      if (gen !== loadGen.current) return;
+      setOrders((prev) => [...prev, ...list.data.filter((row) => !prev.some((existing) => existing.id === row.id))]);
       setPageMeta({
         page: list.meta?.page ?? pageMeta.page + 1,
         pages: list.meta?.pages ?? pageMeta.pages,
         total: list.meta?.total ?? pageMeta.total,
       });
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setMoreLoading(false);
+      if (gen === loadGen.current) setMoreLoading(false);
     }
   };
 
@@ -144,13 +161,14 @@ export default function AdminOrdersPage() {
   };
 
   /** Сонгосон захиалгуудыг нэг хүсэлтээр шилжүүлнэ. */
-  const advanceSelected = async (target: OrderStatus) => {
+  const advanceSelected = async (target: OrderStatus, ids = [...selected]) => {
+    if (busy || ids.length === 0) return;
     setBusyAction(target);
     setError(null);
 
     let message: string | null = null;
     try {
-      const result = await adminApi.bulkOrderStatus([...selected], target);
+      const result = await adminApi.bulkOrderStatus(ids, target);
       if (result.failed.length > 0) {
         message =
           `${result.succeeded} амжилттай, ${result.failed.length} алдаатай — ` +
@@ -202,6 +220,7 @@ export default function AdminOrdersPage() {
               batch: batch || undefined,
               q: query || undefined,
               deleted: showDeleted ? true : undefined,
+        claimed: claimed === "1" ? true : undefined,
               limit: 500,
             },
       );
@@ -314,18 +333,20 @@ export default function AdminOrdersPage() {
 
       {!showDeleted && (
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="Шинэ захиалга" value={summary?.newOrders ?? "—"} />
+        <Metric label="Шинэ захиалга" value={summary?.newOrders ?? "—"} onClick={() => updateWorkspaceQuery({ status: "NEW", q: null, batch: null, claimed: null, deleted: null })} active={status === "NEW"} />
         <Metric
           label="Төлбөр шалгах"
           value={summary?.paymentClaims ?? "—"}
           tone={summary && summary.paymentClaims > 0 ? "warn" : "neutral"}
           sub="Шилжүүлсэн гэж мэдэгдсэн"
+          onClick={() => updateWorkspaceQuery({ claimed: "1", status: null, batch: null, q: null, deleted: null })}
+          active={claimed === "1"}
         />
-        <Metric label="Ирсэн" value={summary?.arrived ?? "—"} tone="ok" />
+        <Metric label="Ирсэн" value={summary?.arrived ?? "—"} tone="ok" onClick={() => updateWorkspaceQuery({ status: "ARRIVED", q: null, batch: null, claimed: null, deleted: null })} active={status === "ARRIVED"} />
         <Metric
-          label="Өнөөдөр хүлээлгэж өгөх"
+          label="Олгоход бэлэн"
           value={todayHandover}
-          sub="Авах аргаа сонгосон"
+          sub="Одоогийн жагсаалтаас"
         />
       </div>
       )}
@@ -371,19 +392,21 @@ export default function AdminOrdersPage() {
           </>
         )}
         <div className="min-w-[200px] flex-1">
-          <Input
+          <SearchField
             value={search}
             onChange={setSearch}
             placeholder="Код, нэр, утас, и-мэйл"
           />
         </div>
+        {(search || status || batch || showDeleted || claimed) && <Button size="sm" variant="ghost" onClick={() => updateWorkspaceQuery({ q: null, status: null, batch: null, deleted: null, claimed: null })}>Шүүлт цэвэрлэх</Button>}
+        <span className="text-[12px] text-muted">{pageMeta.total} захиалга</span>
         {refreshing && (
           <span className="text-[13px] text-muted">Шинэчилж байна…</span>
         )}
       </div>
 
       {canWrite && selected.size > 0 && !showDeleted && (
-        <Card className="mb-4 flex flex-wrap items-center gap-3 p-3">
+        <Card className="sticky top-[76px] z-10 mb-4 flex flex-wrap items-center gap-3 border-secondary-muted bg-bg p-3">
           <span className="text-[14px]">{selected.size} захиалга сонгосон</span>
           <div className="ml-auto flex flex-wrap gap-2">
             <Button
@@ -398,7 +421,7 @@ export default function AdminOrdersPage() {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => advanceSelected("CANCELLED")}
+              onClick={() => setCancelIds([...selected])}
               disabled={busy}
               loading={busyAction === "CANCELLED"}
             >
@@ -419,6 +442,19 @@ export default function AdminOrdersPage() {
           </div>
         </Card>
       )}
+
+      <WorkspaceDialog open={cancelIds.length > 0} onClose={() => setCancelIds([])} title="Сонгосон захиалгыг цуцлах">
+        <div className="p-5">
+          <p className="mt-0 text-[14px]">{cancelIds.length} захиалгыг цуцлах гэж байна. Төлсөн мөнгөний буцаалтыг захиалга тус бүрээс шалгана.</p>
+          <div className="mb-5 max-h-48 overflow-y-auto rounded-lg border border-line px-3 py-2 text-[13px]">
+            {cancelIds.map((id) => <div key={id} className="py-1">{orders.find((order) => order.id === id)?.code ?? id}</div>)}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" disabled={busy} onClick={() => setCancelIds([])}>Болих</Button>
+            <Button variant="danger" disabled={busy} onClick={() => { const ids = cancelIds; setCancelIds([]); void advanceSelected("CANCELLED", ids); }}>{cancelIds.length} захиалга цуцлах</Button>
+          </div>
+        </div>
+      </WorkspaceDialog>
 
       {error && (
         <div className="mb-4">

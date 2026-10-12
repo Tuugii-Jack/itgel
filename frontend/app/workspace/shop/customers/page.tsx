@@ -1,5 +1,7 @@
 "use client";
 
+import { useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
+import { SearchField } from "@/components/admin/SearchField";
 import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
@@ -63,12 +65,12 @@ export default function CustomersPage() {
   const canWrite = isFullAdmin(user?.role);
   const [rows, setRows] = useState<AdminCustomer[]>([]);
   const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useWorkspaceQuery("q", "", true);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useWorkspaceQuery("id");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -111,7 +113,7 @@ export default function CustomersPage() {
           /* ignore */
         }
       }),
-    [],
+    [setOpenId],
   );
 
   if (openOrderId) {
@@ -128,6 +130,7 @@ export default function CustomersPage() {
   if (openId) {
     return (
       <CustomerDetailView
+        key={openId}
         customerId={openId}
         onBack={() => {
           setOpenId(null);
@@ -145,7 +148,7 @@ export default function CustomersPage() {
     <div>
       <PageHead
         title="Хэрэглэгчид"
-        hint="И-мэйлээр нэвтэрнэ. Утас — холбоо барих мэдээлэл."
+        hint="Нэр, утас, и-мэйлээр хайж, захиалга болон төлбөрийн түүхийг нээнэ."
         actions={
           canWrite ? (
           <Button onClick={() => setCreating((v) => !v)}>
@@ -178,7 +181,7 @@ export default function CustomersPage() {
 
       <div className="mb-4 flex max-w-[420px] items-center gap-2">
         <div className="flex-1">
-          <Input value={search} onChange={setSearch} placeholder="И-мэйл, нэр эсвэл утас" />
+          <SearchField value={search} onChange={setSearch} placeholder="И-мэйл, нэр эсвэл утас" />
         </div>
         {refreshing && <span className="text-[13px] text-muted">Шинэчилж байна…</span>}
       </div>

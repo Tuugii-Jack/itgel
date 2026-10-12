@@ -1,5 +1,7 @@
 "use client";
 
+import { SearchField } from "@/components/admin/SearchField";
+import { useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { deferEffect } from "@/lib/deferEffect";
 import { useOnKeyChange } from "@/lib/syncKey";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,7 +15,7 @@ import {
   Td,
   Th,
 } from "@/components/admin/shared";
-import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
+import { Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { LeasingScheduleSms } from "@/components/admin/LeasingScheduleSms";
 import { leasingApi, ApiError } from "@/lib/api";
@@ -58,10 +60,12 @@ export default function LeasingOrdersPage() {
   } | null>(null);
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [pageMeta, setPageMeta] = useState({ page: 1, pages: 1, total: 0 });
-  const [goods, setGoods] = useState<GoodsFilter>("arrived_unpaid");
-  const [search, setSearch] = useState("");
+  const [goodsRaw, setGoodsRaw] = useWorkspaceQuery("goods", "arrived_unpaid");
+  const goods: GoodsFilter = ["arrived_unpaid", "arrived", "not_arrived", "all", "pay_due_today", "pay_overdue", "resale"].includes(goodsRaw) ? goodsRaw as GoodsFilter : "arrived_unpaid";
+  const setGoods = (value: GoodsFilter) => setGoodsRaw(value);
+  const [search, setSearch] = useWorkspaceQuery("q", "", true);
   const [query, setQuery] = useState("");
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useWorkspaceQuery("order");
   const [loading, setLoading] = useState(true);
   const [moreLoading, setMoreLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,6 +91,7 @@ export default function LeasingOrdersPage() {
   const load = useCallback(async () => {
     const gen = ++loadGen.current;
     setLoading(true);
+    setMoreLoading(false);
     setError(null);
     try {
       const [s, list] = await Promise.all([leasingApi.summary(), fetchOrders(1)]);
@@ -126,19 +131,23 @@ export default function LeasingOrdersPage() {
   };
 
   const loadMore = async () => {
+    if (moreLoading) return;
+    const gen = loadGen.current;
     setMoreLoading(true);
     try {
       const list = await fetchOrders(pageMeta.page + 1);
-      setOrders((prev) => [...prev, ...list.data]);
+      if (gen !== loadGen.current) return;
+      setOrders((prev) => [...prev, ...list.data.filter((row) => !prev.some((existing) => existing.id === row.id))]);
       setPageMeta({
         page: list.meta?.page ?? pageMeta.page + 1,
         pages: list.meta?.pages ?? pageMeta.pages,
         total: list.meta?.total ?? pageMeta.total,
       });
     } catch (e) {
+      if (gen !== loadGen.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setMoreLoading(false);
+      if (gen === loadGen.current) setMoreLoading(false);
     }
   };
 
@@ -236,7 +245,7 @@ export default function LeasingOrdersPage() {
       )}
 
       <div className="mb-4">
-        <Input value={search} onChange={setSearch} placeholder="Код, нэр, утас" className="w-52" />
+        <SearchField value={search} onChange={setSearch} placeholder="Код, нэр, утас" className="w-52" />
       </div>
 
       {error && (

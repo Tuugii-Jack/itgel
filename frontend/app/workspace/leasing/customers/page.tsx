@@ -1,10 +1,12 @@
 "use client";
 
+import { useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
+import { SearchField } from "@/components/admin/SearchField";
 import { deferEffect } from "@/lib/deferEffect";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { LeasingBadge, LeasingGoodsBadge, PageHead, Table, Td, Th } from "@/components/admin/shared";
-import { Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
+import { Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { canWriteLeasingMoney } from "@/lib/admin-role";
 import { leasingApi, ApiError } from "@/lib/api";
 import { useAdminSession } from "@/lib/admin-session";
@@ -34,13 +36,16 @@ export default function LeasingCustomersPage() {
   const { user } = useAdminSession();
   const canWrite = canWriteLeasingMoney(user?.role);
   const [rows, setRows] = useState<CustomerRow[]>([]);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useWorkspaceQuery("q", "", true);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useWorkspaceQuery("id");
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailReload, setDetailReload] = useState(0);
+  const listRequest = useRef(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 350);
@@ -48,20 +53,27 @@ export default function LeasingCustomersPage() {
   }, [search]);
 
   const load = useCallback(async () => {
+    const request = ++listRequest.current;
     setError(null);
     try {
       const list = await leasingApi.customers({ q: query || undefined, pageSize: 100 });
+      if (request !== listRequest.current) return;
       setRows(list.data);
     } catch (e) {
+      if (request !== listRequest.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
+      if (request === listRequest.current) setLoading(false);
     }
   }, [query]);
 
   const markChanged = useDeferredReload(load, !openId && !openOrderId);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const requests = listRequest;
+    const cancel = deferEffect(() => { void load(); });
+    return () => { cancel(); requests.current++; };
+  }, [load]);
 
   useEffect(() => {
     if (!openId) {
@@ -70,13 +82,16 @@ export default function LeasingCustomersPage() {
       });
     }
     if (openOrderId) return;
-    return deferEffect(() => {
+    let active = true;
+    const cancel = deferEffect(() => {
+      setDetail(null); setDetailError(null);
       void leasingApi
         .customer(openId)
-        .then(setDetail)
-        .catch((e) => setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."));
+        .then((data) => { if (active) setDetail(data); })
+        .catch((e) => { if (active) setDetailError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."); });
     });
-  }, [openId, openOrderId]);
+    return () => { active = false; cancel(); };
+  }, [openId, openOrderId, detailReload]);
 
   if (openOrderId) {
     return (
@@ -89,6 +104,13 @@ export default function LeasingCustomersPage() {
         onChanged={markChanged}
       />
     );
+  }
+
+  if (openId && (!detail || detail.id !== openId)) {
+    return <div>
+      <PageHead title="Хэрэглэгчийн түүх" actions={<Button size="sm" variant="outline" onClick={() => setOpenId(null)}>← Буцах</Button>} />
+      {detailError ? <><ErrorNote>{detailError}</ErrorNote><Button className="mt-3" variant="outline" onClick={() => setDetailReload((value) => value + 1)}>Дахин оролдох</Button></> : <Skeleton className="h-[240px]" />}
+    </div>;
   }
 
   if (openId && detail) {
@@ -154,7 +176,7 @@ export default function LeasingCustomersPage() {
         hint="Шимтгэл төлсөн лизинг хэрэглэгчид."
       />
       <div className="mb-4">
-        <Input value={search} onChange={setSearch} placeholder="Нэр, и-мэйл, утас" className="w-64" />
+        <SearchField value={search} onChange={setSearch} placeholder="Нэр, и-мэйл, утас" className="w-64" />
       </div>
       {error && (
         <div className="mb-4">

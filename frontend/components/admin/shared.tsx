@@ -112,10 +112,12 @@ export function PageHead({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+    <div className="workspace-pagehead mb-5 flex flex-wrap items-start justify-between gap-3">
       <div>
-        <h1 className="m-0 text-[20px] font-medium">{title}</h1>
-        {hint && <div className="mt-0.5 text-[13px] text-ink-2">{hint}</div>}
+        <h1 className="m-0 text-[22px] font-medium tracking-tight">{title}</h1>
+        {hint && (typeof hint === "string" && hint.length > 140
+          ? <details className="mt-1 max-w-[760px] text-[13px] text-ink-2"><summary className="cursor-pointer">Ашиглах заавар</summary><div className="mt-2 leading-relaxed">{hint}</div></details>
+          : <div className="mt-1 text-[13px] text-ink-2">{hint}</div>)}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
@@ -198,7 +200,7 @@ export function Select({
 
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="overflow-x-auto rounded-[12px] border border-line bg-bg">
+    <div className="workspace-table max-h-[72dvh] overflow-auto rounded-[12px] border border-line bg-bg">
       <table className="w-full border-collapse text-[14px]">{children}</table>
     </div>
   );

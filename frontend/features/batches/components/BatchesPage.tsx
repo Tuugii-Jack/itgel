@@ -1,9 +1,11 @@
 "use client";
 
+import { SearchField } from "@/components/admin/SearchField";
+import { updateWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { useCallback } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { Metric, PageHead } from "@/components/admin/shared";
-import { Button, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
+import { Button, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { useToast } from "@/lib/toast";
 import { useDeferredReload } from "@/lib/useDeferredReload";
 import type { BatchProgress } from "@/lib/types";
@@ -116,13 +118,14 @@ export function BatchesPage() {
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end">
         <div className="min-w-0 flex-1">
-          <Input
+          <SearchField
             value={search}
             onChange={setSearch}
             placeholder="Багц, захиалгын код, барааны нэр"
             aria-label="Хайх"
           />
         </div>
+        {(search || progress || from || to) && <Button size="sm" variant="ghost" onClick={() => updateWorkspaceQuery({ q: null, progress: null, from: null, to: null })}>Шүүлт цэвэрлэх</Button>}
         <label className="text-[13px] text-ink-2">
           Эхлэх
           <input

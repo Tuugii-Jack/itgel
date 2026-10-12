@@ -1,7 +1,8 @@
 "use client";
 
+import { updateWorkspaceQuery, useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { deferEffect } from "@/lib/deferEffect";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { adminApi, ApiError } from "@/lib/api";
 import type { AdminBatch, BatchListSummary, BatchProgress } from "@/lib/types";
 
@@ -20,14 +21,16 @@ export function useBatches() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useWorkspaceQuery("q", "", true);
+  const loadGen = useRef(0);
   const [query, setQuery] = useState("");
-  const [progress, setProgress] = useState<BatchProgress | "">("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [progressRaw, setProgress] = useWorkspaceQuery("progress");
+  const progress: BatchProgress | "" = ["in_transit", "partial", "complete", "mismatch"].includes(progressRaw) ? progressRaw as BatchProgress : "";
+  const [from, setFrom] = useWorkspaceQuery("from");
+  const [to, setTo] = useWorkspaceQuery("to");
 
   /** Нээлттэй багц — жагсаалтын оронд дэлгэрэнгүй харагдана. */
-  const [openBatchId, setOpenBatchId] = useState<string | null>(null);
+  const [openBatchId, setOpenBatchId] = useWorkspaceQuery("batch");
   /** Багцын дотроос нээсэн захиалга. */
   const [openOrderId, setOpenOrderId] = useState<string | null>(null);
 
@@ -40,6 +43,7 @@ export function useBatches() {
 
   const fetchList = useCallback(
     async (pageNum: number, background = false) => {
+      const gen = ++loadGen.current;
       if (!background) setLoading(true);
       try {
         const list = await adminApi.batches({
@@ -50,6 +54,7 @@ export function useBatches() {
           page: pageNum,
           pageSize: PAGE_SIZE,
         });
+        if (gen !== loadGen.current) return;
         const metaSummary = list.meta?.summary as BatchListSummary | undefined;
         setBatches(list.data);
         setSummary(metaSummary ?? EMPTY_SUMMARY);
@@ -61,9 +66,10 @@ export function useBatches() {
         });
         setError(null);
       } catch (e) {
+        if (gen !== loadGen.current) return;
         setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
       } finally {
-        setLoading(false);
+        if (gen === loadGen.current) setLoading(false);
       }
     },
     [query, progress, from, to],
@@ -92,11 +98,11 @@ export function useBatches() {
           /* ignore */
         }
       }),
-    [],
+    [setOpenBatchId],
   );
 
   const toggleProgress = (value: BatchProgress) => {
-    setProgress((prev) => (prev === value ? "" : value));
+    updateWorkspaceQuery({ progress: progress === value ? null : value });
   };
 
   return {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { adminApi, ApiError } from "@/lib/api";
 import { deferEffect } from "@/lib/deferEffect";
 import { shopDueOf } from "@/lib/leasing";
@@ -23,6 +24,7 @@ export function useHandoverSearch({
   const [activeCustomer, setActiveCustomer] = useState<HandoverCustomer | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [code, setCode] = useState("");
+  const [linkedCode] = useWorkspaceQuery("code");
   const [customerQ, setCustomerQ] = useState("");
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -73,6 +75,10 @@ export function useHandoverSearch({
     },
     [setBusy, setDone, setError, toast],
   );
+
+  useEffect(() => deferEffect(() => {
+    if (linkedCode) { setCode(linkedCode); void lookup(linkedCode); }
+  }), [linkedCode, lookup]);
 
   const searchCustomer = async () => {
     const q = customerQ.trim();
