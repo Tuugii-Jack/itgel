@@ -207,8 +207,8 @@ export function LeasingReadyTransfer({
       {!loading && eligible.length > 0 && (
         <>
           <Field label="Шалтгаан">
+            <fieldset disabled={busy} className="m-0 min-w-0 border-0 p-0">
             <Textarea
-              disabled={busy}
               value={reason}
               onChange={(v) => {
                 touch();
@@ -217,6 +217,7 @@ export function LeasingReadyTransfer({
               rows={2}
               placeholder="Яагаад шилжүүлж байна"
             />
+            </fieldset>
           </Field>
           {preview && (
             <div className="flex flex-col gap-2 rounded-[8px] border border-line bg-surface p-3">
