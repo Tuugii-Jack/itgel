@@ -171,6 +171,7 @@ export function LeasingReadyTransfer({
               <div className="flex flex-col gap-3">
                 <Field label="Шилжүүлэх тоо" hint={`Ихдээ ${item.availableQty} ширхэг`}>
                   <Input
+                    disabled={busy}
                     value={qtyById[item.id] ?? ""}
                     onChange={(v) => {
                       touch();
@@ -181,6 +182,7 @@ export function LeasingReadyTransfer({
                 </Field>
                 <Field label="Дахин борлуулах үнэ" hint={`Одоогийн үнэ ${money(item.unitPrice)}`}>
                   <Input
+                    disabled={busy}
                     value={resaleById[item.id] ?? ""}
                     onChange={(v) => {
                       touch();
@@ -206,6 +208,7 @@ export function LeasingReadyTransfer({
         <>
           <Field label="Шалтгаан">
             <Textarea
+              disabled={busy}
               value={reason}
               onChange={(v) => {
                 touch();

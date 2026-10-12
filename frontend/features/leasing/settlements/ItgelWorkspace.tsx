@@ -587,7 +587,7 @@ export function ItgelWorkspace({
         ))}
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-end">
+      <fieldset disabled={busy} className="m-0 mb-4 grid min-w-0 grid-cols-2 gap-3 border-0 p-0 sm:flex sm:flex-wrap sm:items-end">
         <label className="flex flex-col gap-1 text-[12px] text-muted">
           Өдөр (УБ)
           <Input type="date" value={day} onChange={setDay} className="w-full sm:w-44" />
@@ -626,7 +626,7 @@ export function ItgelWorkspace({
             </select>
           </label>
         )}
-      </div>
+      </fieldset>
 
       {error && (
         <div className="mb-4">
@@ -1020,13 +1020,13 @@ export function ItgelWorkspace({
         <Card className="fixed inset-x-3 bottom-3 z-30 flex max-h-[85dvh] flex-col gap-3 overflow-auto p-4 sm:inset-auto sm:bottom-24 sm:right-6 sm:w-[420px]">
           <div className="text-[15px] font-medium">Дүн оруулж төлөх</div>
           <Field label="Төгрөг (бүхэл)">
-            <Input value={customAmount} onChange={setCustomAmount} inputMode="numeric" />
+            <Input disabled={busy} value={customAmount} onChange={setCustomAmount} inputMode="numeric" />
           </Field>
           <div className="flex gap-2">
             <Button loading={busy} onClick={() => void openCustom()}>
               Хуваарилалт харах
             </Button>
-            <Button variant="ghost" onClick={() => setCustomOpen(false)}>
+            <Button disabled={busy} variant="ghost" onClick={() => setCustomOpen(false)}>
               Болих
             </Button>
           </div>
@@ -1074,13 +1074,13 @@ export function ItgelWorkspace({
             Баримт оруулсан төдийд өр хаагдахгүй. Дүн: {money(preview?.amount ?? selectedAmount)}
           </p>
           <Field label="Гүйлгээний лавлагаа">
-            <Input value={bankRef} onChange={setBankRef} />
+            <Input disabled={busy} value={bankRef} onChange={setBankRef} />
           </Field>
           <Field label="Огноо">
-            <Input type="date" value={bankDate} onChange={setBankDate} />
+            <Input disabled={busy} type="date" value={bankDate} onChange={setBankDate} />
           </Field>
           <Field label="Баримтын холбоос">
-            <Input value={receiptUrl} onChange={setReceiptUrl} placeholder="https://" />
+            <Input disabled={busy} value={receiptUrl} onChange={setReceiptUrl} placeholder="https://" />
           </Field>
           <div className="flex gap-2">
             <Button
@@ -1096,7 +1096,7 @@ export function ItgelWorkspace({
             >
               Мэдэгдэх
             </Button>
-            <Button variant="ghost" onClick={() => setBankOpen(false)}>
+            <Button disabled={busy} variant="ghost" onClick={() => setBankOpen(false)}>
               Болих
             </Button>
           </div>
