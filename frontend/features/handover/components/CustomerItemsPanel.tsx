@@ -203,7 +203,7 @@ export function CustomerItemsPanel({
         }
         primaryAmount={dueForSelected > 0 ? dueForSelected : null}
         primarySub={paySub(payMethod)}
-        primaryDisabled={pickableSelected.length === 0 || (dueForSelected > 0 && !payMethod)}
+        primaryDisabled={pickableSelected.length === 0 || dueForSelected > 0}
         primaryLoading={busy}
         onPrimary={() =>
           onMarkReceived(

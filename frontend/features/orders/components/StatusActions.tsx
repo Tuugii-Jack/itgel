@@ -40,6 +40,7 @@ export function StatusActions({
   onChange,
   onRevert,
   handoverHref,
+  allowHandover = true,
 }: {
   status: OrderStatus;
   hasHandedOverItems: boolean;
@@ -48,8 +49,10 @@ export function StatusActions({
   onChange: (status: OrderStatus) => void;
   onRevert: () => void;
   handoverHref?: string;
+  allowHandover?: boolean;
 }) {
-  const next = nextStatus(status);
+  const proposed = nextStatus(status);
+  const next = proposed === "HANDED_OVER" && !allowHandover ? null : proposed;
   const prev = previousStatus(status);
   const canRevert = status !== "NEW";
   const canCancel = status !== "CANCELLED" && status !== "HANDED_OVER" && !hasHandedOverItems;

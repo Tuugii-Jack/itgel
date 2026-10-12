@@ -1,7 +1,7 @@
 "use client";
 
 import { deferEffect } from "@/lib/deferEffect";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Metric,
   PageHead,
@@ -30,29 +30,45 @@ export default function LeasingReadyPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const loadGeneration = useRef(0);
   const [editing, setEditing] = useState<AdminProduct | null | "new">(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [stock, setStock] = useState<{ onHand: number; reserved: number; available: number } | null>(null);
+  useEffect(() => {
+    const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 350);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
+    setLoading(true);
     setError(null);
     try {
       const [list, cats, stockSummary] = await Promise.all([
-        leasingApi.products({ pageSize: 100, q: search.trim() || undefined }),
+        leasingApi.products({ pageSize: 100, page, q: query || undefined }),
         leasingApi.categories(),
         leasingApi.readyStock().catch(() => null),
       ]);
-      setProducts(list.data);
+      if (generation !== loadGeneration.current) return;
+      setProducts(list.data); setPages(list.meta?.pages ?? 1);
       setCategories(cats);
       if (stockSummary) setStock(stockSummary);
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
-  }, [search]);
+  }, [query, page]);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const requests = loadGeneration;
+    const cancel = deferEffect(() => { void load(); });
+    return () => { cancel(); requests.current++; };
+  }, [load]);
 
   const rows = useMemo(() => {
     const out: { product: AdminProduct; round: AdminRound }[] = [];
@@ -122,7 +138,7 @@ export default function LeasingReadyPage() {
             ? "Бүх лизингийн бэлэн бараа. Шинэ бараа нэмэхдээ эзэмшигч сонгоно."
             : "Өөрийн эзэмшлийн бэлэн бараа. Шинэ борлуулалтын төлбөр лизингийн дансанд орно."
         }
-        actions={<Button onClick={() => setEditing("new")}>Бэлэн бараа нэмэх</Button>}
+        actions={<Button disabled={loading || categories.length === 0} onClick={() => setEditing("new")}>Бэлэн бараа нэмэх</Button>}
       />
       <div className="mb-5 grid grid-cols-3 gap-3 lg:grid-cols-6">
         <Metric label="Ажиллаж буй" value={counts.open} tone="ok" />
@@ -135,6 +151,7 @@ export default function LeasingReadyPage() {
       <div className="mb-4">
         <Input value={search} onChange={setSearch} placeholder="Нэрээр хайх" className="w-52" />
       </div>
+      {pages > 1 && <div className="mb-4 flex items-center justify-end gap-3"><span className="text-[13px] text-muted">{page} / {pages}</span><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPage((value) => value - 1)}>Өмнөх</Button><Button variant="outline" disabled={loading || page >= pages} onClick={() => setPage((value) => value + 1)}>Дараах</Button></div>}
       {error && (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>

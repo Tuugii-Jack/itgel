@@ -117,10 +117,10 @@ async function seedArrivedOrder(opts: {
 }
 
 describe('олголт+төлбөр атомик (HTTP + Postgres)', () => {
-  it('ижил key зэрэг хүсэлт нэг олголт, нэг Payment', async () => {
+  it('төлсөн захиалгын ижил key давтан ирэхэд олголт нэг, кассын орлого нэмэхгүй', async () => {
     const staff = await seedAdmin('STAFF');
     const seed = await seedArrivedOrder({
-      paidAmount: 30_000,
+      paidAmount: 40_000,
       items: [{ qty: 2, arrivedQty: 2, unitPrice: 20_000 }],
     });
     const key = `idem-${randomUUID()}`;
@@ -148,8 +148,7 @@ describe('олголт+төлбөр атомик (HTTP + Postgres)', () => {
     const pays = await prisma.payment.findMany({
       where: { orderId: seed.order.id, kind: 'PAYMENT', payeeKind: 'SHOP' },
     });
-    expect(pays).toHaveLength(1);
-    expect(pays[0]?.amount).toBe(10_000);
+    expect(pays).toHaveLength(0);
   });
 
   it('өөр payload ижил key → 409', async () => {
@@ -183,10 +182,10 @@ describe('олголт+төлбөр атомик (HTTP + Postgres)', () => {
     expect(item.handedOverQty).toBe(1);
   });
 
-  it('өөр мөрүүдийн зэрэг олголт нэг захиалгын өрийг хоёр удаа авахгүй', async () => {
+  it('төлсөн захиалгын өөр мөрүүдийг зэрэг олгоход кассын орлого нэмэхгүй', async () => {
     const staff = await seedAdmin('STAFF');
     const seed = await seedArrivedOrder({
-      paidAmount: 30_000,
+      paidAmount: 40_000,
       items: [
         { qty: 1, arrivedQty: 1 },
         { qty: 1, arrivedQty: 1 },
@@ -219,11 +218,10 @@ describe('олголт+төлбөр атомик (HTTP + Postgres)', () => {
     const pays = await prisma.payment.findMany({
       where: { orderId: seed.order.id, kind: 'PAYMENT', payeeKind: 'SHOP' },
     });
-    expect(pays).toHaveLength(1);
-    expect(pays[0]?.amount).toBe(10_000);
+    expect(pays).toHaveLength(0);
   });
 
-  it('төлбөр бичихэд алдаа гарвал олголт хагас хадгалагдахгүй', async () => {
+  it('QPay төлөгдөөгүй байхад кассын мөнгөөр олголт хийхгүй, орлого нэмэхгүй', async () => {
     const staff = await seedAdmin('STAFF');
     const seed = await seedArrivedOrder({
       paidAmount: 30_000,
@@ -290,10 +288,10 @@ describe('олголт+төлбөр атомик (HTTP + Postgres)', () => {
     expect(item.handedOverQty).toBe(0);
   });
 
-  it('complete зам ч олголт+мөнгийг нэгтгэнэ', async () => {
+  it('complete зам төлсөн захиалгад нэмэлт кассын орлого бүртгэхгүй', async () => {
     const staff = await seedAdmin('STAFF');
     const seed = await seedArrivedOrder({
-      paidAmount: 15_000,
+      paidAmount: 20_000,
       items: [{ qty: 1, arrivedQty: 1 }],
     });
     const res = await fetch(`${server.url}/api/admin/handover/${seed.order.id}/complete`, {
@@ -307,7 +305,6 @@ describe('олголт+төлбөр атомик (HTTP + Postgres)', () => {
     });
     expect(res.status).toBe(200);
     const pays = await prisma.payment.findMany({ where: { orderId: seed.order.id, payeeKind: 'SHOP' } });
-    expect(pays).toHaveLength(1);
-    expect(pays[0]?.amount).toBe(5_000);
+    expect(pays).toHaveLength(0);
   });
 });

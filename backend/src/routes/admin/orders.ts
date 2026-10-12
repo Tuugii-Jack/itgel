@@ -367,6 +367,7 @@ adminOrdersRouter.post(
   validate({ body: createOrderBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof createOrderBody>;
+    if (body.markPaid) throw conflict('Төлбөрийг QPay-ээр авна. Захиалга үүсгэхдээ гараар орлого бүртгэхгүй.');
     const actor = actorOf(req);
 
     const customerId = body.customerId ?? await resolveAdminOrderCustomer(body);

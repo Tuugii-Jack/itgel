@@ -3,7 +3,9 @@ import { SearchField } from "@/components/admin/SearchField";
 import { downloadReportCsv } from "@/lib/reportCsv";
 
 import { deferEffect } from "@/lib/deferEffect";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useOnKeyChange } from "@/lib/syncKey";
+import { parseMoneyInput } from "@/lib/moneyInput";
 import { Metric, PageHead, Select } from "@/components/admin/shared";
 import { OrderDetail } from "@/components/admin/OrderDetail";
 import { Qr } from "@/components/Qr";
@@ -23,6 +25,7 @@ import {
   type SettlementPaymentPage,
   type SettlementPreview,
   type SettlementSummary,
+  type SettlementPaymentOptions,
 } from "./types";
 import {
   appendUniqueById,
@@ -31,10 +34,23 @@ import {
   mergeSelectionOnReload,
   restoredQpay,
   selectedRemainingTotal,
+  addSettlementSelection,
+  MAX_SETTLEMENT_SELECTION,
+  payRequestFromPreview,
 } from "./selection";
 
 function ubToday() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ulaanbaatar" }).format(new Date());
+}
+
+const PAYMENT_STATUS_LABEL: Record<string, string> = { PENDING: "Хүлээгдэж буй", CONFIRMED: "Баталгаажсан", REJECTED: "Буцаасан", SUPERSEDED: "Цуцалсан" };
+
+function PaymentEvidence({ payment }: { payment: SettlementPayment }) {
+  return <div className="flex flex-col gap-1 text-[13px] text-ink-2">
+    {payment.bankDate && <div>Шилжүүлсэн огноо: {payment.bankDate.slice(0, 10)}</div>}
+    {payment.receiptUrl && /^https?:\/\//i.test(payment.receiptUrl) && <a href={payment.receiptUrl} target="_blank" rel="noopener noreferrer" className="underline">Шилжүүлгийн баримт нээх</a>}
+    {payment.rejectedReason && <div className="text-warn">Буцаасан шалтгаан: {payment.rejectedReason}</div>}
+  </div>;
 }
 
 function statusTone(status: SettlementDisplayStatus): Tone {
@@ -95,6 +111,7 @@ export function ItgelWorkspace({
   const [search, setSearch] = useState("");
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("");
+  const [historyStatus, setHistoryStatus] = useState("");
   const [ownerAdminId, setOwnerAdminId] = useState("");
   const [operators, setOperators] = useState<SettlementOperator[]>([]);
   const [summary, setSummary] = useState<SettlementSummary | null>(null);
@@ -123,10 +140,21 @@ export function ItgelWorkspace({
   const [preview, setPreview] = useState<SettlementPreview | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [paymentOptions, setPaymentOptions] = useState<SettlementPaymentOptions | null>(null);
+  const loadGeneration = useRef(0);
+  const paymentSubmitting = useRef(false);
 
   const ownerQuery = ownerAdminId || undefined;
   const ownerRequired = showOwnerFilter && canPay;
   const canSelectPay = canPay && (!ownerRequired || Boolean(ownerAdminId));
+  const canBankPay = canSelectPay && paymentOptions?.manualBankAllowed === true;
+  const selectionScope = [ownerQuery, from, to, q, status].join("|");
+  useOnKeyChange(selectionScope, () => {
+    setSelected(new Map()); setPreview(null); setCustomOpen(false); setBankOpen(false);
+    setInvoice(null); setPaymentId(null); setInvoicePending(false);
+  });
+  const selectionKey = [...selected].map(([id, row]) => `${id}:${row.remaining}`).sort().join("|");
+  useOnKeyChange(`${selectionKey}|${customAmount}`, () => { setPreview(null); });
 
   useEffect(() => {
     const timer = setTimeout(() => setQ(search.trim()), 350);
@@ -134,6 +162,7 @@ export function ItgelWorkspace({
   }, [search]);
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     try {
       const summaryReq =
         variant === "leasing"
@@ -157,7 +186,7 @@ export function ItgelWorkspace({
         ownerAdminId: ownerQuery,
       };
       const historyQuery = {
-        status: "CONFIRMED",
+        status: historyStatus || undefined,
         from: from || undefined,
         to: to || undefined,
         ownerAdminId: ownerQuery,
@@ -174,6 +203,7 @@ export function ItgelWorkspace({
             : Promise.resolve(null);
 
       const [dayData, ops, pendingRows, list] = await Promise.all([summaryReq, opsReq, pendingReq, listReq]);
+      if (generation !== loadGeneration.current) return;
       setSummary(dayData);
       setOperators(ops);
       setPending(pendingRows);
@@ -190,13 +220,25 @@ export function ItgelWorkspace({
       }
       setError(null);
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
+      if (generation === loadGeneration.current) setLoading(false);
     }
-  }, [variant, day, from, to, q, status, ownerQuery, tab, showOwnerFilter]);
+  }, [variant, day, from, to, q, status, historyStatus, ownerQuery, tab, showOwnerFilter]);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const requests = loadGeneration;
+    const cancel = deferEffect(() => { setLoading(true); void load(); });
+    return () => { cancel(); requests.current++; };
+  }, [load]);
+  useEffect(() => {
+    if (!canPay) return;
+    let active = true;
+    void leasingApi.itgelPaymentOptions().then((options) => { if (active) setPaymentOptions(options); })
+      .catch(() => { if (active) setPaymentOptions(null); });
+    return () => { active = false; };
+  }, [canPay]);
 
   const restoredPendingQpay = restoredQpay(pending);
   const activePaymentId = paymentId ?? restoredPendingQpay?.id ?? null;
@@ -210,7 +252,8 @@ export function ItgelWorkspace({
   const groups = useMemo(() => groupByOrder(lines), [lines]);
 
   const loadMore = async () => {
-    if (!nextCursor || tab !== "unpaid") return;
+    if (!nextCursor || tab !== "unpaid" || busy || loading) return;
+    const generation = loadGeneration.current;
     setBusy(true);
     try {
       const page =
@@ -233,6 +276,7 @@ export function ItgelWorkspace({
               ownerAdminId: ownerQuery,
               cursor: nextCursor,
             });
+      if (generation !== loadGeneration.current) return;
       setLines((prev) => appendUniqueById(prev, page.rows));
       setSelected((prev) => mergeSelectionOnPage(prev, page.rows));
       setNextCursor(page.nextCursor);
@@ -245,25 +289,27 @@ export function ItgelWorkspace({
   };
 
   const loadMoreHistory = async () => {
-    if (!historyCursor || tab !== "history") return;
+    if (!historyCursor || tab !== "history" || busy || loading) return;
+    const generation = loadGeneration.current;
     setBusy(true);
     try {
       const page =
         variant === "leasing"
           ? await leasingApi.itgelPayments({
-              status: "CONFIRMED",
+              status: historyStatus || undefined,
               from: from || undefined,
               to: to || undefined,
               ownerAdminId: ownerQuery,
               cursor: historyCursor,
             })
           : await adminApi.leasingSettlementPayments({
-              status: "CONFIRMED",
+              status: historyStatus || undefined,
               from: from || undefined,
               to: to || undefined,
               ownerAdminId: ownerQuery,
               cursor: historyCursor,
             });
+      if (generation !== loadGeneration.current) return;
       setHistory((prev) => appendUniqueById(prev, page.rows));
       setHistoryCursor(page.nextCursor);
     } catch (e) {
@@ -274,33 +320,38 @@ export function ItgelWorkspace({
   };
 
   const toggleLine = (id: string) => {
+    if (busy || loading) return;
     const line = lines.find((row) => row.id === id);
     setSelected((prev) => {
       const next = new Map(prev);
       if (next.has(id)) next.delete(id);
-      else if (line) next.set(id, { remaining: line.remainingAmount, orderId: line.orderId });
+      else if (line) return addSettlementSelection(next, [line]);
       return next;
     });
   };
 
   const toggleOrder = (orderId: string, items: SettlementLine[]) => {
+    if (busy || loading) return;
     const rows = items.filter((row) => row.selectable);
     setSelected((prev) => {
       const next = new Map(prev);
       const allOn = rows.length > 0 && rows.every((row) => next.has(row.id));
       for (const row of rows) {
         if (allOn) next.delete(row.id);
-        else next.set(row.id, { remaining: row.remainingAmount, orderId: row.orderId });
+        else return addSettlementSelection(next, rows);
       }
       return next;
     });
   };
 
   const showInvoice = (result: {
-    payment: { id: string };
+    payment: { id: string; status?: string };
     invoice: SettlementInvoice | null;
     invoicePending?: boolean;
   }) => {
+    if (result.payment.status && result.payment.status !== "PENDING") {
+      setPaymentId(null); setInvoice(null); setInvoicePending(false); return;
+    }
     setPaymentId(result.payment.id);
     setInvoice(result.invoice);
     setInvoicePending(Boolean(result.invoicePending));
@@ -311,23 +362,28 @@ export function ItgelWorkspace({
     amount?: number,
     allocations?: { settlementId: string; amount: number }[],
   ) => {
-    const settlementIds = [...selected.keys()];
+    if (!canSelectPay || paymentSubmitting.current || busy || loading) return;
+    if (method === "BANK_TRANSFER" && !canBankPay) return;
+    const request = allocations && amount !== undefined ? payRequestFromPreview({ amount, allocations }) : { settlementIds: [...selected.keys()], amount, allocations };
+    const { settlementIds } = request;
     if (settlementIds.length === 0) {
       toast.error("Тооцоо сонгоно уу.");
       return;
     }
+    if (settlementIds.length > MAX_SETTLEMENT_SELECTION) { toast.error("Нэг удаа ихдээ 50 мөр төлнө."); return; }
     if (ownerRequired && !ownerAdminId) {
       toast.error("Эзэн сонгоно уу. Өөр эзний өрийг нэгтгэхгүй.");
       return;
     }
+    paymentSubmitting.current = true;
     setBusy(true);
     if (method === "QPAY") setInvoiceCreating(true);
     try {
       const result = await leasingApi.itgelPay({
         settlementIds,
         method,
-        amount,
-        allocations,
+        amount: request.amount,
+        allocations: request.allocations,
         ownerAdminId: ownerQuery,
         bankRef: method === "BANK_TRANSFER" ? bankRef : undefined,
         bankDate: method === "BANK_TRANSFER" ? bankDate : undefined,
@@ -347,6 +403,7 @@ export function ItgelWorkspace({
         setBankOpen(false);
       }
       setCustomOpen(false);
+      setSelected(new Map());
       setPreview(null);
       setInvoiceCreating(false);
       setBusy(false);
@@ -354,14 +411,16 @@ export function ItgelWorkspace({
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : "Төлбөр үүсгэж чадсангүй.");
     } finally {
+      paymentSubmitting.current = false;
       setBusy(false);
       setInvoiceCreating(false);
     }
   };
 
   const openCustom = async () => {
-    const amount = Number(customAmount.replace(/[^\d-]/g, ""));
-    if (!Number.isSafeInteger(amount) || amount <= 0) {
+    if (busy || loading) return;
+    const amount = parseMoneyInput(customAmount);
+    if (amount === null) {
       toast.error("Бүхэл төгрөгөөр дүн оруулна уу.");
       return;
     }
@@ -386,6 +445,7 @@ export function ItgelWorkspace({
   };
 
   const verify = async (id: string) => {
+    if (!canPay || busy) return;
     setBusy(true);
     try {
       const st = await leasingApi.itgelVerify(id);
@@ -404,6 +464,7 @@ export function ItgelWorkspace({
   };
 
   const resume = async (id: string) => {
+    if (!canPay || busy) return;
     setBusy(true);
     try {
       const result = await leasingApi.itgelResume(id);
@@ -423,6 +484,7 @@ export function ItgelWorkspace({
   };
 
   const cancelInvoice = async (id: string) => {
+    if (!canPay || busy) return;
     setBusy(true);
     try {
       await leasingApi.itgelCancel(id);
@@ -441,6 +503,7 @@ export function ItgelWorkspace({
   };
 
   const confirmBank = async (id: string) => {
+    if (!canConfirmBank || busy) return;
     setBusy(true);
     try {
       await adminApi.confirmLeasingBankPayment(id);
@@ -454,7 +517,7 @@ export function ItgelWorkspace({
   };
 
   const rejectBank = async () => {
-    if (!rejectId || rejectReason.trim().length < 3) return;
+    if (!canConfirmBank || busy || !rejectId || rejectReason.trim().length < 3) return;
     setBusy(true);
     try {
       await adminApi.rejectLeasingBankPayment(rejectId, rejectReason.trim());
@@ -483,15 +546,32 @@ export function ItgelWorkspace({
   }
 
   return (
-    <div className={canSelectPay && selectedAmount > 0 ? "pb-28" : ""}>
+    <div className={canSelectPay && selectedAmount > 0 ? "pb-64 sm:pb-28" : ""}>
       <PageHead
         title={variant === "leasing" ? "Итгэлд төлөх" : "Лизингийн тооцоо"}
         hint={
           variant === "leasing"
-            ? "Хэрэглэгчийн хэсэгчилсэн төлөлт энэ дүнг бууруулахгүй. Өрийг захиалга/барааны мөрөөр харна."
+            ? "Төлөх захиалгуудаа сонгоод Итгэлийн QPay-ээр төлнө. Хэрэглэгчийн төлөлтөөс тусдаа Итгэлтэй хийх тооцоо."
             : "Хэнээс, ямар захиалгад, хэд орсон, хэд үлдсэнийг энд батална. Дансны мэдүүлэг өр хаахгүй."
         }
       />
+
+      {canPay && <Card className="mb-5 flex flex-col gap-3 p-4">
+        <div className="text-[16px] font-medium">Итгэлд мөнгө төлөх</div>
+        <ol className="m-0 list-decimal space-y-1 pl-5 text-[13px] text-ink-2">
+          <li>{ownerRequired ? "Хариуцагчаа сонгоод төлөх захиалгын мөрүүдийг чагтална." : "Доорх жагсаалтаас төлөх захиалгын мөрүүдийг чагтална."}</li>
+          <li>QPay-ээр QR уншуулах эсвэл банкны апп нээж төлнө. Хэсэгчлэн төлөх бол дүнгээ оруулна.</li>
+          {paymentOptions?.manualBankAllowed && <li>Лизингийн админ дансны гүйлгээ бүртгэх эрхтэй. Лавлагаа, огноог үндсэн админ баталсны дараа үлдэгдэл буурна.</li>}
+        </ol>
+        <div className="flex flex-wrap gap-2">
+          <Button loading={busy} disabled={!canSelectPay || selectedAmount <= 0 || loading || paymentOptions?.qpayReady === false} onClick={() => void pay("QPAY")}>QPay-ээр төлөх{selectedAmount > 0 ? ` · ${money(selectedAmount)}` : ""}</Button>
+          <Button variant="outline" disabled={!canSelectPay || selectedAmount <= 0 || busy || loading} onClick={() => { setCustomOpen(true); setCustomAmount(String(selectedAmount)); setPreview(null); }}>Хэсэгчлэн төлөх</Button>
+          {paymentOptions?.manualBankAllowed && <Button variant="outline" disabled={!canBankPay || selectedAmount <= 0 || busy || loading} onClick={() => { setPreview(null); setBankOpen(true); }}>Дансны гүйлгээ бүртгэх</Button>}
+        </div>
+        <p className="m-0 text-[12px] text-muted">{selected.size ? `${selected.size} мөр · ${selectedOrders} захиалга сонгосон. ` : "Төлбөрийн товч идэвхжүүлэхийн тулд мөрөө сонгоно уу. "}Нэг удаад ихдээ 50 мөр төлнө.</p>
+        {paymentOptions?.qpayReady === false && <p className="m-0 text-[13px] text-warn">Итгэлийн QPay одоогоор идэвхгүй. Үндсэн админтай холбогдоно уу.</p>}
+
+      </Card>}
 
       <div className="mb-4 flex flex-wrap gap-2">
         {(
@@ -587,7 +667,7 @@ export function ItgelWorkspace({
         </div>
       )}
 
-      {(invoiceCreating || activeInvoice || activeInvoicePending) && (
+      {canPay && (invoiceCreating || activeInvoice || activeInvoicePending) && (
         <Card className="mb-4 flex flex-col items-center gap-3 p-4">
           <div className="text-[15px] font-medium">
             {invoiceCreating
@@ -601,6 +681,11 @@ export function ItgelWorkspace({
               QPay хариу иртэл хүлээнэ. Хариу ирээгүй байхад амжилттай гэж үзэхгүй.
             </p>
           ) : null}
+          {activeInvoice?.urls && activeInvoice.urls.length > 0 && <div className="w-full max-w-lg">
+            <p className="mb-2 mt-0 text-center text-[13px] text-ink-2">Утаснаасаа банкны апп сонгож төлөх</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{activeInvoice.urls.filter((bank) => bank.link && !/^(javascript|data|vbscript):/i.test(bank.link.trim())).map((bank) => <a key={bank.link} href={bank.link} className="flex min-h-11 items-center justify-center rounded-lg border border-line px-3 py-2 text-center text-[13px] text-ink no-underline hover:bg-surface">{bank.description || bank.name}</a>)}</div>
+          </div>}
+          {activeInvoice?.shortUrl && /^https?:\/\//i.test(activeInvoice.shortUrl) && <a href={activeInvoice.shortUrl} target="_blank" rel="noopener noreferrer" className="text-[13px] underline">QPay төлбөрийн холбоос нээх</a>}
           {activeInvoice?.qrImage ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -634,7 +719,7 @@ export function ItgelWorkspace({
           <div className="mb-4 flex flex-wrap items-center gap-2">
             {canSelectPay && <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => {
               const available = lines.filter((line) => line.selectable && line.remainingAmount > 0);
-              setSelected(new Map(available.map((line) => [line.id, { remaining: line.remainingAmount, orderId: line.orderId }])));
+              setSelected(addSettlementSelection(new Map(), available));
             }}>Харагдаж буй боломжит мөрүүдийг сонгох</Button>}
             {selected.size > 0 && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelected(new Map())}>Сонголт цэвэрлэх</Button>}
             <Button size="sm" variant="outline" disabled={lines.length === 0} onClick={() => downloadReportCsv("itgel-settlements.csv", ["Захиалга", "Хэрэглэгч", "Бараа", "Ширхэг", "Нийт", "Орсон", "Үлдэгдэл", "Төлөв"], lines.map((line) => [line.orderCode, line.customerName, line.productName, line.qty, line.amount, line.paidAmount, line.remainingAmount, line.statusLabel]))}>Жагсаалт CSV татах</Button>
@@ -662,6 +747,7 @@ export function ItgelWorkspace({
                             type="checkbox"
                             className="mt-1 h-5 w-5"
                             checked={allOn}
+                            disabled={busy || loading}
                             onChange={() => toggleOrder(group.orderId, group.items)}
                             aria-label={`${group.orderCode} сонгох`}
                           />
@@ -706,6 +792,7 @@ export function ItgelWorkspace({
                                 type="checkbox"
                                 className="mt-1 h-5 w-5"
                                 checked={selected.has(line.id)}
+                                disabled={busy || loading || (!selected.has(line.id) && selected.size >= MAX_SETTLEMENT_SELECTION)}
                                 onChange={() => toggleLine(line.id)}
                               />
                             ) : (
@@ -775,7 +862,7 @@ export function ItgelWorkspace({
                       </div>
                       <div className="text-[13px] text-ink-2">
                         {p.ownerName ? `${p.ownerName} · ` : ""}
-                        {p.status}
+                        {PAYMENT_STATUS_LABEL[p.status] ?? p.status}
                         {p.bankRef ? ` · ${p.bankRef}` : ""}
                       </div>
                     </div>
@@ -812,6 +899,7 @@ export function ItgelWorkspace({
                       )}
                     </div>
                   </div>
+                  <PaymentEvidence payment={p} />
                   {p.lines.map((line) => (
                     <div key={line.settlement.id} className="text-[13px]">
                       <button
@@ -849,20 +937,25 @@ export function ItgelWorkspace({
 
       {tab === "history" && (
         <>
+          <div className="mb-4"><Select value={historyStatus} onChange={setHistoryStatus} options={[
+            { value: "", label: "Бүх төлөлт" }, { value: "CONFIRMED", label: "Баталгаажсан" },
+            { value: "REJECTED", label: "Буцаасан" }, { value: "SUPERSEDED", label: "Цуцалсан" },
+          ]} /></div>
           {history.length === 0 ? (
-            <Empty>Баталгаажсан төлбөр алга.</Empty>
+            <Empty>Энэ шүүлтээр төлөлт алга.</Empty>
           ) : (
             <div className="flex flex-col gap-3">
               {history.map((p) => (
                 <Card key={p.id} className="p-4">
                   <div className="font-medium">
-                    {p.method === "QPAY" ? "QPay" : "Данс"} · нийт {money(p.amount)}
+                    {p.method === "QPAY" ? "QPay" : "Данс"} · нийт {money(p.amount)} · {PAYMENT_STATUS_LABEL[p.status] ?? p.status}
                   </div>
                   <div className="text-[13px] text-ink-2">
-                    {historyDateLabel(p)}
+                    {p.status === "CONFIRMED" ? historyDateLabel(p) : p.createdAt.slice(0, 10)}
                     {p.ownerName ? ` · ${p.ownerName}` : ""}
-                    {p.claimedBy ? ` · ${p.claimedBy}` : ""}
+                    {p.bankRef ? ` · ${p.bankRef}` : ""}
                   </div>
+                  <PaymentEvidence payment={p} />
                   {p.lines.map((line) => (
                     <div key={line.settlement.id} className="mt-2 text-[13px]">
                       <button
@@ -900,11 +993,12 @@ export function ItgelWorkspace({
               <span className="tnum font-medium">{money(selectedAmount)}</span>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button loading={busy} className="min-h-11 w-full sm:w-auto" onClick={() => void pay("QPAY")}>
-                Бүтэн төлөх
+              <Button loading={busy} disabled={loading || paymentOptions?.qpayReady === false} className="min-h-11 w-full sm:w-auto" onClick={() => void pay("QPAY")}>
+                QPay-ээр төлөх
               </Button>
               <Button
                 variant="outline"
+                disabled={busy || loading}
                 className="min-h-11 w-full sm:w-auto"
                 onClick={() => {
                   setCustomOpen(true);
@@ -914,16 +1008,16 @@ export function ItgelWorkspace({
               >
                 Дүн оруулж төлөх
               </Button>
-              <Button variant="ghost" className="min-h-11 w-full sm:w-auto" onClick={() => setBankOpen(true)}>
-                Дансаар мэдэгдэх
-              </Button>
+              {canBankPay && <Button variant="ghost" disabled={busy || loading} className="min-h-11 w-full sm:w-auto" onClick={() => { setPreview(null); setBankOpen(true); }}>
+                Дансны гүйлгээ бүртгэх
+              </Button>}
             </div>
           </div>
         </div>
       )}
 
       {customOpen && (
-        <Card className="fixed inset-x-3 bottom-24 z-30 flex max-h-[70vh] flex-col gap-3 overflow-auto p-4 sm:inset-auto sm:bottom-24 sm:right-6 sm:w-[420px]">
+        <Card className="fixed inset-x-3 bottom-3 z-30 flex max-h-[85dvh] flex-col gap-3 overflow-auto p-4 sm:inset-auto sm:bottom-24 sm:right-6 sm:w-[420px]">
           <div className="text-[15px] font-medium">Дүн оруулж төлөх</div>
           <Field label="Төгрөг (бүхэл)">
             <Input value={customAmount} onChange={setCustomAmount} inputMode="numeric" />
@@ -947,6 +1041,7 @@ export function ItgelWorkspace({
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Button
                   loading={busy}
+                  disabled={paymentOptions?.qpayReady === false}
                   onClick={() =>
                     void pay(
                       "QPAY",
@@ -959,6 +1054,7 @@ export function ItgelWorkspace({
                 </Button>
                 <Button
                   variant="outline"
+                  disabled={!canBankPay || busy}
                   onClick={() => {
                     setBankOpen(true);
                   }}
@@ -971,8 +1067,8 @@ export function ItgelWorkspace({
         </Card>
       )}
 
-      {bankOpen && (
-        <Card className="fixed inset-x-3 bottom-24 z-30 flex max-w-[480px] flex-col gap-3 p-4 sm:left-auto sm:right-6">
+      {bankOpen && canBankPay && (
+        <Card className="fixed inset-x-3 bottom-3 z-30 flex max-h-[85dvh] max-w-[480px] flex-col gap-3 overflow-auto p-4 sm:left-auto sm:bottom-24 sm:right-6">
           <div className="text-[15px] font-medium">Дансаар шилжүүлсэн</div>
           <p className="m-0 text-[13px] text-ink-2">
             Баримт оруулсан төдийд өр хаагдахгүй. Дүн: {money(preview?.amount ?? selectedAmount)}
@@ -989,7 +1085,7 @@ export function ItgelWorkspace({
           <div className="flex gap-2">
             <Button
               loading={busy}
-              disabled={!bankRef.trim()}
+              disabled={!bankRef.trim() || !bankDate || loading}
               onClick={() =>
                 void pay(
                   "BANK_TRANSFER",

@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { activeWorkspaceLink, normalizeWorkHref, searchWorkspaceLinks, workspaceHref, workspaceLinksFor } from "../lib/workspaceNavigation.ts";
-import { helperAdminCanAccess } from "../lib/admin-role.ts";
+import { canAccessWorkspacePage, destinationsFor, helperAdminCanAccess } from "../lib/admin-role.ts";
+
+test("a cached destination list cannot grant access to another admin portal", () => {
+  assert.deepEqual(destinationsFor("LEASING", ["shop", "leasing", "store"]), ["leasing"]);
+  assert.deepEqual(destinationsFor("ADMIN", ["shop", "leasing"]), ["shop"]);
+  assert.deepEqual(destinationsFor("CUSTOMER", ["shop", "leasing"]), []);
+  for (const role of ["LEASING", "CUSTOMER", "UNKNOWN", null]) {
+    assert.equal(canAccessWorkspacePage("shop", role, "/workspace/shop/today"), false);
+    assert.equal(canAccessWorkspacePage("shop", role, "/workspace/shop/handover"), false);
+  }
+  assert.equal(canAccessWorkspacePage("shop", "STAFF", "/workspace/shop/orders/new"), false);
+  assert.equal(canAccessWorkspacePage("shop", "STAFF", "/workspace/shop/handover"), true);
+  assert.equal(canAccessWorkspacePage("leasing", "ADMIN", "/workspace/leasing"), false);
+  assert.equal(canAccessWorkspacePage("leasing", "LEASING", "/workspace/leasing/itgel"), true);
+});
 
 test("workspace menus respect every role and deny unknown roles", () => {
   assert.equal(workspaceLinksFor("shop", "OWNER").length, 20);

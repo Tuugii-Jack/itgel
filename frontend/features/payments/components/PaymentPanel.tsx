@@ -102,13 +102,6 @@ export function PaymentPanel({
               ? "Эхлээд лизингийн шимтгэлийг лизингийн QPay-ээр төлнө. Үндсэн төлбөрийг хуваарьтай төлнө."
               : "Төлбөрийг QPay-ээр төлнө. Төлсний дараа захиалга баталгаажна."}
           </p>
-          {leasingPayee && store.leasingBank && (
-            <p className="mt-2 mb-0 text-[13px] leading-[1.5] text-ink-2">
-              Шилжүүлэг: {store.leasingBank.name} {store.leasingBank.accountNumber}
-              {store.leasingBank.accountName ? ` · ${store.leasingBank.accountName}` : ""}
-              {store.leasingBank.note ? ` · ${store.leasingBank.note}` : ""}
-            </p>
-          )}
         </>
       ) : (
         <>

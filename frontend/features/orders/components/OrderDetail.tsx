@@ -17,6 +17,8 @@ import {
   Spinner,
 } from "@/components/ui";
 import { adminApi } from "@/lib/api";
+import { useAdminSession } from "@/lib/admin-session";
+import { useToast } from "@/lib/toast";
 import { customerNameLabel, dayTimeLabel, money, phoneLabel } from "@/lib/format";
 import { PAYMENT_TONE } from "@/lib/payment";
 import { leasingGoodsArrived } from "@/lib/leasing";
@@ -49,6 +51,9 @@ export function OrderDetail({
   workspace?: "shop" | "leasing";
 }) {
   const [section, setSection] = useState("auto");
+  const { user } = useAdminSession();
+  const userRoleAllowsBank = user?.role === "LEASING";
+  const toast = useToast();
   const {
     order,
     ledger,
@@ -162,7 +167,7 @@ export function OrderDetail({
           <Badge tone={PAYMENT_TONE[order.paymentState]}>{order.paymentStateLabel}</Badge>
         )}
         {order.batch &&
-          (canWriteStatus ? (
+          (canWriteStatus && !leasingPortal ? (
           <Link
             href={`/workspace/shop/batches?batch=${encodeURIComponent(order.batch.id)}`}
             className="no-underline"
@@ -247,6 +252,13 @@ export function OrderDetail({
         { id: "goods", label: "Бараа ба олголт", count: order.items.filter((item) => !item.cancelled).length },
         { id: "history", label: "Төлбөрийн түүх", count: ledger.payments.length },
       ]} />
+      {leasingPortal && <div className="mb-4 flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" onClick={() => setSection("payment")}>Төлбөр, буцаалт</Button>
+        {order.isLeasing && !order.isResale && <Button size="sm" variant="outline" onClick={() => setSection("goods")}>Бэлэн бараанд шилжүүлэх</Button>}
+        {canWritePayments && order.dueAmount > 0 && <Button size="sm" variant="outline" loading={busyKey === "leasing-sms"} disabled={busy} onClick={() => void openPaySms()}>SMS сануулах</Button>}
+        <Link href="/workspace/leasing/itgel" className="inline-flex min-h-9 items-center rounded-lg border border-line px-3 text-[13px] text-ink no-underline">Итгэлд төлөх</Link>
+      </div>}
+      {view === "payment" && totals.dueAmount > 0 && <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4"><p className="m-0 text-[13px] text-ink-2">Хэрэглэгч барааны төлбөрөө {order.isLeasing || order.payeeKind === "LEASING" ? "лизингийн" : "Итгэлийн"} QPay-ээр төлнө. Карго Итгэлийн QPay-д орно.</p><Button size="sm" variant="outline" onClick={() => { void navigator.clipboard.writeText(`${window.location.origin}/t/${encodeURIComponent(order.code)}`).then(() => toast.success("Төлбөрийн холбоос хууллаа.")).catch(() => toast.error("Холбоос хуулж чадсангүй.")); }}>Төлбөрийн холбоос хуулах</Button></Card>}
       <div className={view === "history" ? "" : "grid gap-4 lg:grid-cols-[1fr_360px] lg:items-start"}>
         <div className="flex flex-col gap-4">
           <div hidden={view !== "goods"}>
@@ -292,7 +304,8 @@ export function OrderDetail({
             busyKey={busyKey}
             onChange={changeStatus}
             onRevert={revertStatus}
-            handoverHref={"/workspace/shop/handover?code=" + encodeURIComponent(order.code)}
+            handoverHref={leasingPortal ? undefined : "/workspace/shop/handover?code=" + encodeURIComponent(order.code)}
+            allowHandover={!leasingPortal}
           />
           ) : leasingPortal ? (
             <>
@@ -329,7 +342,7 @@ export function OrderDetail({
           )}
           </div>
 
-          {view === "payment" && canWritePayments && totals.dueAmount > 0 && (
+          {view === "payment" && canWritePayments && leasingPortal && userRoleAllowsBank && totals.dueAmount > 0 && (
             <RecordPayment
               key={`payment-${order.id}`}
               suggested={
@@ -337,6 +350,7 @@ export function OrderDetail({
                   ? (order.nextPayAmount ?? totals.dueAmount)
                   : totals.dueAmount
               }
+              bankOnly
               disabled={busy}
               loading={busyKey === "payment"}
               onSubmit={(body) =>

@@ -48,8 +48,16 @@ export type SettlementInvoice = {
   invoiceId: string;
   qrText: string;
   qrImage: string | null;
+  shortUrl?: string | null;
   urls: { name: string; description: string; logo: string | null; link: string }[];
   amount: number;
+};
+
+export type SettlementPaymentOptions = {
+  recipientName: string;
+  qpayReady: boolean;
+  manualBankAllowed: boolean;
+  maxSettlements: number;
 };
 
 export type SettlementPayment = {

@@ -518,6 +518,9 @@ export const leasingApi = {
       }[];
     }>("/leasing/finance/ready/sales", { ...adminAuth, query }).then((r) => ({ ...r.data, meta: r.meta })),
 
+  itgelPaymentOptions: () =>
+    request<import("./settlements/types").SettlementPaymentOptions>("/leasing/finance/itgel/payment-options", adminAuth).then((r) => r.data),
+
   itgelSummary: (query?: { day?: string; ownerAdminId?: string }) =>
     request<import("./settlements/types").SettlementSummary>("/leasing/finance/itgel/summary", {
       ...adminAuth,

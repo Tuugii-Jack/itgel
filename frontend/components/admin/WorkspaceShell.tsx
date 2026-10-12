@@ -5,7 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { ArrowUpRight, ChevronRight, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
 import { Spinner } from "@/components/ui";
-import { helperAdminCanAccess, isFullAdmin, isLeasingAdmin, ROLE_LABEL, workspaceSectionsFor } from "@/lib/admin-role";
+import { canAccessWorkspacePage, isFullAdmin, ROLE_LABEL } from "@/lib/admin-role";
+import { workspaceHome } from "@/lib/safeNext";
 import { AdminSessionProvider, useAdminSession } from "@/lib/admin-session";
 import { activeWorkspaceLink, workspaceLinksFor, type WorkspacePortal } from "@/lib/workspaceNavigation";
 import { WorkspaceIcon } from "./WorkspaceIcon";
@@ -24,10 +25,10 @@ function Frame({ portal, children }: { portal: WorkspacePortal; children: ReactN
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [compact, setCompact] = useState(false);
-  const allowed = portal === "leasing" ? isLeasingAdmin(user?.role) : isFullAdmin(user?.role) || helperAdminCanAccess(pathname);
+  const allowed = canAccessWorkspacePage(portal, user?.role, pathname);
   const links = workspaceLinksFor(portal, user?.role);
   const current = activeWorkspaceLink(pathname, links);
-  useEffect(() => { if (user && !allowed) router.replace("/workspace/shop/today"); }, [user, allowed, router]);
+  useEffect(() => { if (user && !allowed) router.replace(workspaceHome(user.role)); }, [user, allowed, router]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen((value) => !value); }
@@ -82,11 +83,6 @@ function Frame({ portal, children }: { portal: WorkspacePortal; children: ReactN
           <span className="truncate font-medium text-ink">{current?.label ?? "Ажлын хэсэг"}</span>
         </nav>
         <button type="button" onClick={() => setSearchOpen(true)} aria-label="Хурдан хайлт" className="flex h-10 w-10 items-center justify-center rounded-lg border border-line lg:hidden"><Search className="h-4 w-4" /></button>
-        {workspaceSectionsFor(user.role, user.destinations).length > 1 && <select aria-label="Ажлын хэсэг солих" value={portal}
-          onChange={(event) => router.push(event.target.value === "store" ? "/" : `/workspace/${event.target.value}/today`)}
-          className="hidden h-10 max-w-[145px] rounded-lg border border-line bg-bg px-2 text-[12px] sm:block">
-          {workspaceSectionsFor(user.role, user.destinations).map((section) => <option value={section.id} key={section.id}>{section.label}</option>)}
-        </select>}
         <Link href={quickHref} className="hidden h-10 items-center gap-2 rounded-lg bg-secondary px-3 text-[12px] font-medium text-white no-underline sm:inline-flex">
           <WorkspaceIcon name={portal === "shop" ? "add" : "money"} className="h-4 w-4" />{quickLabel}
         </Link>
@@ -98,7 +94,7 @@ function Frame({ portal, children }: { portal: WorkspacePortal; children: ReactN
     <WorkspaceDialog open={menuOpen} onClose={() => setMenuOpen(false)} title="Ажлын хэсгүүд" className="max-w-[380px]">
       <div className="p-4">{navigation(true)}<Link href={quickHref} onClick={() => setMenuOpen(false)} className="mt-5 flex h-11 items-center justify-center rounded-lg bg-secondary text-white no-underline">{quickLabel}</Link>
         <div className="mt-4 border-t border-line pt-3">
-          {workspaceSectionsFor(user.role, user.destinations).filter((section) => section.id !== portal).map((section) => <Link key={section.id} href={section.id === "store" ? "/" : `${section.href}/today`} onClick={() => setMenuOpen(false)} className="flex min-h-11 items-center gap-3 px-3 text-[13px] text-ink no-underline"><ArrowUpRight className="h-4 w-4" />{section.label}</Link>)}
+          <Link href="/" target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center gap-3 px-3 text-[13px] text-ink no-underline"><ArrowUpRight className="h-4 w-4" />Дэлгүүр нээх</Link>
           <button type="button" onClick={signOut} className="flex min-h-11 w-full items-center gap-3 px-3 text-[13px] text-ink-2"><LogOut className="h-4 w-4" />Гарах</button>
         </div>
       </div>

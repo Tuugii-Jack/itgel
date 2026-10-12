@@ -36,6 +36,8 @@ export default function LeasingCustomersPage() {
   const { user } = useAdminSession();
   const canWrite = canWriteLeasingMoney(user?.role);
   const [rows, setRows] = useState<CustomerRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
   const [search, setSearch] = useWorkspaceQuery("q", "", true);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -48,24 +50,26 @@ export default function LeasingCustomersPage() {
   const listRequest = useRef(0);
 
   useEffect(() => {
-    const timer = setTimeout(() => setQuery(search.trim()), 350);
+    const timer = setTimeout(() => { setQuery(search.trim()); setPage(1); }, 350);
     return () => clearTimeout(timer);
   }, [search]);
 
   const load = useCallback(async () => {
     const request = ++listRequest.current;
+    setLoading(true);
     setError(null);
     try {
-      const list = await leasingApi.customers({ q: query || undefined, pageSize: 100 });
+      const list = await leasingApi.customers({ q: query || undefined, pageSize: 100, page });
       if (request !== listRequest.current) return;
       setRows(list.data);
+      setPages(list.meta?.pages ?? 1);
     } catch (e) {
       if (request !== listRequest.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
       if (request === listRequest.current) setLoading(false);
     }
-  }, [query]);
+  }, [query, page]);
 
   const markChanged = useDeferredReload(load, !openId && !openOrderId);
 
@@ -178,6 +182,7 @@ export default function LeasingCustomersPage() {
       <div className="mb-4">
         <SearchField value={search} onChange={setSearch} placeholder="Нэр, и-мэйл, утас" className="w-64" />
       </div>
+      {pages > 1 && <div className="mb-4 flex items-center justify-end gap-3"><span className="text-[13px] text-muted">{page} / {pages}</span><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPage((value) => value - 1)}>Өмнөх</Button><Button variant="outline" disabled={loading || page >= pages} onClick={() => setPage((value) => value + 1)}>Дараах</Button></div>}
       {error && (
         <div className="mb-4">
           <ErrorNote>{error}</ErrorNote>

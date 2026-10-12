@@ -4,14 +4,13 @@ import { z } from 'zod';
 import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { endOfUbDay, parseUbDay, startOfUbDay } from '../../lib/date.js';
-import { notFound } from '../../lib/errors.js';
+import { conflict, notFound } from '../../lib/errors.js';
 import { selectionsOf } from '../../lib/options.js';
 import { pickableQtyOf, handedQtyOf } from '../../lib/itemQty.js';
 import { actorOf } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { deliveryHistory } from '../../services/deliveryHistory.js';
 import { handOverItems } from '../../services/orders.js';
-import { recordPayment } from '../../services/payments.js';
 import { shopDueAmount } from '../../services/money.js';
 
 export const adminDeliveriesRouter = Router();
@@ -186,6 +185,7 @@ adminDeliveriesRouter.patch(
       include: { order: { include: { items: true } } },
     });
     if (!before) throw notFound('Хүргэлт олдсонгүй.');
+    if (body.status === 'DELIVERED' && shopDueAmount(before.order) > 0) throw conflict('Хүргэлтийг дуусгахын өмнө хэрэглэгч QPay төлбөрөө бүрэн төлнө.', { code: 'QPAY_REQUIRED' });
 
     const after = await prisma.delivery.update({
       where: { id: before.id },
@@ -231,23 +231,12 @@ adminDeliveriesRouter.patch(
             note: payNote,
             idempotencyKey: `delivery-${before.id}`,
             collection: {
-              method: 'CASH',
-              autoCollectDue: true,
+              qpayOnly: true,
             },
           });
         } else {
           const shopDue = shopDueAmount(before.order);
-          if (shopDue > 0) {
-            await recordPayment({
-              orderId: before.orderId,
-              kind: 'PAYMENT',
-              amount: shopDue,
-              method: 'CASH',
-              note: payNote,
-              actor,
-              payeeKind: 'SHOP',
-            });
-          }
+          if (shopDue > 0) throw conflict('Хэрэглэгч QPay төлбөрөө бүрэн төлнө.');
         }
       } catch (error) {
         await prisma.delivery.update({

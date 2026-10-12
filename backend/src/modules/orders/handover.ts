@@ -23,6 +23,8 @@ export interface HandOverCollection {
   method?: PaymentMethod;
   /** complete/delivery: дутуу collectedAmount-ийг shop due-р нөхнө. partial: дутуу = 0. */
   autoCollectDue?: boolean;
+  /** Public admin workflows require the customer's QPay payment before handing over. */
+  qpayOnly?: boolean;
 }
 
 export interface HandOverItemsResult {
@@ -71,6 +73,7 @@ function handoverPayloadHash(input: {
     collectedAmount: input.collection?.collectedAmount ?? null,
     method: input.collection?.method ?? null,
     autoCollectDue: Boolean(input.collection?.autoCollectDue),
+    qpayOnly: Boolean(input.collection?.qpayOnly),
   });
 }
 
@@ -162,6 +165,7 @@ export async function handOverItems(opts: {
       totalDue += due;
     }
     if (totalDue > 0) {
+      if (opts.collection?.qpayOnly) throw conflict('Төлбөрөө QPay-ээр бүрэн төлсний дараа барааг олгоно.', { code: 'QPAY_REQUIRED', dueAmount: totalDue });
       const collected = opts.collection?.autoCollectDue
         ? (opts.collection.collectedAmount ?? totalDue)
         : (opts.collection?.collectedAmount ?? 0);

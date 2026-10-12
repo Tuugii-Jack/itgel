@@ -57,6 +57,20 @@ export function selectedRemainingTotal(selected: Map<string, SettlementPick>): n
   return [...selected.values()].reduce((sum, row) => sum + row.remaining, 0);
 }
 
+export const MAX_SETTLEMENT_SELECTION = 50;
+
+export function addSettlementSelection(
+  selected: Map<string, SettlementPick>, rows: SelectableSettlement[], limit = MAX_SETTLEMENT_SELECTION,
+): Map<string, SettlementPick> {
+  const next = new Map(selected);
+  for (const row of rows) {
+    if (!row.selectable || row.remainingAmount <= 0) continue;
+    if (!next.has(row.id) && next.size >= limit) continue;
+    next.set(row.id, { remaining: row.remainingAmount, orderId: row.orderId });
+  }
+  return next;
+}
+
 export function restoredQpay(pending: PendingQpay[]): PendingQpay | null {
   return pending.find((row) => row.method === "QPAY" && row.status === "PENDING") ?? null;
 }

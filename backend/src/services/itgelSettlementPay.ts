@@ -144,7 +144,7 @@ export async function createSettlementPayment(input: {
   }
   if (input.method === 'BANK_TRANSFER') {
     if (!input.bankRef?.trim()) throw conflict('Гүйлгээний лавлагаа оруулна уу.');
-    if (!input.bankDate) throw conflict('Шилжүүлгийн огноо оруулна уу.');
+    if (!input.bankDate || !Number.isFinite(input.bankDate.getTime())) throw badRequest('Шилжүүлгийн огноог зөв оруулна уу.');
   }
 
   if (canViewAllSettlements(input.role) && !input.ownerAdminId) {

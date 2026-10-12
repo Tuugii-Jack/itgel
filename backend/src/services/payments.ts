@@ -66,12 +66,24 @@ export async function recordPaymentWithTotals(
       leasingFee: true,
       paidAmount: true,
       refundedAmount: true,
+      isLeasing: true,
+      payeeKind: true,
     },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
 
   if (input.kind === 'REFUND') {
     assertRefundable(computeTotals(order), input.amount);
+    if (input.payeeKind) {
+      const legacyPayee = order.isLeasing || order.payeeKind === 'LEASING' ? 'LEASING' : 'SHOP';
+      const own = await tx.payment.groupBy({
+        by: ['kind'],
+        where: { orderId: order.id, OR: [{ payeeKind: input.payeeKind }, ...(input.payeeKind === legacyPayee ? [{ payeeKind: null }] : [])] },
+        _sum: { amount: true },
+      });
+      const available = own.reduce((sum, row) => sum + (row.kind === 'PAYMENT' ? 1 : -1) * (row._sum.amount ?? 0), 0);
+      if (input.amount > Math.max(0, available)) throw conflict('Энэ хүлээн авагчид орсон мөнгөнөөс их дүнг буцаах боломжгүй.');
+    }
   }
 
   const payment = await tx.payment.create({

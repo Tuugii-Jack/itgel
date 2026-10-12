@@ -5,7 +5,6 @@ import { money } from "@/lib/format";
 import { leasingAccountDue, shopDueOf } from "@/lib/leasing";
 import type { HandoverPayMethod } from "@/lib/types";
 import { lineLeasingDue, lineShopDue, type DueOrderLine } from "../utils";
-import { PayMethodPicker } from "./PayMethodPicker";
 
 function SumLine({
   label,
@@ -45,8 +44,6 @@ export function PaymentDueCard({
   leasingDueAmount,
   isLeasing,
   orders,
-  payMethod,
-  onPayMethod,
   selectedDue,
 }: {
   subtotal?: number;
@@ -179,9 +176,7 @@ export function PaymentDueCard({
         </div>
       )}
 
-      {onPayMethod && collect > 0 && (
-        <PayMethodPicker amount={collect} value={payMethod ?? null} onChange={onPayMethod} />
-      )}
+      {collect > 0 && <div className="border-t border-line bg-warn-bg px-4 py-3 text-[13px] text-warn">Хэрэглэгч үлдэгдлээ Итгэлийн QPay-ээр төлнө. Төлбөр орсны дараа жагсаалтаа шинэчилж олгоно.</div>}
     </Card>
   );
 }

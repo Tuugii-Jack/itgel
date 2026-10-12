@@ -9,7 +9,17 @@ import {
   payRequestFromPreview,
   restoredQpay,
   selectedRemainingTotal,
+  addSettlementSelection,
 } from "../features/leasing/settlements/selection.ts";
+
+test("bulk selection respects the payment API's 50-row limit across pages", () => {
+  const rows = Array.from({ length: 80 }, (_, index) => ({ id: `s${index}`, remainingAmount: 100, orderId: `o${index}`, selectable: true }));
+  const selected = addSettlementSelection(new Map(), rows);
+  assert.equal(selected.size, 50);
+  assert.equal(selectedRemainingTotal(selected), 5000);
+  assert.equal(addSettlementSelection(selected, rows.slice(50)).size, 50);
+  assert.equal(addSettlementSelection(new Map(), [{ ...rows[0], selectable: false }, { ...rows[1], remainingAmount: 0 }]).size, 0);
+});
 
 test("reload drops rows that are no longer selectable and refreshes remaining", () => {
   const prev = new Map([

@@ -20,10 +20,12 @@ export function RecordPayment({
   disabled,
   loading,
   onSubmit,
+  bankOnly = false,
 }: {
   suggested: number;
   disabled: boolean;
   loading: boolean;
+  bankOnly?: boolean;
   onSubmit: (body: {
     amount: number;
     method: PaymentMethod;
@@ -64,7 +66,7 @@ export function RecordPayment({
         <Select
           value={method}
           onChange={(v) => setMethod(v as PaymentMethod)}
-          options={METHODS}
+          options={bankOnly ? METHODS.filter((method) => method.value === "BANK_TRANSFER") : METHODS}
           className="w-full"
         />
       </Field>

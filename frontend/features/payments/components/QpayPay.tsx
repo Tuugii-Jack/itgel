@@ -10,6 +10,7 @@ import { money } from "@/lib/format";
 import { leasingFeePercentOf, formatLeasingPercent, leasingNowPayAmount, isLeasingSplitPay } from "@/lib/leasing";
 import { autoInvoiceDedupeKey, shouldIssueAutoInvoice } from "@/lib/qpayAutoInvoice";
 import { useToast } from "@/lib/toast";
+import { parseMoneyInput } from "@/lib/moneyInput";
 import type { PublicOrder, QpayInvoice, Store } from "@/lib/types";
 import { PaymentRow as Row } from "./PaymentRow";
 
@@ -36,6 +37,7 @@ export function QpayPay({
     onPayAttemptRef.current = onPayAttempt;
   }, [onPayAttempt]);
   const lastAutoInvoiceKey = useRef<string | null>(null);
+  const invoiceRequest = useRef(0);
   const [invoice, setInvoice] = useState<QpayInvoice | null>(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -53,14 +55,14 @@ export function QpayPay({
   const [splitAmount, setSplitAmount] = useState(
     suggestedSplit > 0 ? String(suggestedSplit) : "",
   );
-  const chosenSplit = Number(splitAmount.replace(/\D/g, "")) || 0;
+  const chosenSplit = parseMoneyInput(splitAmount) ?? 0;
   const cargoDue = order.unpaidCargoFee ?? 0;
   const payAmount = cargoPay
     ? cargoDue
     : feeFirst
       ? leasingNowPayAmount(order)
       : splitPay
-        ? Math.min(Math.max(0, chosenSplit), maxSplit)
+        ? chosenSplit <= maxSplit ? chosenSplit : 0
         : (order.nextPayAmount ?? order.dueAmount);
   const payLabel = cargoPay
     ? "Карго — Итгэл"
@@ -72,6 +74,7 @@ export function QpayPay({
   const presets = splitPresets(maxSplit, suggestedSplit);
 
   const loadInvoice = useCallback(async (amount?: number, source: "auto" | "user" = "auto") => {
+    const generation = ++invoiceRequest.current;
     if (source === "user") onPayAttemptRef.current?.();
     setBusy(true);
     setError(null);
@@ -84,8 +87,9 @@ export function QpayPay({
             ? { amount }
             : undefined,
       );
-      setInvoice(inv);
+      if (generation === invoiceRequest.current) setInvoice(inv);
     } catch (e) {
+      if (generation !== invoiceRequest.current) return;
       const message =
         e instanceof ApiError ? e.message : "QPay нэхэмжлэл үүсгэж чадсангүй.";
       setError(message);
@@ -93,7 +97,7 @@ export function QpayPay({
         toast.error(message);
       }
     } finally {
-      setBusy(false);
+      if (generation === invoiceRequest.current) setBusy(false);
     }
   }, [cargoPay, order.code, toast]);
 
@@ -247,6 +251,7 @@ export function QpayPay({
                   key={n}
                   type="button"
                   onClick={() => {
+                    invoiceRequest.current++; setBusy(false);
                     setSplitAmount(String(n));
                     setInvoice(null);
                   }}
@@ -263,12 +268,14 @@ export function QpayPay({
             <Input
               value={splitAmount}
               onChange={(v) => {
-                setSplitAmount(v.replace(/\D/g, ""));
+                invoiceRequest.current++; setBusy(false);
+                setSplitAmount(v);
                 setInvoice(null);
               }}
               inputMode="numeric"
               placeholder={`1 – ${maxSplit}`}
             />
+            {splitAmount && (chosenSplit <= 0 || chosenSplit > maxSplit) && <p className="mb-0 mt-2 text-[13px] text-danger">Дүнг бүхэл төгрөгөөр, үлдэгдлээс хэтрүүлэхгүй оруулна уу.</p>}
           </div>
           <Row label={payLabel} value={money(payAmount)} big />
           {payAmount > 0 && !invoice && (

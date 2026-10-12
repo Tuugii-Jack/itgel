@@ -42,13 +42,11 @@ describe('админы хялбар захиалга үүсгэх', () => {
     expect((await prisma.customer.findUniqueOrThrow({ where: { id: seed.customer.id } })).email).toBeNull();
     expect(await prisma.order.count({ where: { customerId: other.id } })).toBe(0);
   });
-  it('бэлэн төлбөрийг тодорхой сонгосон үед л бүртгэнэ', async () => {
+  it('QPay төлбөрөөс өмнө гараар бэлэн орлого бүртгэхийг хориглоно', async () => {
     const seed = await fixture();
     const result = await submit({ customerId: seed.customer.id, status: 'CONFIRMED', markPaid: true, items: [{ productId: seed.round.id, qty: 1 }] });
-    expect(result.status).toBe(201);
-    const order = await prisma.order.findUniqueOrThrow({ where: { id: result.json.data.id }, include: { payments: true } });
-    expect(order.paidAmount).toBe(order.subtotal); expect(order.payments).toHaveLength(1);
-    expect(order.payments[0]!.method).toBe('CASH');
+    expect(result.status).toBe(409);
+    expect(await prisma.order.count({ where: { customerId: seed.customer.id } })).toBe(0);
   });
   it('туслах админд үүсгэх эрх олгохгүй, холбоо барихгүй хүсэлтийг хориглоно', async () => {
     const seed = await fixture();

@@ -88,7 +88,7 @@ adminHandoverRouter.get(
       data: {
         ...adminOrderDetail(fresh, gaps),
         canHandOver:
-          pickable.length > 0 && fresh.status !== 'CANCELLED' && !leasingHeld && !leasingUnpaid,
+          pickable.length > 0 && fresh.status !== 'CANCELLED' && !leasingHeld && !leasingUnpaid && shopDueAmount(fresh) <= 0,
         blockReason:
           fresh.status === 'CANCELLED'
             ? 'Захиалга цуцлагдсан.'
@@ -98,6 +98,8 @@ adminHandoverRouter.get(
                 ? 'Лизингийн үндсэн төлбөр дутуу. Лизингийн дансанд төлнө, дэлгүүрийн кассанд бүү ав.'
                 : leasingUnpaid
                   ? 'Лизингийн бэлэн барааны төлбөр дутуу. Лизингийн QPay-ээр төлнө.'
+                  : shopDueAmount(fresh) > 0
+                    ? 'Итгэлийн QPay-ээр үлдэгдлээ төлсний дараа бараагаа авна.'
                   : pickable.length === 0
                     ? deliveryHeld.length > 0
                       ? 'Эдгээр бараа хүргэлтээр авахаар сонгогдсон.'
@@ -218,7 +220,7 @@ adminHandoverRouter.get(
               canPick:
                 pickableQtyOf(item) > 0 &&
                 pub.fulfilment !== 'DELIVERY' &&
-                !leasingHeld,
+                !leasingHeld && shopDue <= 0,
             };
           });
         });
@@ -305,6 +307,7 @@ adminHandoverRouter.post(
       note: body.note,
       idempotencyKey,
       collection: {
+        qpayOnly: true,
         collectedAmount: body.collectedAmount,
         method: body.method,
       },
@@ -372,6 +375,7 @@ adminHandoverRouter.post(
       note,
       idempotencyKey,
       collection: {
+        qpayOnly: true,
         collectedAmount,
         method,
         autoCollectDue: true,

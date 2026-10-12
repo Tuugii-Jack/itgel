@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { adminOrderPaymentChoice, appendOptionValues, handoverSearchKind, parseWholeQuantity, validCustomerContact } from "../lib/adminWorkflow.ts";
 import { reportCsv } from "../lib/reportCsv.ts";
-test("order creation registers cash only after explicit cash selection", () => {
+test("order creation never records income before QPay payment", () => {
   assert.deepEqual(adminOrderPaymentChoice("unpaid"), { status: "NEW", markPaid: false });
   assert.deepEqual(adminOrderPaymentChoice("confirmed_unpaid"), { status: "CONFIRMED", markPaid: false });
-  assert.deepEqual(adminOrderPaymentChoice("cash"), { status: "CONFIRMED", markPaid: true });
 });
 test("customer creation accepts phone or email and rejects invalid supplied fields", () => {
   assert.equal(validCustomerContact("", "99112233"), true);

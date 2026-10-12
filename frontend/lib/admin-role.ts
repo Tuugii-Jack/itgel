@@ -28,6 +28,7 @@ export function canWriteLeasingMoney(role?: string | null): boolean {
 
 /** Туслах админ хандаж болох хуудсууд. */
 export function helperAdminCanAccess(pathname: string): boolean {
+  if (pathname === "/workspace/shop/orders/new" || pathname.startsWith("/workspace/shop/orders/new/")) return false;
   if (
     pathname === "/workspace" ||
     pathname === "/workspace/shop" ||
@@ -64,13 +65,14 @@ export function destinationsFor(
   role?: string | null,
   destinations?: string[] | null,
 ): WorkspaceDestination[] {
-  if (destinations?.length) {
-    return WORKSPACE_SECTIONS.map((s) => s.id).filter((id) => destinations.includes(id));
-  }
-  if (role === "OWNER") return ["shop", "leasing", "store"];
-  if (role === "LEASING") return ["leasing"];
-  if (role === "ADMIN" || role === "STAFF") return ["shop"];
-  return [];
+  const allowed: WorkspaceDestination[] = role === "OWNER" ? ["shop", "leasing", "store"]
+    : role === "LEASING" ? ["leasing"] : role === "ADMIN" || role === "STAFF" ? ["shop"] : [];
+  return destinations?.length ? allowed.filter((id) => destinations.includes(id)) : allowed;
+}
+
+export function canAccessWorkspacePage(portal: "shop" | "leasing", role: string | null | undefined, pathname: string): boolean {
+  return portal === "leasing" ? canAccessLeasingPortal(role)
+    : isFullAdmin(role) || (role === "STAFF" && helperAdminCanAccess(pathname));
 }
 
 export function workspaceSectionsFor(role?: string | null, destinations?: string[] | null) {

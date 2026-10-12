@@ -78,10 +78,10 @@ async function seedArrived(opts: {
 }
 
 describe('HTTP gaps — delivery / status / SMS / history', () => {
-  it('delivery зэрэг баталгаа нэг олголт, нэг Payment', async () => {
+  it('төлсөн delivery зэрэг баталгаажихад нэг олголт, шинэ кассын орлогогүй', async () => {
     const admin = await seedAdmin('ADMIN');
     const seed = await seedArrived({
-      paidAmount: 30_000,
+      paidAmount: 40_000,
       fulfilment: 'DELIVERY',
       items: [{ qty: 1, arrivedQty: 1, unitPrice: 40_000 }],
     });
@@ -112,8 +112,7 @@ describe('HTTP gaps — delivery / status / SMS / history', () => {
     const pays = await prisma.payment.findMany({
       where: { orderId: seed.order.id, payeeKind: 'SHOP' },
     });
-    expect(pays).toHaveLength(1);
-    expect(pays[0]?.amount).toBe(10_000);
+    expect(pays).toHaveLength(0);
   });
 
   it('delivery төлбөр алдаа гарвал олголт хагас үлдэхгүй', async () => {

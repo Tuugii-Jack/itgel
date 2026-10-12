@@ -15,7 +15,6 @@ export function useHandoverMutation({
   setCustomerQ,
   pickableSelected,
   dueForSelected,
-  payMethod,
   loadPending,
   goToDone,
   resetSelection,
@@ -53,14 +52,12 @@ export function useHandoverMutation({
             expectedHandedQty: i.handedOverQty ?? 0,
           }));
     if (payload.length === 0) return;
-    if (dueForSelected > 0 && !payMethod) return;
+    if (dueForSelected > 0) { setError("Хэрэглэгч QPay төлбөрөө бүрэн төлсний дараа олгоно."); return; }
     setBusy(true);
     setError(null);
     try {
       const result = await adminApi.handoverPartial({
         items: payload,
-        collectedAmount: dueForSelected > 0 ? dueForSelected : 0,
-        method: dueForSelected > 0 ? (payMethod ?? undefined) : undefined,
         idempotencyKey: crypto.randomUUID(),
       });
       setDone(`${result.pieceCount ?? result.itemCount} ширхэг өгсөн`);
@@ -83,7 +80,7 @@ export function useHandoverMutation({
   const complete = async (lines?: { itemId: string; qty: number; expectedHandedQty: number }[]) => {
     if (!found) return;
     const shopDue = shopDueOf(found);
-    if (shopDue > 0 && !payMethod) return;
+    if (shopDue > 0) { setError("Хэрэглэгч QPay төлбөрөө бүрэн төлсний дараа олгоно."); return; }
     const payload =
       lines && lines.length > 0
         ? lines
@@ -101,8 +98,6 @@ export function useHandoverMutation({
     try {
       const result = await adminApi.handoverPartial({
         items: payload,
-        collectedAmount: shopDue > 0 ? shopDue : 0,
-        method: shopDue > 0 ? (payMethod ?? undefined) : undefined,
         idempotencyKey: crypto.randomUUID(),
       });
       setDone(`${result.pieceCount ?? result.itemCount} ширхэг өгсөн`);

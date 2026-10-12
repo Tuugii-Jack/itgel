@@ -464,45 +464,8 @@ publicOrdersRouter.post(
   requireCustomer,
   ipRateLimit(20, 10 * 60 * 1000),
   validate({ params: z.object({ code: z.string().min(3).max(20) }) }),
-  asyncHandler(async (req, res) => {
-    const code = param(req, 'code').toUpperCase();
-    const order = await prisma.order.findFirst({
-      where: { code, deletedAt: null, customerId: req.auth!.sub },
-    });
-    if (!order) throw notFound('Захиалга олдсонгүй.');
-
-    if (order.status === 'CANCELLED') {
-      throw conflict('Цуцлагдсан захиалга дээр төлбөр мэдэгдэх боломжгүй.');
-    }
-    if (order.debtClosedAt) {
-      throw conflict('Хаалттай өр дээр төлбөр мэдэгдэх боломжгүй.');
-    }
-    if (order.dueAmount <= 0) {
-      throw conflict('Энэ захиалгын төлбөр аль хэдийн бүрэн орсон байна.');
-    }
-
-    // Давхар дарахад анхны огноог хадгална — дарааллын шударга байдлын төлөө.
-    if (!order.paymentClaimedAt) {
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { paymentClaimedAt: new Date() },
-      });
-      await audit({
-        actor: `customer:${order.customerId}`,
-        action: 'PAYMENT_CLAIM',
-        entity: 'Order',
-        entityId: order.id,
-        after: { code: order.code, dueAmount: order.dueAmount },
-      });
-    }
-
-    const updated = await prisma.order.findUniqueOrThrow({ where: { id: order.id } });
-    res.json({
-      data: {
-        code: updated.code,
-        paymentClaimedAt: updated.paymentClaimedAt?.toISOString() ?? null,
-      },
-    });
+  asyncHandler(async () => {
+    throw conflict('Хэрэглэгчийн төлбөрийг зөвхөн QPay-ээр авна. QPay төлбөрөө шалгана уу.');
   }),
 );
 

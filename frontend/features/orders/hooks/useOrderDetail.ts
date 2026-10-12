@@ -65,7 +65,7 @@ export function useOrderDetail({
   const lockShopPayments = !leasingPortal && leasingOrder;
   const mixedLegacyLocked = order?.mixedOwnership === true && user?.role !== "OWNER";
   const canWritePayments = canWrite && !lockShopPayments && !mixedLegacyLocked;
-  const canWriteStatus = canWrite && !leasingPortal;
+  const canWriteStatus = canWrite && (!leasingPortal || order?.isResale === true) && !mixedLegacyLocked;
   const canCancelItems = canWrite && !leasingPortal && !lockShopPayments;
   const busy = busyKey !== null;
   /** Төлбөр дутуу гэж 409 өгсөн үед force-оор давах саналыг харуулна. */

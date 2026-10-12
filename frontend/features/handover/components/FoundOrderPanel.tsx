@@ -210,7 +210,7 @@ export function FoundOrderPanel({
         primaryDisabled={
           !found.canHandOver ||
           selectedIds.length === 0 ||
-          (shopDueOf(found) > 0 && !payMethod)
+          shopDueOf(found) > 0
         }
         primaryLoading={busy}
         onPrimary={() =>

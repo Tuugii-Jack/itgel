@@ -71,7 +71,8 @@ export function TodayWorkBoard({ portal }: { portal: "shop" | "leasing" }) {
   useEffect(() => {
     if (!isOwner(user?.role)) return;
     let active = true;
-    void adminApi.leasingSettlementOperators().then((list) => { if (active) setOwners(list.map((op) => ({ id: op.id, name: op.name }))); }).catch(() => undefined);
+    const request = portal === "leasing" ? leasingApi.itgelOperators() : adminApi.leasingSettlementOperators();
+    void request.then((list) => { if (active) setOwners(list.map((op) => ({ id: op.id, name: op.name }))); }).catch(() => undefined);
     return () => { active = false; };
   }, [user?.role, portal]);
   const loadRows = useCallback(async () => {

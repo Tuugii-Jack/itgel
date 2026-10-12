@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { notFound } from '../../lib/errors.js';
+import { forbidden, notFound } from '../../lib/errors.js';
 import { endOfUbDay, parseUbDay, startOfUbDay } from '../../lib/date.js';
 import { isOwnerRole } from '../../lib/adminRoles.js';
 import { settlementOwnerFilter } from '../../lib/leasingAccess.js';
@@ -20,8 +20,23 @@ import {
   verifySettlementInvoice,
 } from '../../services/itgelSettlement.js';
 import { leasingReadySales, leasingReadyStockSummary } from '../../services/leasingReadyFinance.js';
+import { getSettings } from '../../services/settings.js';
+import { isQpayReady } from '../../services/qpay.js';
 
 export const leasingFinanceRouter = Router();
+
+leasingFinanceRouter.get(
+  '/itgel/payment-options',
+  asyncHandler(async (req, res) => {
+    const settings = await getSettings();
+    res.json({ data: {
+      recipientName: settings.storeName,
+      qpayReady: isQpayReady('shop'),
+      manualBankAllowed: req.auth?.role === 'LEASING',
+      maxSettlements: 50,
+    } });
+  }),
+);
 
 leasingFinanceRouter.get(
   '/ready/stock',
@@ -171,6 +186,7 @@ leasingFinanceRouter.post(
   validate({ body: payBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof payBody>;
+    if (body.method === 'BANK_TRANSFER' && req.auth?.role !== 'LEASING') throw forbidden('Дансны бүртгэл хийх эрх зөвхөн лизингийн админд байна.');
     const result = await createSettlementPayment({
       settlementIds: body.settlementIds,
       method: body.method,

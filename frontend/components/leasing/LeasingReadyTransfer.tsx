@@ -9,6 +9,8 @@ import { formatSelections } from "@/lib/options";
 import { money } from "@/lib/format";
 import { useToast } from "@/lib/toast";
 import type { AdminOrderDetail } from "@/lib/types";
+import { parseMoneyInput } from "@/lib/moneyInput";
+import { parseWholeQuantity } from "@/lib/adminWorkflow";
 
 type TransferData = Awaited<ReturnType<typeof leasingApi.readyTransfer>>;
 type TransferItem = TransferData["items"][number];
@@ -32,6 +34,7 @@ export function LeasingReadyTransfer({
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<TransferItem[]>([]);
   const [transfers, setTransfers] = useState<TransferData["transfers"]>([]);
+  const [reload, setReload] = useState(0);
 
   useOnKeyChange(order.id, () => {
     setOpen(false);
@@ -42,11 +45,14 @@ export function LeasingReadyTransfer({
 
   useEffect(() => {
     if (!open) return;
-    return deferEffect(() => {
+    let active = true;
+    const cancel = deferEffect(() => {
       setLoading(true);
+      setError(null); setItems([]); setTransfers([]);
       void leasingApi
         .readyTransfer(order.id)
         .then((data) => {
+          if (!active) return;
           setItems(data.items);
           setTransfers(data.transfers);
           setQtyById(
@@ -57,10 +63,11 @@ export function LeasingReadyTransfer({
           );
           setPreview(null);
         })
-        .catch(() => undefined)
-        .finally(() => setLoading(false));
+        .catch((e) => { if (active) setError(e instanceof ApiError ? e.message : "Шилжүүлэх барааг ачаалж чадсангүй."); })
+        .finally(() => { if (active) setLoading(false); });
     });
-  }, [order.id, open]);
+    return () => { active = false; cancel(); };
+  }, [order.id, open, reload]);
 
   const eligible = items.filter((item) => item.eligible);
   const blocked = items.filter((item) => !item.eligible && !item.cancelled && !item.transferred);
@@ -68,10 +75,11 @@ export function LeasingReadyTransfer({
   const selected = eligible
     .map((item) => ({
       orderItemId: item.id,
-      qty: Math.min(item.availableQty, Number(qtyById[item.id] ?? 0) || 0),
-      resaleUnitPrice: Number((resaleById[item.id] ?? "").replace(/\D/g, "")) || 0,
+      qty: parseWholeQuantity(qtyById[item.id] ?? "0") ?? -1,
+      resaleUnitPrice: parseMoneyInput(resaleById[item.id] ?? "") ?? -1,
     }))
-    .filter((line) => line.qty > 0);
+    .filter((line) => line.qty !== 0);
+  const invalidSelection = selected.some((line) => line.qty < 0 || line.qty > (items.find((item) => item.id === line.orderItemId)?.availableQty ?? 0) || line.resaleUnitPrice <= 0);
 
   const touch = () => {
     setPreview(null);
@@ -85,8 +93,9 @@ export function LeasingReadyTransfer({
   };
 
   const runPreview = async () => {
+    if (busy || loading) return;
     setError(null);
-    if (!reason.trim() || selected.length === 0 || selected.some((l) => l.resaleUnitPrice <= 0)) {
+    if (!reason.trim() || selected.length === 0 || invalidSelection) {
       const message = "Шалтгаан, тоо, дахин борлуулах үнийг оруулна уу.";
       setError(message);
       toast.error(message);
@@ -106,7 +115,7 @@ export function LeasingReadyTransfer({
   };
 
   const confirm = async () => {
-    if (!preview) return;
+    if (!preview || busy || invalidSelection) return;
     setBusy(true);
     setError(null);
     try {
@@ -118,6 +127,7 @@ export function LeasingReadyTransfer({
       const message = e instanceof ApiError ? e.message : "Шилжүүлж чадсангүй.";
       setError(message);
       toast.error(message);
+    } finally {
       setBusy(false);
     }
   };
@@ -164,7 +174,7 @@ export function LeasingReadyTransfer({
                     value={qtyById[item.id] ?? ""}
                     onChange={(v) => {
                       touch();
-                      setQtyById((prev) => ({ ...prev, [item.id]: v.replace(/\D/g, "") }));
+                      setQtyById((prev) => ({ ...prev, [item.id]: v }));
                     }}
                     inputMode="numeric"
                   />
@@ -174,7 +184,7 @@ export function LeasingReadyTransfer({
                     value={resaleById[item.id] ?? ""}
                     onChange={(v) => {
                       touch();
-                      setResaleById((prev) => ({ ...prev, [item.id]: v.replace(/\D/g, "") }));
+                      setResaleById((prev) => ({ ...prev, [item.id]: v }));
                     }}
                     inputMode="numeric"
                   />
@@ -205,7 +215,6 @@ export function LeasingReadyTransfer({
               placeholder="Яагаад шилжүүлж байна"
             />
           </Field>
-          {error && <ErrorNote>{error}</ErrorNote>}
           {preview && (
             <div className="flex flex-col gap-2 rounded-[8px] border border-line bg-surface p-3">
               <Row label="Төлсөн (үлдэнэ)" value={money(preview.paidKeptAmount)} />
@@ -231,6 +240,8 @@ export function LeasingReadyTransfer({
           )}
         </>
       )}
+
+      {error && <ErrorNote>{error}{items.length === 0 && <Button full variant="outline" className="mt-2" onClick={() => setReload((value) => value + 1)}>Дахин оролдох</Button>}</ErrorNote>}
 
       {!loading && transfers.length > 0 && (
         <>

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../prisma.js';
-import { notFound } from '../../lib/errors.js';
+import { forbidden, notFound } from '../../lib/errors.js';
 import { leasingPayeeSums } from '../../lib/money.js';
 import { isOwnerRole } from '../../lib/adminRoles.js';
 import {
@@ -48,11 +48,13 @@ adminPaymentsRouter.get(
     ]);
     let scopedTotals = totals;
     let scopedPayments = payments;
+    let maxRefundable = Math.max(0, totals.netPaid);
     let mixedOwnership = false;
     let attributedMoney = false;
     let unallocatedPaid = 0;
     let unallocatedRefunded = 0;
-    if (req.auth?.role === 'LEASING') {
+    const leasingPortal = req.baseUrl.startsWith('/api/leasing/');
+    if (leasingPortal || req.auth?.role === 'LEASING') {
       const items = await prisma.orderItem.findMany({
         where: { orderId },
         select: {
@@ -69,7 +71,8 @@ adminPaymentsRouter.get(
           amount: payment.amount,
         })),
       );
-      if (isMixedLeasingResale(order, items)) {
+      maxRefundable = Math.max(0, leasingSums.paid - leasingSums.refunded);
+      if (req.auth?.role === 'LEASING' && isMixedLeasingResale(order, items)) {
         mixedOwnership = true;
         attributedMoney = true;
         const share = leasingResaleMoneyShare({
@@ -115,7 +118,7 @@ adminPaymentsRouter.get(
         },
         paymentState: state,
         paymentStateLabel: PAYMENT_STATE_LABEL[state],
-        maxRefundable: mixedOwnership && !isOwnerRole(req.auth?.role) ? 0 : Math.max(0, scopedTotals.netPaid),
+        maxRefundable: mixedOwnership && !isOwnerRole(req.auth?.role) ? 0 : maxRefundable,
         mixedOwnership,
         attributedMoney,
       },
@@ -143,6 +146,10 @@ adminPaymentsRouter.post(
       note?: string;
     };
 
+    if (req.auth?.role !== 'LEASING' || !req.baseUrl.startsWith('/api/leasing/') || (body.method ?? 'BANK_TRANSFER') !== 'BANK_TRANSFER') {
+      throw forbidden('Хэрэглэгчийн төлбөр QPay-ээр бүртгэгдэнэ. Дансны бүртгэлийг зөвхөн лизингийн админ хийнэ.');
+    }
+
     const order = await assertLeasingOrderMoneyWrite(param(req, 'id'), {
       sub: req.auth?.sub ?? '',
       role: req.auth?.role,
@@ -156,6 +163,7 @@ adminPaymentsRouter.post(
       reference: body.reference ?? null,
       note: body.note ?? null,
       actor: actorOf(req),
+      payeeKind: order.isLeasing || order.payeeKind === 'LEASING' ? 'LEASING' : 'SHOP',
     });
 
     res.status(201).json({
@@ -197,6 +205,7 @@ adminPaymentsRouter.post(
       reference: body.reference ?? null,
       note: body.note ?? null,
       actor: actorOf(req),
+      payeeKind: order.isLeasing || order.payeeKind === 'LEASING' ? 'LEASING' : 'SHOP',
     });
 
     res.status(201).json({
