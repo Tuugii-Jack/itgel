@@ -1,6 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { TaskTabs } from "@/components/admin/TaskTabs";
+import { ProductImage } from "@/components/ProductImage";
+import type { ReleaseKind } from "./ReleaseForm";
 import { PageHead } from "@/components/admin/shared";
 import { Button, ErrorNote } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
@@ -25,8 +28,10 @@ export function ProductForm({
   product: AdminProduct | null;
   categories: AdminCategory[];
   onClose: () => void;
-  onSaved: () => void | Promise<void>;
+  onSaved: (result?: { productId: string; release?: ReleaseKind }) => void | Promise<void>;
 }) {
+  const [section, setSection] = useState("basics");
+  const saving = useRef(false);
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? categories[0]?.id ?? "");
@@ -75,7 +80,8 @@ export function ProductForm({
     return created.id;
   };
 
-  const save = async () => {
+  const save = async (release?: ReleaseKind) => {
+    if (saving.current || uploading) return;
     if (!name.trim()) {
       const message = "Барааны нэр оруулна уу.";
       setError(message);
@@ -88,6 +94,7 @@ export function ProductForm({
       toast.error(message);
       return;
     }
+    saving.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -95,15 +102,18 @@ export function ProductForm({
       // Хэрэглэгчийн нэрийг template-д баталгаажуулна (draft «Шинэ бараа» байж болно).
       template.name = name.trim();
 
-      if (productId) await adminApi.updateProduct(productId, template);
-      else await adminApi.createProduct(template);
+      const saved = productId ? await adminApi.updateProduct(productId, template) : await adminApi.createProduct(template);
+      setProductId(saved.id);
 
       toast.success(productId ? "Бараа хадгалагдлаа." : "Бараа үүслээ.");
-      await onSaved();
+      await onSaved({ productId: saved.id, release });
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Хадгалж чадсангүй.";
       setError(message);
       toast.error(message);
+      setBusy(false);
+    } finally {
+      saving.current = false;
       setBusy(false);
     }
   };
@@ -187,7 +197,7 @@ export function ProductForm({
   };
 
   return (
-    <div className="max-w-[760px]">
+    <div className="max-w-[1100px]">
       <PageHead
         title={product ? "Бараа засах" : "Шинэ бараа"}
         hint="Зөвхөн каталогийн мэдээлэл. Үнэ, огноог дараа нь гаргалтаар тавина."
@@ -196,14 +206,20 @@ export function ProductForm({
             <Button variant="ghost" onClick={onClose}>
               Болих
             </Button>
-            <Button onClick={save} loading={busy} disabled={!name.trim() || !categoryId}>
+            <Button onClick={() => void save()} loading={busy} disabled={uploading || !name.trim() || !categoryId}>
               Хадгалах
             </Button>
           </>
         }
       />
 
+      <TaskTabs value={section} onChange={setSection} items={[
+        { id: "basics", label: "Нэр ба ангилал" }, { id: "images", label: "Зураг", count: images.length },
+        { id: "options", label: "Өнгө, хэмжээ", count: options.length }, { id: "size", label: "Хэмжээний хүснэгт", count: sizeChart.length },
+      ]} />
+      <div className="grid items-start gap-5 lg:grid-cols-[1fr_280px]">
       <div className="flex flex-col gap-4">
+        <div hidden={section !== "basics"}>
         <ProductBasicsCard
           name={name}
           onName={setName}
@@ -213,14 +229,17 @@ export function ProductForm({
           onCategory={setCategoryId}
           categories={categories}
         />
-
+        </div>
+        <div hidden={section !== "options"}>
         <ProductOptionsEditor options={options} onChange={setOptions} />
-
+        </div>
+        <div hidden={section !== "size"}>
         <SizeChartEditor rows={sizeChart} onChange={setSizeChart} />
-
+        </div>
+        <div hidden={section !== "images"}>
         <ProductImageGallery
           images={images}
-          uploading={uploading}
+          uploading={uploading || busy}
           categoryId={categoryId}
           fileRef={fileRef}
           dragFrom={dragFrom}
@@ -228,17 +247,26 @@ export function ProductForm({
           onRemove={(url) => void removeImage(url)}
           onMove={(from, to) => void moveImage(from, to)}
         />
+        </div>
 
         {error && <ErrorNote>{error}</ErrorNote>}
 
-        <div className="flex gap-2">
-          <Button onClick={save} loading={busy} disabled={!name.trim() || !categoryId}>
-            Хадгалах
-          </Button>
-          <Button variant="ghost" onClick={onClose}>
-            Болих
-          </Button>
+      </div>
+      <div className="space-y-4 lg:sticky lg:top-24">
+        <div className="rounded-xl border border-line bg-bg p-4">
+          <ProductImage src={images[0]} alt={name || "Барааны зураг"} className="mb-3 aspect-square w-full rounded-lg" />
+          <div className="text-[17px] font-medium">{name || "Барааны нэр"}</div>
+          <div className="mt-1 text-[12px] text-muted">{categories.find((c) => c.id === categoryId)?.name ?? "Ангилал сонгоогүй"}</div>
+          <div className="mt-3 text-[13px] text-ink-2">{images.length} зураг · {options.length} сонголтын төрөл</div>
         </div>
+        <p className="text-[13px] text-ink-2">Хадгалаад шууд үнэ, үлдэгдэл эсвэл захиалга хаах огноогоо тохируулж худалдаанд гаргаж болно.</p>
+      </div>
+      </div>
+      <div className="sticky bottom-3 z-10 mt-5 flex flex-wrap justify-end gap-2 rounded-xl border border-line bg-bg p-3">
+        <Button variant="ghost" disabled={busy || uploading} onClick={onClose}>Болих</Button>
+        <Button variant="outline" onClick={() => void save()} loading={busy} disabled={uploading || !name.trim() || !categoryId}>Хадгалах</Button>
+        <Button variant="outline" onClick={() => void save("preorder")} disabled={busy || uploading || !name.trim() || !categoryId}>Хадгалаад урьдчилсан захиалга нээх</Button>
+        <Button onClick={() => void save("ready")} disabled={busy || uploading || !name.trim() || !categoryId}>Хадгалаад бэлэн гаргах</Button>
       </div>
     </div>
   );

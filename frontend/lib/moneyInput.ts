@@ -5,3 +5,6 @@ export function parseMoneyInput(raw: string, max = 2_147_483_647): number | null
   const amount = Number(text.replace(/[, \u00a0\u202f]/g, ""));
   return Number.isSafeInteger(amount) && amount > 0 && amount <= max ? amount : null;
 }
+export function parseNonnegativeMoneyInput(raw: string): number | null {
+  return raw.trim() === "" || /^0+$/.test(raw.trim()) ? 0 : parseMoneyInput(raw);
+}

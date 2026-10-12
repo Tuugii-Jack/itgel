@@ -79,9 +79,9 @@ export function useOrderDetail({
   const [smsToken, setSmsToken] = useState<string | null>(null);
   const [smsTick, setSmsTick] = useState(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     const gen = ++loadGen.current;
-    setLoading(true);
+    if (!background) setLoading(true);
     setError(null);
     try {
       const [o, l, q] = await Promise.all([
@@ -116,7 +116,7 @@ export function useOrderDetail({
     try {
       await action();
       toast.success(okMessage);
-      await load();
+      await load(true);
       onChanged();
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Гүйцэтгэж чадсангүй.";

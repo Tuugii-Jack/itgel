@@ -2,6 +2,8 @@
 
 import { useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { SearchField } from "@/components/admin/SearchField";
+import { TaskTabs } from "@/components/admin/TaskTabs";
+import Link from "next/link";
 import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
 import { OrderDetail } from "@/components/admin/OrderDetail";
@@ -335,6 +337,7 @@ function CustomerDetailView({
   onBack: () => void;
   onOpenOrder: (orderId: string) => void;
 }) {
+  const [section, setSection] = useState("orders");
   const toast = useToast();
   const { user } = useAdminSession();
   const canWrite = isFullAdmin(user?.role);
@@ -445,7 +448,7 @@ function CustomerDetailView({
         title={data.name ?? data.email ?? "Хэрэглэгч"}
         hint={`${data.email ?? "и-мэйлгүй"} · бүртгэгдсэн ${dayLabel(data.createdAt)}`}
         actions={
-          canWrite ? (
+          canWrite && section === "profile" ? (
           <Button onClick={save} loading={busy}>
             Хадгалах
           </Button>
@@ -460,7 +463,12 @@ function CustomerDetailView({
         <Metric label="Дутуу төлбөр" value={money(debt)} tone={debt > 0 ? "warn" : "ok"} />
       </div>
 
-      <Card className="mb-5 flex flex-col gap-3 p-4">
+      <div className="mb-4 flex flex-wrap gap-2">
+        {data.phone && <a href={"tel:" + data.phone} className="inline-flex h-11 items-center rounded-lg border border-line bg-bg px-4 text-[13px] text-ink no-underline">Утасдах · {phoneLabel(data.phone)}</a>}
+        {canWrite && <Link href={"/workspace/shop/orders/new?customer=" + encodeURIComponent(data.id)} className="inline-flex h-11 items-center rounded-lg bg-secondary px-4 text-[13px] text-white no-underline">Энэ хэрэглэгчид захиалга нэмэх</Link>}
+      </div>
+      <TaskTabs value={section} onChange={setSection} items={[{ id: "orders", label: "Захиалгууд", count: data.orders.length }, { id: "due", label: "Дутуу төлбөр", count: data.orders.filter((order) => order.status !== "CANCELLED" && order.dueAmount > 0).length }, { id: "profile", label: "Мэдээлэл засах" }]} />
+      <Card className={section === "profile" ? "mb-5 flex flex-col gap-3 p-4" : "hidden"}>
         <div className="text-[15px] font-medium">{canWrite ? "Мэдээлэл засах" : "Мэдээлэл"}</div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="И-мэйл">
@@ -514,7 +522,8 @@ function CustomerDetailView({
         </div>
       </Card>
 
-      <h2 className="mb-2 text-[16px] font-medium">Захиалгын түүх</h2>
+      <div hidden={section === "profile"}>
+      <h2 className="mb-2 text-[16px] font-medium">{section === "due" ? "Төлбөр дутуу захиалгууд" : "Захиалгын түүх"}</h2>
       {data.orders.length === 0 ? (
         <Empty>Захиалга алга.</Empty>
       ) : (
@@ -528,7 +537,7 @@ function CustomerDetailView({
             </tr>
           </thead>
           <tbody>
-            {data.orders.map((order) => {
+            {data.orders.filter((order) => section !== "due" || order.status !== "CANCELLED" && order.dueAmount > 0).map((order) => {
               const itemCount = order.items
                 .filter((i) => !i.cancelled)
                 .reduce((sum, i) => sum + i.qty, 0);
@@ -565,6 +574,7 @@ function CustomerDetailView({
           </tbody>
         </Table>
       )}
+      </div>
     </div>
   );
 }

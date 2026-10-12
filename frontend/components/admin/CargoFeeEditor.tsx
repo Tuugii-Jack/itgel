@@ -1,4 +1,5 @@
 "use client";
+import { parseNonnegativeMoneyInput } from "@/lib/moneyInput";
 
 import { useState } from "react";
 import { ProductImage } from "@/components/ProductImage";
@@ -13,7 +14,7 @@ function draftKey(roundId: string, variantKey = "") {
 }
 
 function parseCargo(raw: string | undefined): number {
-  return Math.max(0, Math.round(Number((raw ?? "").replace(/[^\d]/g, "") || "0")));
+  return parseNonnegativeMoneyInput(raw ?? "") ?? 0;
 }
 
 /**
@@ -31,6 +32,7 @@ export function CargoFeeEditor({
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [fillAll, setFillAll] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const invalidInput = Object.values(draft).some((raw) => parseNonnegativeMoneyInput(raw) === null);
 
   const canEdit = batch.stage === "IN_TRANSIT";
 
@@ -52,7 +54,7 @@ export function CargoFeeEditor({
   const batchTotal = batch.products.reduce((sum, p) => sum + productTotal(p), 0);
 
   const applyFill = (p: BatchProduct, raw: string) => {
-    const cleaned = raw.replace(/[^\d]/g, "");
+    const cleaned = raw;
     setFillAll((prev) => ({ ...prev, [p.roundId]: cleaned }));
     const variants = p.variants ?? [];
     setDraft((prev) => {
@@ -67,6 +69,7 @@ export function CargoFeeEditor({
   };
 
   const save = async () => {
+    if (busy || invalidInput || !canEdit) return;
     const items = batch.products.map((p) => {
       const variants = p.variants ?? [];
       if (variants.length === 0) {
@@ -104,6 +107,7 @@ export function CargoFeeEditor({
 
   return (
     <Card className="mt-4 p-4">
+      {invalidInput && <div role="alert" className="mb-3 text-[13px] text-danger">Карго үнийг бүхэл төгрөгөөр оруулна уу. Бутархай дүнг хадгалахгүй.</div>}
       <div className="mb-1 flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="text-[16px] font-medium">Карго үнэ</div>
@@ -134,7 +138,7 @@ export function CargoFeeEditor({
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[14px] font-medium">{p.name}</div>
                   <div className="text-[12px] text-muted">
-                    {p.orderedQty} ш · {p.customerCount} хүн
+                    {(p.variants ?? []).reduce((sum, v) => sum + v.orderedQty, 0)} ш · энэ багцад
                   </div>
                 </div>
                 {canEdit && variants.length > 1 && (
@@ -164,7 +168,7 @@ export function CargoFeeEditor({
                         onChange={(v) =>
                           setDraft((prev) => ({
                             ...prev,
-                            [draftKey(p.roundId)]: v.replace(/[^\d]/g, ""),
+                            [draftKey(p.roundId)]: v,
                           }))
                         }
                         placeholder="0"
@@ -198,7 +202,7 @@ export function CargoFeeEditor({
                             onChange={(val) =>
                               setDraft((prev) => ({
                                 ...prev,
-                                [draftKey(p.roundId, v.key)]: val.replace(/[^\d]/g, ""),
+                                [draftKey(p.roundId, v.key)]: val,
                               }))
                             }
                             placeholder="0"

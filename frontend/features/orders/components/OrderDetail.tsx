@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
+import { TaskTabs } from "@/components/admin/TaskTabs";
+import { Metric } from "@/components/admin/shared";
 import { ORDER_STATUS_LABEL, OrderBadge, PageHead, LeasingBadge, LeasingGoodsBadge } from "@/components/admin/shared";
 import { OrderQpayCard } from "@/components/admin/OrderQpay";
 import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
@@ -45,6 +48,7 @@ export function OrderDetail({
   canWrite?: boolean;
   workspace?: "shop" | "leasing";
 }) {
+  const [section, setSection] = useState("auto");
   const {
     order,
     ledger,
@@ -94,9 +98,10 @@ export function OrderDetail({
   }
 
   const { totals } = ledger;
+  const view = section === "auto" ? (totals.dueAmount > 0 && !lockShopPayments ? "payment" : "goods") : section;
 
   return (
-    <div className="max-w-[860px]">
+    <div className="max-w-[1100px]">
       <PageHead
         title={order.code}
         hint={
@@ -232,8 +237,19 @@ export function OrderDetail({
         </Card>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_360px] lg:items-start">
+      <div className="mb-5 grid grid-cols-3 gap-3">
+        <Metric label="Нийт дүн" value={money(totals.total)} />
+        <Metric label="Орсон төлбөр" value={money(totals.paidAmount)} />
+        <Metric label="Үлдэгдэл" value={money(totals.dueAmount)} tone={totals.dueAmount > 0 ? "warn" : "ok"} />
+      </div>
+      <TaskTabs value={view} onChange={setSection} items={[
+        { id: "payment", label: "Төлбөр ба тооцоо" },
+        { id: "goods", label: "Бараа ба олголт", count: order.items.filter((item) => !item.cancelled).length },
+        { id: "history", label: "Төлбөрийн түүх", count: ledger.payments.length },
+      ]} />
+      <div className={view === "history" ? "" : "grid gap-4 lg:grid-cols-[1fr_360px] lg:items-start"}>
         <div className="flex flex-col gap-4">
+          <div hidden={view !== "goods"}>
           <OrderItems
             order={order}
             canCancelItems={canCancelItems}
@@ -247,9 +263,11 @@ export function OrderDetail({
               )
             }
           />
-
+          </div>
+          <div hidden={view !== "history"}>
           <PaymentLedger payments={ledger.payments} />
-
+          </div>
+          <div hidden={view !== "payment"}>
           <OrderQpayCard
             orderId={order.id}
             qpay={qpay}
@@ -259,9 +277,13 @@ export function OrderDetail({
             readOnly={!canWritePayments || Boolean(order.debtClosedAt)}
             api={api}
           />
+          </div>
+          {view === "payment" && <PaymentSummary order={order} totals={totals} leasingPortal={leasingPortal} busy={busy} busyKey={busyKey} smsOpen={smsOpen} onOpenPaySms={openPaySms} />}
+
         </div>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4" hidden={view === "history"}>
+          <div hidden={view !== "goods"}>
           {canWriteStatus ? (
           <StatusActions
             status={order.status}
@@ -270,6 +292,7 @@ export function OrderDetail({
             busyKey={busyKey}
             onChange={changeStatus}
             onRevert={revertStatus}
+            handoverHref={"/workspace/shop/handover?code=" + encodeURIComponent(order.code)}
           />
           ) : leasingPortal ? (
             <>
@@ -304,18 +327,9 @@ export function OrderDetail({
               )}
             </Card>
           )}
+          </div>
 
-          <PaymentSummary
-            order={order}
-            totals={totals}
-            leasingPortal={leasingPortal}
-            busy={busy}
-            busyKey={busyKey}
-            smsOpen={smsOpen}
-            onOpenPaySms={openPaySms}
-          />
-
-          {canWritePayments && totals.dueAmount > 0 && (
+          {view === "payment" && canWritePayments && totals.dueAmount > 0 && (
             <RecordPayment
               key={`payment-${order.id}`}
               suggested={
@@ -331,7 +345,7 @@ export function OrderDetail({
             />
           )}
 
-          {canWritePayments && ledger.maxRefundable > 0 && (
+          {view === "payment" && canWritePayments && ledger.maxRefundable > 0 && (
             <RecordRefund
               key={`refund-${order.id}`}
               max={ledger.maxRefundable}
@@ -342,6 +356,7 @@ export function OrderDetail({
               }
             />
           )}
+          {view === "payment" && totals.dueAmount <= 0 && <Card className="border-ok bg-ok-bg p-4 text-[14px] text-ok">Төлбөр бүрэн орсон.<Button full variant="outline" className="mt-3" onClick={() => setSection("goods")}>Бараа ба олголт харах</Button></Card>}
         </div>
       </div>
 

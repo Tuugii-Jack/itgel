@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { ORDER_STATUS_LABEL } from "@/components/admin/shared";
 import { Button, Card } from "@/components/ui";
@@ -38,6 +39,7 @@ export function StatusActions({
   busyKey,
   onChange,
   onRevert,
+  handoverHref,
 }: {
   status: OrderStatus;
   hasHandedOverItems: boolean;
@@ -45,6 +47,7 @@ export function StatusActions({
   busyKey: string | null;
   onChange: (status: OrderStatus) => void;
   onRevert: () => void;
+  handoverHref?: string;
 }) {
   const next = nextStatus(status);
   const prev = previousStatus(status);
@@ -66,7 +69,7 @@ export function StatusActions({
         Одоо: {ORDER_STATUS_LABEL[status]}
       </div>
       <div className="flex flex-wrap gap-2">
-        {next && (
+        {next === "HANDED_OVER" && handoverHref ? <Link href={handoverHref} className="inline-flex min-h-11 items-center rounded-lg bg-secondary px-4 text-[14px] text-white no-underline">Олголт нээх</Link> : next && (
           <Button
             size="sm"
             disabled={disabled}
@@ -76,6 +79,7 @@ export function StatusActions({
             {ORDER_STATUS_LABEL[next]} болгох
           </Button>
         )}
+        <details className="w-full"><summary className="cursor-pointer py-2 text-[12px] text-ink-2">Бусад үйлдэл</summary><div className="mt-2 flex flex-wrap gap-2">
         {canRevert && (
           <Button
             size="sm"
@@ -98,6 +102,7 @@ export function StatusActions({
             Цуцлах
           </Button>
         )}
+        </div></details>
       </div>
     </Card>
   );

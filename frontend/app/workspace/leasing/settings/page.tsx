@@ -2,6 +2,8 @@
 
 import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { TaskTabs } from "@/components/admin/TaskTabs";
+import { useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { PageHead } from "@/components/admin/shared";
 import { LeasingPaySchedule } from "@/components/LeasingPaySchedule";
 import { Button, Card, ErrorNote, Field, Input, Spinner, Textarea } from "@/components/ui";
@@ -43,6 +45,8 @@ function parseRows(rows: TierRow[]): { minAmount: number; ratePercent: number }[
 
 export default function LeasingSettingsPage() {
   const toast = useToast();
+  const [sectionRaw, setSection] = useWorkspaceQuery("section", "terms");
+  const section = ["terms", "contact", "payment", "copy", "sms", "preview"].includes(sectionRaw) ? sectionRaw : "terms";
   const [settings, setSettings] = useState<LeasingSettings | null>(null);
   const [rows, setRows] = useState<TierRow[]>([]);
   const [choiceHint, setChoiceHint] = useState("");
@@ -200,8 +204,13 @@ export default function LeasingSettingsPage() {
         hint="Шимтгэл, үндсэн төлбөрийн хоногийн зай, холбоо барих, SMS загвар"
       />
 
+      <TaskTabs value={section} onChange={setSection} items={[
+        { id: "terms", label: "Шимтгэл ба хуваарь" }, { id: "contact", label: "Холбоо барих" },
+        { id: "payment", label: "Данс ба хариуцагч" }, { id: "copy", label: "Нөхцөлийн бичвэр" },
+        { id: "sms", label: "SMS загвар" }, { id: "preview", label: "Тооцоо турших" },
+      ]} />
       <div className="flex flex-col gap-4">
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "contact" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Хэрэглэгчид харагдах холбоо барих</div>
           <p className="m-0 text-[13px] text-ink-2">
             Лизингээр авсан захиалга дээр харагдана. Дэлгүүрийн ерөнхий утас өөрчлөгдөхгүй.
@@ -226,7 +235,7 @@ export default function LeasingSettingsPage() {
           </Field>
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "payment" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Итгэлд төлөх хариуцагч</div>
           {settings.settlementAdmin ? (
             <p className="m-0 text-[14px]">
@@ -243,7 +252,7 @@ export default function LeasingSettingsPage() {
           )}
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "terms" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-[15px] font-medium">Шимтгэлийн шатлал</div>
@@ -322,7 +331,7 @@ export default function LeasingSettingsPage() {
           </p>
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "terms" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <div className="text-[15px] font-medium">Үндсэн төлбөрийн хуваарь</div>
@@ -397,7 +406,7 @@ export default function LeasingSettingsPage() {
           </p>
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "copy" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Хэрэглэгчид харагдах бичвэр</div>
           <p className="m-0 text-[13px] text-ink-2">
             Сагсан дээрх хувийг <span className="font-medium text-ink">{"{percent}"}</span>,
@@ -425,7 +434,7 @@ export default function LeasingSettingsPage() {
           </Field>
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "sms" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Сануулгын SMS</div>
           <p className="m-0 text-[13px] text-ink-2">
             {"{ner}"} нэр, {"{dun}"} дүн, {"{ognoo}"} огноо, {"{honog}"} хоног. Хоосон бол
@@ -451,7 +460,7 @@ export default function LeasingSettingsPage() {
           />
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "payment" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Шилжүүлгийн данс</div>
           <p className="m-0 text-[13px] text-ink-2">
             Лизингийн бэлэн борлуулалт болон хуваарьт төлбөрийн шилжүүлэг. Дэлгүүрийн данс руу буцахгүй.
@@ -470,7 +479,7 @@ export default function LeasingSettingsPage() {
           </Field>
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "preview" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Урьдчилан харах</div>
           <Field label="Жишээ барааны үнэ">
             <Input value={sample} onChange={setSample} inputMode="numeric" />
@@ -490,8 +499,8 @@ export default function LeasingSettingsPage() {
         </Card>
 
         {error && <ErrorNote>{error}</ErrorNote>}
-        <div>
-          <Button
+        <div className="sticky bottom-3 z-10 rounded-xl border border-line bg-bg p-3">
+          <Button full
             loading={busy}
             disabled={
               smsDueToday.length > SMS_TEMPLATE_MAX ||

@@ -1,4 +1,8 @@
 "use client";
+import { TaskTabs } from "@/components/admin/TaskTabs";
+import { money } from "@/lib/format";
+import { parseMoneyInput } from "@/lib/moneyInput";
+import { parseWholeQuantity } from "@/lib/adminWorkflow";
 
 import { useEffect, useState } from "react";
 import { deferEffect } from "@/lib/deferEffect";
@@ -36,6 +40,7 @@ export function ReleaseForm({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
+  const [section, setSection] = useState("sale");
   const [product, setProduct] = useState<AdminProduct | null>(null);
   const [loading, setLoading] = useState(Boolean(initialProductId));
   const [search, setSearch] = useState("");
@@ -138,13 +143,13 @@ export function ReleaseForm({
     };
   }, [initialProductId, toast]);
 
-  const sell = Number(sellPrice) || 0;
+  const sell = parseMoneyInput(sellPrice) ?? 0;
   const hasOptions = (product?.options?.length ?? 0) > 0;
   const optionPrices = optionRows
-    .filter((r) => Number(r.sell) > 0)
+    .filter((r) => (parseMoneyInput(r.sell) ?? 0) > 0)
     .map((r) => ({
       selections: r.selections,
-      sellPrice: Number(r.sell) || sell || 0,
+      sellPrice: parseMoneyInput(r.sell) ?? sell,
       costPrice: 0,
     }));
   const skuStocks = skuRows.map((r) => ({
@@ -172,6 +177,10 @@ export function ReleaseForm({
   };
 
   const save = async () => {
+    if (busy) return;
+    if ((sellPrice.trim() && parseMoneyInput(sellPrice) === null) || optionRows.some((r) => r.sell.trim() && parseMoneyInput(r.sell) === null) || skuRows.some((r) => parseWholeQuantity(r.stock || "0") === null) || parseWholeQuantity(stock || "0") === null) {
+      setError("Үнэ болон үлдэгдлийг бүхэл тоогоор зөв оруулна уу."); return;
+    }
     if (!productId) return;
     setBusy(true);
     setError(null);
@@ -224,6 +233,7 @@ export function ReleaseForm({
         }
       />
 
+      <TaskTabs value={section} onChange={setSection} items={[{ id: "sale", label: "Үнэ, огноо ба үлдэгдэл" }, { id: "variants", label: "Сонголт тус бүрээр" }, { id: "more", label: "Төлөв ба тэмдэглэл" }]} />
       <div className="flex flex-col gap-4">
         {error && <ErrorNote>{error}</ErrorNote>}
 
@@ -324,12 +334,12 @@ export function ReleaseForm({
           <Field label="Зарах үнэ">
             <Input
               value={sellPrice}
-              onChange={(v) => setSellPrice(v.replace(/\D/g, ""))}
+              onChange={(v) => setSellPrice(v)}
               inputMode="numeric"
             />
           </Field>
             {hasOptions && product && (
-              <OptionPriceEditor
+              <div hidden={section !== "variants"}><OptionPriceEditor
                 options={product.options}
                 rows={optionRows}
                 onChange={setOptionRows}
@@ -338,7 +348,7 @@ export function ReleaseForm({
                     prev.map((r) => ({ ...r, sell: sellPrice, cost: "0" })),
                   )
                 }
-              />
+              /></div>
             )}
         </Card>
 
@@ -358,23 +368,23 @@ export function ReleaseForm({
               </Field>
             </>
           ) : hasOptions && product ? (
-            <SkuStockEditor
+            <div><div hidden={section !== "variants"}><SkuStockEditor
               options={product.options}
               rows={skuRows}
               onChange={setSkuRows}
-            />
+            /></div>{section === "sale" && <div className="flex items-center justify-between gap-3"><span className="text-[13px]">{skuRows.reduce((sum, row) => sum + (parseWholeQuantity(row.stock || "0") ?? 0), 0)} ширхэг · {skuRows.length} сонголт</span><Button size="sm" variant="outline" onClick={() => setSection("variants")}>Үлдэгдэл бөглөх</Button></div>}</div>
           ) : (
             <Field label="Үлдэгдэл">
               <Input
                 value={stock}
-                onChange={(v) => setStock(v.replace(/\D/g, ""))}
+                onChange={(v) => setStock(v)}
                 inputMode="numeric"
               />
             </Field>
           )}
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "more" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <Field label="Статус">
             <Select
               value={status}
@@ -393,6 +403,10 @@ export function ReleaseForm({
             />
           </Field>
         </Card>
+      </div>
+      <div className="sticky bottom-3 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-bg p-4">
+        <span className="text-[14px]">{product?.name ?? "Бараа сонгоно уу"} · {money(sell)} · {status === "ACTIVE" ? "Худалдаанд гарна" : "Нуугдсан / ноорог"}</span>
+        <Button loading={busy} disabled={!canSave || loading} onClick={() => void save()}>Худалдаанд гаргах</Button>
       </div>
     </div>
   );

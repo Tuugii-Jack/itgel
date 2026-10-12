@@ -516,7 +516,7 @@ export const leasingApi = {
         paymentState: string;
         sourceTransfer: { id: string; sourceOrderId: string; paidKeptAmount: number } | null;
       }[];
-    }>("/leasing/finance/ready/sales", { ...adminAuth, query }).then((r) => r.data),
+    }>("/leasing/finance/ready/sales", { ...adminAuth, query }).then((r) => ({ ...r.data, meta: r.meta })),
 
   itgelSummary: (query?: { day?: string; ownerAdminId?: string }) =>
     request<import("./settlements/types").SettlementSummary>("/leasing/finance/itgel/summary", {

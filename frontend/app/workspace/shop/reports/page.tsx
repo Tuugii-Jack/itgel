@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { downloadReportCsv } from "@/lib/reportCsv";
+import { SearchField } from "@/components/admin/SearchField";
 import { Metric, PageHead, Table, Td, Th } from "@/components/admin/shared";
-import { Button, Card, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
+import { Button, Card, Empty, ErrorNote, Spinner } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { money, monthLabel, num } from "@/lib/format";
 import type { AdminProduct, ProductReportRow, RevenueReport } from "@/lib/types";
@@ -167,6 +169,9 @@ export default function ReportsPage() {
         hint="Зөвхөн зарах үнэ. Бараа эсвэл буцаалт сонгоод хэр их зарагдсаныг харна."
         actions={
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" disabled={loading || tableRows.length === 0} onClick={() => downloadReportCsv("itgel-report-" + period + ".csv",
+              ["Бараа", "Ангилал", "Зарсан ширхэг", "Борлуулалт", "Буцаасан ширхэг", "Буцаалтын дүн", "Цэвэр ширхэг", "Цэвэр дүн"],
+              tableRows.map((row) => [row.name, row.category, row.soldQty, row.soldAmount, row.returnedQty, row.returnedAmount, row.netQty, row.netAmount]))}>CSV татах</Button>
             {PERIODS.map((p) => (
               <Button
                 key={p.value}
@@ -196,7 +201,7 @@ export default function ReportsPage() {
         <Empty>Мэдээлэл алга.</Empty>
       ) : (
         <>
-          <Card className="mb-5 p-4">
+          <details className="mb-5 rounded-xl border border-line bg-bg p-4"><summary className="cursor-pointer text-[14px] font-medium">Бараагаар шүүх · {selected.size > 0 ? `${selected.size} сонгосон` : "Бүх бараа"}</summary><div className="mt-4">
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <div>
                 <div className="text-[15px] font-medium">Бараа, буцаалт</div>
@@ -243,7 +248,7 @@ export default function ReportsPage() {
               ))}
             </div>
             <div className="mb-3 max-w-[320px]">
-              <Input value={query} onChange={setQuery} placeholder="Бараа хайх" />
+              <SearchField value={query} onChange={setQuery} placeholder="Бараа хайх" />
             </div>
             {pickerRows.length === 0 ? (
               <div className="text-[13px] text-muted">Энэ хугацаанд бараа алга.</div>
@@ -272,7 +277,7 @@ export default function ReportsPage() {
                 })}
               </div>
             )}
-          </Card>
+          </div></details>
 
           <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Metric

@@ -60,7 +60,7 @@ export function OptionPriceEditor({
   const patch = (key: string, next: string) => {
     onChange(
       rows.map((r) =>
-        r.key === key ? { ...r, sell: next.replace(/\D/g, ""), cost: "0" } : r,
+        r.key === key ? { ...r, sell: next, cost: "0" } : r,
       ),
     );
   };

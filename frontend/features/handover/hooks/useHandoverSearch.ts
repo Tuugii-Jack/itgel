@@ -80,8 +80,8 @@ export function useHandoverSearch({
     if (linkedCode) { setCode(linkedCode); void lookup(linkedCode); }
   }), [linkedCode, lookup]);
 
-  const searchCustomer = async () => {
-    const q = customerQ.trim();
+  const searchCustomer = async (raw = customerQ) => {
+    const q = raw.trim();
     if (q.length < 2) return;
     setError(null);
     setDone(null);

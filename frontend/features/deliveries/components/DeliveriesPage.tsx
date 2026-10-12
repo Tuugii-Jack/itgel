@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SearchField } from "@/components/admin/SearchField";
 import { DELIVERY_STATUS_LABEL, Metric, PageHead, Select } from "@/components/admin/shared";
 import { Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { isFullAdmin } from "@/lib/admin-role";
@@ -45,6 +46,7 @@ export function DeliveriesPage() {
   } = useDeliveryHistory();
 
   const {
+    search, setSearch,
     selectedDays,
     setSelectedDays,
     selectedDistricts,
@@ -197,7 +199,13 @@ export function DeliveriesPage() {
             </div>
           )}
 
-          <Card className="mb-5 p-4">
+          <div className="mb-4 flex flex-wrap gap-2">
+            <SearchField value={search} onChange={setSearch} placeholder="Код, утас, нэр, хүргэлтийн хүн хайх" className="w-full sm:w-80" />
+            <Button variant="outline" onClick={() => { setSelectedDays([...selectableDates]); setSelectedDistricts(new Set()); }}>Энэ сарын бүх хүргэлт</Button>
+          </div>
+          <details className="mb-5 rounded-xl border border-line bg-bg p-4">
+          <summary className="mb-3 cursor-pointer text-[14px] font-medium">Өдрөөр сонгох · {selectedDays.length} өдөр</summary>
+          <div>
             <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
               <div>
                 <div className="text-[15px] font-medium">Өдөр сонгох</div>
@@ -265,7 +273,8 @@ export function DeliveriesPage() {
                 })}
               </div>
             )}
-          </Card>
+          </div>
+          </details>
 
           {allZones.length > 0 && (
             <Card className="mb-5 p-4">

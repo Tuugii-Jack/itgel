@@ -2,6 +2,8 @@
 
 import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useState } from "react";
+import { TaskTabs } from "@/components/admin/TaskTabs";
+import { useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { PageHead, Select } from "@/components/admin/shared";
 import {
   Button,
@@ -25,6 +27,9 @@ import { useAdminSession } from "@/lib/admin-session";
 
 export default function SettingsPage() {
   const toast = useToast();
+  const [sectionRaw, setSection] = useWorkspaceQuery("section", "store");
+  const section = ["store", "payment", "delivery", "automation", "account", "history"].includes(sectionRaw) ? sectionRaw : "store";
+  const [original, setOriginal] = useState<string | null>(null);
   const { user } = useAdminSession();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [districts, setDistricts] = useState<string[]>([]);
@@ -43,6 +48,7 @@ export default function SettingsPage() {
         adminApi.leasingSettlementOperators().catch(() => []),
       ]);
       setSettings(data);
+      setOriginal(JSON.stringify({ settings: data, districts: Object.keys(data.deliveryFees ?? {}) }));
       setDistricts(Object.keys(data.deliveryFees ?? {}));
       setOperators(ops);
     } catch (e) {
@@ -56,6 +62,8 @@ export default function SettingsPage() {
 
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
+  if (!loading && !settings && error) return <ErrorNote>{error}<Button variant="outline" onClick={() => void load()}>Дахин оролдох</Button></ErrorNote>;
+
   if (loading || !settings) {
     return (
       <div className="flex justify-center py-16">
@@ -67,7 +75,9 @@ export default function SettingsPage() {
   const patch = (changes: Partial<Settings>) =>
     setSettings((prev) => (prev ? { ...prev, ...changes } : prev));
 
+  const dirty = original !== JSON.stringify({ settings, districts });
   const save = async () => {
+    if (busy || !dirty) return;
     setBusy(true);
     setError(null);
     try {
@@ -95,6 +105,7 @@ export default function SettingsPage() {
         leasingSettlementAdminId: settings.leasingSettlementAdminId || null,
       });
       setSettings(updated);
+      setOriginal(JSON.stringify({ settings: updated, districts: Object.keys(updated.deliveryFees ?? {}) }));
       setDistricts(Object.keys(updated.deliveryFees ?? {}));
       setSaved(true);
       toast.success("Тохиргоо хадгалагдлаа.");
@@ -130,15 +141,20 @@ export default function SettingsPage() {
     <div className="max-w-[760px]">
       <PageHead title="Тохиргоо" hint="Дэлгүүрийн мэдээлэл, төлбөр, хүргэлт" />
 
+      <TaskTabs value={section} onChange={setSection} items={[
+        { id: "store", label: "Дэлгүүр" }, { id: "payment", label: "Төлбөр ба агуулах" },
+        { id: "delivery", label: "Хүргэлт" }, { id: "automation", label: "Автомат үйлдэл" },
+        { id: "account", label: "Ажилтнууд, нэвтрэх" }, { id: "history", label: "Өөрчлөлтийн түүх" },
+      ]} />
       <div className="flex flex-col gap-4">
-        <Card className="p-4">
+        <Card className={section === "account" ? "p-4" : "hidden"}>
           <LoginPhoneCard title="Миний нэвтрэх утас" phones={user?.loginPhones} />
         </Card>
 
-        <StaffAccountsCard />
+        <div hidden={section !== "account"}><StaffAccountsCard /></div>
 
         {isFullAdmin(user?.role) && (
-          <Card className="flex flex-col gap-3 p-4">
+          <Card className={section === "automation" ? "flex flex-col gap-3 p-4" : "hidden"}>
             <div className="text-[15px] font-medium">SMS хүргэлт</div>
             <p className="m-0 text-[13px] text-ink-2">
               Cron өдөрт нэг удаа төлөв шинэчилнэ. Энэ товч зөвхөн хүргэлтийн GET ажиллуулна, SMS дахин илгээхгүй.
@@ -155,7 +171,7 @@ export default function SettingsPage() {
           </Card>
         )}
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "store" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Дэлгүүр</div>
           <Field label="Нэр">
             <Input value={settings.storeName} onChange={(v) => patch({ storeName: v })} />
@@ -180,7 +196,7 @@ export default function SettingsPage() {
           </Field>
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "payment" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div>
             <div className="text-[15px] font-medium">Төлбөр хүлээн авах данс</div>
             <p className="mt-1 mb-0 text-[13px] text-ink-2">
@@ -266,7 +282,7 @@ export default function SettingsPage() {
           </Field>
         </Card>
 
-        <Card className="flex flex-col gap-2 p-4">
+        <Card className={section === "automation" ? "flex flex-col gap-2 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Автомат үйлдэл</div>
           <Toggle
             label="Хугацаа дуусахад захиалга хаах"
@@ -279,7 +295,7 @@ export default function SettingsPage() {
           </p>
         </Card>
 
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "delivery" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="flex items-center justify-between gap-2">
             <div>
               <div className="text-[15px] font-medium">Хүргэлтийн байршил</div>
@@ -348,13 +364,15 @@ export default function SettingsPage() {
 
         {error && <ErrorNote>{error}</ErrorNote>}
 
-        <div className="sticky bottom-4">
-          <Button full size="lg" onClick={save} loading={busy}>
+        <div className="sticky bottom-3 z-10 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-bg p-3" hidden={section === "account" || section === "history"}>
+          <span className="flex-1 text-[13px] text-ink-2">{dirty ? "Хадгалаагүй өөрчлөлт байна" : "Өөрчлөлт хадгалагдсан"}</span>
+          <Button variant="ghost" disabled={busy || !dirty} onClick={() => void load()}>Өөрчлөлтийг буцаах</Button>
+          <Button size="lg" onClick={save} loading={busy} disabled={!dirty}>
             {saved ? "Хадгалсан" : "Хадгалах"}
           </Button>
         </div>
 
-        <AuditTrail />
+        <div hidden={section !== "history"}><AuditTrail /></div>
       </div>
     </div>
   );

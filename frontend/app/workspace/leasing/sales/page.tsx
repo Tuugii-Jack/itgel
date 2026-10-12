@@ -1,7 +1,9 @@
 "use client";
 
 import { deferEffect } from "@/lib/deferEffect";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { updateWorkspaceQuery, useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
+import { downloadReportCsv } from "@/lib/reportCsv";
 import { Metric, PageHead, Table, Td, Th } from "@/components/admin/shared";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { leasingApi, ApiError } from "@/lib/api";
@@ -21,9 +23,16 @@ const PAY_LABEL: Record<string, string> = {
 
 export default function LeasingSalesPage() {
   const { user } = useAdminSession();
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const [status, setStatus] = useState("");
+  const [from] = useWorkspaceQuery("from");
+  const [to] = useWorkspaceQuery("to");
+  const [status] = useWorkspaceQuery("status");
+  const [pageRaw, setPageRaw] = useWorkspaceQuery("page", "1");
+  const page = Math.max(1, Number.isSafeInteger(Number(pageRaw)) ? Number(pageRaw) : 1);
+  const [pages, setPages] = useState(1);
+  const requestId = useRef(0);
+  const setFrom = (value: string) => updateWorkspaceQuery({ from: value, page: null });
+  const setTo = (value: string) => updateWorkspaceQuery({ to: value, page: null });
+  const setStatus = (value: string) => updateWorkspaceQuery({ status: value, page: null });
   const [totals, setTotals] = useState<{
     received: number;
     refunded: number;
@@ -42,6 +51,8 @@ export default function LeasingSalesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const request = ++requestId.current;
+    setLoading(true);
     setError(null);
     try {
       const [data, stockSummary] = await Promise.all([
@@ -49,20 +60,23 @@ export default function LeasingSalesPage() {
           from: from || undefined,
           to: to || undefined,
           status: status || undefined,
-          page: 1,
+          page,
           pageSize: 50,
         }),
         leasingApi.readyStock().catch(() => null),
       ]);
+      if (request !== requestId.current) return;
+      setPages(Number(data.meta?.pages ?? 1));
       setTotals(data.totals);
       setRows(data.rows);
       if (stockSummary) setStock(stockSummary);
     } catch (e) {
+      if (request !== requestId.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
+      if (request === requestId.current) setLoading(false);
     }
-  }, [from, to, status]);
+  }, [from, to, status, page]);
 
   useEffect(() => deferEffect(() => { void load(); }), [load]);
 
@@ -70,6 +84,7 @@ export default function LeasingSalesPage() {
     <div>
       <PageHead
         title="Бэлэн барааны борлуулалт"
+        actions={<Button size="sm" variant="outline" disabled={loading || rows.length === 0} onClick={() => downloadReportCsv("leasing-sales-page-" + page + ".csv", ["Код", "Хэрэглэгч", "Орсон", "Буцаасан", "Үлдэгдэл", "Төлөв"], rows.map((row) => [row.code, row.customer.name, row.paidAmount, row.refundedAmount, row.dueAmount, row.status]))}>Энэ хуудас CSV татах</Button>}
         hint={
           isOwner(user?.role)
             ? "Бүх эзний бэлэн барааны борлуулалт. Орлого давхар тооцогдохгүй."
@@ -133,6 +148,7 @@ export default function LeasingSalesPage() {
           <ErrorNote>{error}</ErrorNote>
         </div>
       )}
+      {pages > 1 && <div className="mt-4 flex items-center justify-end gap-3"><span className="text-[13px] text-muted">{page} / {pages}</span><Button variant="outline" disabled={loading || page <= 1} onClick={() => setPageRaw(String(page - 1))}>Өмнөх</Button><Button variant="outline" disabled={loading || page >= pages} onClick={() => setPageRaw(String(page + 1))}>Дараах</Button></div>}
       {loading ? (
         <Skeleton className="h-40 w-full rounded-[12px]" />
       ) : rows.length === 0 ? (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { TaskTabs } from "@/components/admin/TaskTabs";
 import { ProductImage } from "@/components/ProductImage";
 import { ArrivalRegister } from "@/components/admin/ArrivalRegister";
 import { CargoFeeEditor } from "@/components/admin/CargoFeeEditor";
@@ -24,7 +25,9 @@ import { BatchOrdersPanel } from "./BatchOrdersPanel";
 import { STAGES } from "./StageBar";
 
 const TABS = [
+  { id: "receive", label: "Ачаа хүлээн авах" },
   { id: "products", label: "Бараа" },
+  { id: "cargo", label: "Карго тооцоо" },
   { id: "orders", label: "Холбогдох захиалга" },
   { id: "history", label: "Үйлдлийн түүх" },
 ] as const;
@@ -53,7 +56,7 @@ export function BatchDetail({
   const toast = useToast();
   const [picking, setPicking] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [tab, setTab] = useState<TabId>("products");
+  const [tab, setTab] = useState<TabId>("receive");
   const {
     batch,
     setBatch,
@@ -217,24 +220,14 @@ export function BatchDetail({
         </div>
       )}
 
-      <div className="mb-4 flex gap-1 overflow-x-auto border-b border-line">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => {
-              setTab(item.id);
-              if (item.id === "orders") void loadOrders();
-            }}
-            className={`h-11 shrink-0 px-3 text-[14px] ${
-              tab === item.id
-                ? "border-b-2 border-ink font-medium text-ink"
-                : "cursor-pointer text-ink-2"
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
+      <TaskTabs items={TABS} value={tab} onChange={(next) => {
+        setTab(next as TabId); if (next === "orders") void loadOrders();
+      }} label="Ачааны ажлууд" />
+      <div hidden={tab !== "receive"}>
+        {batch.products.length === 0 ? <Card className="space-y-3 p-5"><div>Эхлээд ачаанд бараагаа холбоно.</div><Button onClick={() => { setTab("products"); setPicking(true); }}>Бараа нэмэх</Button></Card> : <ArrivalRegister batch={batch} onSaved={() => { void load(true); onListChanged(); }} />}
+      </div>
+      <div hidden={tab !== "cargo"}>
+        <CargoFeeEditor batch={batch} onSaved={async () => { await load(true); onListChanged(); }} />
       </div>
 
       {tab === "products" && (
@@ -312,7 +305,7 @@ export function BatchDetail({
                         </div>
                       </Td>
                       <Td className="text-right">
-                        <span className="tnum">{p.orderedQty} ш</span>
+                        <span className="tnum">{(p.variants ?? []).reduce((sum, v) => sum + v.orderedQty, 0)} ш</span>
                       </Td>
                       <Td className="text-right">
                         <span className="tnum">{arrived} ш</span>
@@ -344,23 +337,6 @@ export function BatchDetail({
             </Table>
           )}
 
-          <div className="mt-4">
-            <ArrivalRegister
-              batch={batch}
-              onSaved={() => {
-                void load(true);
-                onListChanged();
-              }}
-            />
-          </div>
-
-          <CargoFeeEditor
-            batch={batch}
-            onSaved={async () => {
-              await load(true);
-              onListChanged();
-            }}
-          />
         </>
       )}
 

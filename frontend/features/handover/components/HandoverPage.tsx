@@ -2,9 +2,11 @@
 
 import { deferEffect } from "@/lib/deferEffect";
 import { useEffect, useState } from "react";
+import { SearchField } from "@/components/admin/SearchField";
+import { handoverSearchKind } from "@/lib/adminWorkflow";
 import { Metric, OrderBadge, PageHead } from "@/components/admin/shared";
 import { QrScanner } from "@/components/QrScanner";
-import { Button, Card, Divider, Empty, ErrorNote, Input, Spinner } from "@/components/ui";
+import { Button, Card, Divider, Empty, ErrorNote, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { money, phoneLabel } from "@/lib/format";
 import type { HandoverReceiptStore } from "@/lib/handoverReceipt";
@@ -33,6 +35,7 @@ export function HandoverPage() {
   const toast = useToast();
 
   const [tab, setTab] = useState<Tab>("give");
+  const [lookupValue, setLookupValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -68,11 +71,6 @@ export function HandoverPage() {
   const history = useHandoverHistory();
   const search = useHandoverSearch({ setBusy, setError, setDone });
 
-  const goToDone = () => {
-    setTab("done");
-    history.goToToday();
-  };
-
   const { markReceived, complete } = useHandoverMutation({
     found: search.found,
     setFound: search.setFound,
@@ -85,7 +83,7 @@ export function HandoverPage() {
     dueForSelected: search.dueForSelected,
     payMethod,
     loadPending: search.loadPending,
-    goToDone,
+    goToDone: () => { setTab("give"); setLookupValue(""); },
     resetSelection: search.resetSelection,
     setBusy,
     setError,
@@ -272,39 +270,18 @@ export function HandoverPage() {
             </Button>
           )}
 
-          <Card className="mb-4 flex flex-col gap-3 p-4">
-            <div className="text-[14px] font-medium">Утас, нэр эсвэл и-мэйл</div>
-            <p className="m-0 text-[13px] leading-[1.4] text-muted">
-              Утсаар захиалсан / сайт дээр «өөрөө авна» дараагүй байсан ч утасны дугаараар олж өгнө.
-            </p>
-            <Input
-              value={search.customerQ}
-              onChange={search.setCustomerQ}
-              placeholder="99112233 / Бат / you@gmail.com"
-            />
-            <Button
-              full
-              onClick={() => void search.searchCustomer()}
-              loading={busy}
-              disabled={search.customerQ.trim().length < 2}
-            >
-              Хэрэглэгч хайх
-            </Button>
-          </Card>
-
-          <Card className="mb-6 flex flex-col gap-3 p-4">
-            <div className="text-[14px] text-ink-2">Эсвэл захиалгын код</div>
-            <Input
-              value={search.code}
-              onChange={(v) => search.setCode(v.toUpperCase())}
-              placeholder="PH-XXXXXX"
-              maxLength={9}
-            />
-            <Button full onClick={() => search.lookup(search.code)} loading={busy} disabled={search.code.length < 3}>
-              Кодоор хайх
-            </Button>
+          <form onSubmit={(event) => {
+            event.preventDefault();
+            if (busy || lookupValue.trim().length < 2) return;
+            if (handoverSearchKind(lookupValue) === "code") { search.setCode(lookupValue); void search.lookup(lookupValue); }
+            else { search.setCustomerQ(lookupValue); void search.searchCustomer(lookupValue); }
+          }}><Card className="mb-5 space-y-3 p-5">
+            <h2 className="m-0 text-[16px] font-medium">Хэний барааг олгох вэ?</h2>
+            <SearchField value={lookupValue} onChange={setLookupValue} maxLength={80} autoFocus placeholder="Утас, нэр, захиалгын код эсвэл QR холбоос" />
+            <p className="m-0 text-[12px] text-muted">Утас, нэрээр бүх бэлэн барааг; PH- кодоор тухайн захиалгыг олно. Enter дарж хайна.</p>
+            <Button full type="submit" loading={busy} disabled={lookupValue.trim().length < 2}>Бараа хайх</Button>
             {error && <ErrorNote>{error}</ErrorNote>}
-          </Card>
+          </Card></form>
 
           <Divider className="mb-4" />
 

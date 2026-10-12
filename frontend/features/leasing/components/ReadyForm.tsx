@@ -1,4 +1,8 @@
 "use client";
+import { TaskTabs } from "@/components/admin/TaskTabs";
+import { ProductOptionsEditor } from "@/features/catalog/components/ProductOptionsEditor";
+import { parseMoneyInput } from "@/lib/moneyInput";
+import { parseWholeQuantity } from "@/lib/adminWorkflow";
 
 import { useEffect, useRef, useState } from "react";
 import { useOnKeyChange } from "@/lib/syncKey";
@@ -18,7 +22,7 @@ import { leasingApi, ApiError } from "@/lib/api";
 import { isOwner } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { IMAGE_SIZE_HINT, assertImageUnderLimit, prepareAdminImage } from "@/lib/imageUpload";
-import { OPTION_PRESETS, skuStockSum } from "@/lib/options";
+import { skuStockSum } from "@/lib/options";
 import { useToast } from "@/lib/toast";
 import type { AdminCategory, AdminProduct, ProductOption, ProductStatus } from "@/lib/types";
 
@@ -40,6 +44,7 @@ export function LeasingReadyForm({
   onSaved: () => void | Promise<void>;
 }) {
   const round = product?.currentRound ?? product?.rounds[0] ?? null;
+  const [section, setSection] = useState("basics");
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? categories[0]?.id ?? "");
@@ -98,7 +103,7 @@ export function LeasingReadyForm({
     if (!categoryId) throw new Error("Эхлээд ангилал сонгоно уу.");
     const created = await leasingApi.createProduct({
       ...buildTemplate([]),
-      sellPrice: Number(sellPrice) || 1,
+      sellPrice: parseMoneyInput(sellPrice) ?? 1,
       stock: 0,
       status: "DRAFT",
       ...(ownerPicker && ownerAdminId ? { ownerAdminId } : {}),
@@ -109,6 +114,10 @@ export function LeasingReadyForm({
   };
 
   const save = async () => {
+    if (busy || uploading) return;
+    if (parseMoneyInput(sellPrice) === null || parseWholeQuantity(stock || "0") === null || skuRows.some((r) => parseWholeQuantity(r.stock || "0") === null)) {
+      setError("Үнэ болон үлдэгдлийг бүхэл тоогоор зөв оруулна уу."); return;
+    }
     if (!name.trim()) {
       const message = "Барааны нэр оруулна уу.";
       setError(message);
@@ -127,7 +136,7 @@ export function LeasingReadyForm({
       toast.error(message);
       return;
     }
-    const sell = Number(sellPrice) || 0;
+    const sell = parseMoneyInput(sellPrice) ?? 0;
     if (sell <= 0) {
       const message = "Зарах үнэ оруулна уу.";
       setError(message);
@@ -217,9 +226,10 @@ export function LeasingReadyForm({
           </>
         }
       />
+      <TaskTabs value={section} onChange={setSection} items={[{ id: "basics", label: "Нэр ба ангилал" }, { id: "stock", label: "Үнэ ба үлдэгдэл" }, { id: "options", label: "Өнгө, хэмжээ" }, { id: "images", label: "Зураг", count: images.length }]} />
       <div className="flex flex-col gap-4">
         {error && <ErrorNote>{error}</ErrorNote>}
-        <ProductBasicsCard
+        <div hidden={section !== "basics"}><ProductBasicsCard
           name={name}
           onName={setName}
           description={description}
@@ -228,9 +238,9 @@ export function LeasingReadyForm({
           onCategory={setCategoryId}
           categories={categories}
           descriptionRows={4}
-        />
+        /></div>
         {ownerPicker && !product ? (
-          <Card className="flex flex-col gap-3 p-4">
+          <Card className={section === "basics" ? "flex flex-col gap-3 p-4" : "hidden"}>
             <Field label="Лизингийн эзэмшигч" hint="Бараа энэ админы бүртгэлд үүснэ.">
               <Select
                 value={ownerAdminId}
@@ -244,7 +254,7 @@ export function LeasingReadyForm({
             </Field>
           </Card>
         ) : null}
-        <Card className="flex flex-col gap-3 p-4">
+        <Card className={section === "images" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <div className="text-[15px] font-medium">Зураг</div>
           <p className="m-0 text-[13px] text-muted">{IMAGE_SIZE_HINT}</p>
           <div className="flex flex-wrap gap-2">
@@ -283,45 +293,16 @@ export function LeasingReadyForm({
             }}
           />
         </Card>
-        <Card className="flex flex-col gap-3 p-4">
-          <div className="flex flex-wrap gap-2">
-            {OPTION_PRESETS.map((preset) => (
-              <Button
-                key={preset}
-                size="sm"
-                variant="ghost"
-                disabled={options.some((o) => o.name === preset)}
-                onClick={() => setOptions((prev) => [...prev, { name: preset, values: [] }])}
-              >
-                + {preset}
-              </Button>
-            ))}
-          </div>
-          {options.map((opt, index) => (
-            <Field key={`${opt.name}-${index}`} label={opt.name || "Сонголт"}>
-              <Input
-                value={opt.values.join(", ")}
-                onChange={(v) =>
-                  setOptions((prev) =>
-                    prev.map((row, i) =>
-                      i === index ? { ...row, values: v.split(",").map((s) => s.trim()).filter(Boolean) } : row,
-                    ),
-                  )
-                }
-                placeholder="S, M, L"
-              />
-            </Field>
-          ))}
-        </Card>
-        <Card className="flex flex-col gap-3 p-4">
+        <div hidden={section !== "options"}><ProductOptionsEditor options={options} onChange={setOptions} /></div>
+        <Card className={section === "stock" ? "flex flex-col gap-3 p-4" : "hidden"}>
           <Field label="Зарах үнэ">
-            <Input value={sellPrice} onChange={(v) => setSellPrice(v.replace(/\D/g, ""))} inputMode="numeric" />
+            <Input value={sellPrice} onChange={(v) => setSellPrice(v)} inputMode="numeric" />
           </Field>
           {options.length > 0 ? (
             <SkuStockEditor options={options} rows={skuRows} onChange={setSkuRows} />
           ) : (
             <Field label="Үлдэгдэл">
-              <Input value={stock} onChange={(v) => setStock(v.replace(/\D/g, ""))} inputMode="numeric" />
+              <Input value={stock} onChange={(v) => setStock(v)} inputMode="numeric" />
             </Field>
           )}
           <Field label="Төлөв">
@@ -333,6 +314,10 @@ export function LeasingReadyForm({
             />
           </Field>
         </Card>
+      </div>
+      <div className="sticky bottom-3 z-10 mt-4 flex flex-wrap justify-end gap-2 rounded-xl border border-line bg-bg p-3">
+        <Button variant="outline" onClick={() => setSection("stock")}>Үнэ, үлдэгдлээ шалгах</Button>
+        <Button loading={busy} disabled={uploading || !name.trim() || !categoryId} onClick={() => void save()}>Бараа хадгалах</Button>
       </div>
     </div>
   );

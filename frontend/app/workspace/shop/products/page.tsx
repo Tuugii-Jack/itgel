@@ -116,8 +116,9 @@ export default function ProductsPage() {
         product={editing === "new" ? null : editing}
         categories={categories}
         onClose={() => setEditing(null)}
-        onSaved={async () => {
+        onSaved={async (result) => {
           setEditing(null);
+          if (result?.release) setReleasing({ kind: result.release, productId: result.productId });
           await load();
         }}
       />
@@ -152,7 +153,7 @@ export default function ProductsPage() {
             <Button variant="outline" onClick={() => setReleasing({ kind: "ready" })}>
               Бэлэн гаргах
             </Button>
-            <Button onClick={() => setEditing("new")}>Бараа нэмэх</Button>
+            <Button disabled={loading} onClick={() => setEditing("new")}>Бараа нэмэх</Button>
           </div>
         }
       />

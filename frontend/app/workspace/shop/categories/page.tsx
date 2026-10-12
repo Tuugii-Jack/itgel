@@ -112,7 +112,7 @@ export default function CategoriesPage() {
       <Card className="mb-4 flex flex-col gap-3 p-4 sm:flex-row sm:items-end">
         <div className="flex-1">
           <div className="mb-1.5 text-[13px] text-ink-2">Шинэ ангилал</div>
-          <Input value={name} onChange={setName} placeholder="Ангилалын нэр" />
+          <Input value={name} onChange={setName} placeholder="Ангилалын нэр" onKeyDown={(event) => { if (event.key === "Enter" && !busy && name.trim()) void create(); }} />
         </div>
         <Button onClick={create} loading={busyKey === "create"} disabled={busy || !name.trim()}>
           Нэмэх
@@ -138,7 +138,7 @@ export default function CategoriesPage() {
               {editing === row.id ? (
                 <>
                   <div className="min-w-[180px] flex-1">
-                    <Input value={editName} onChange={setEditName} />
+                    <Input value={editName} onChange={setEditName} onKeyDown={(event) => { if (event.key === "Enter" && !busy && editName.trim()) void rename(row.id); if (event.key === "Escape") setEditing(null); }} />
                   </div>
                   <Button
                     size="sm"

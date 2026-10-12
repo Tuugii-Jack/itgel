@@ -45,6 +45,7 @@ export function ProductBasicsCard({
         <Select
           value={categoryId}
           onChange={onCategory}
+          placeholder="Ангилал сонгох"
           options={categories.map((c) => ({ value: c.id, label: c.name }))}
           className="w-full"
         />

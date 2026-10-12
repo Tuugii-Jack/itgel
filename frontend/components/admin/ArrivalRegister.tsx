@@ -5,6 +5,7 @@ import { ProductImage } from "@/components/ProductImage";
 import { Button, Card, Input } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { parseWholeQuantity } from "@/lib/adminWorkflow";
 import type {
   AdminBatchDetail,
   ArrivalPreview,
@@ -40,6 +41,7 @@ export function ArrivalRegister({
   const [noteText, setNoteText] = useState("");
   const [noteRoundId, setNoteRoundId] = useState("");
   const [noteKey, setNoteKey] = useState("");
+  const [onlyRemaining, setOnlyRemaining] = useState(true);
 
   const linked = (batch.products ?? []).some((p) => (p.variants?.length ?? 0) > 0);
   const remainingTotal = useMemo(
@@ -80,7 +82,7 @@ export function ArrivalRegister({
     for (const p of batch.products) {
       for (const v of p.variants ?? []) {
         const raw = addValueOf(p, v);
-        const addQty = Math.max(0, Math.round(Number(raw.replace(/\D/g, "") || "0")));
+        const addQty = parseWholeQuantity(raw || "0") ?? 0;
         if (addQty <= 0) continue;
         lines.push({ roundId: p.roundId, selections: v.selections, addQty });
       }
@@ -93,7 +95,7 @@ export function ArrivalRegister({
     for (const p of batch.products) {
       for (const v of p.variants ?? []) {
         const raw = totalValueOf(p, v);
-        const arrivedQty = Math.max(0, Math.round(Number(raw.replace(/\D/g, "") || "0")));
+        const arrivedQty = parseWholeQuantity(raw || "0") ?? 0;
         if (arrivedQty === v.arrivedQty) continue;
         lines.push({ roundId: p.roundId, selections: v.selections, arrivedQty });
       }
@@ -121,6 +123,9 @@ export function ArrivalRegister({
   };
 
   const runPreview = async () => {
+    if (Object.values(draft).some((raw) => parseWholeQuantity(raw || "0") === null)) {
+      toast.error("Ирсэн тоог бүхэл ширхэгээр оруулна уу."); return;
+    }
     const lines = collectAdds();
     if (lines.length === 0) {
       toast.error("Энэ удаа ирсэн тоо оруулна уу.");
@@ -176,6 +181,9 @@ export function ArrivalRegister({
   };
 
   const saveCorrection = async () => {
+    if (Object.values(draft).some((raw) => parseWholeQuantity(raw || "0") === null)) {
+      toast.error("Ирсэн тоог бүхэл ширхэгээр оруулна уу."); return;
+    }
     const lines = collectTotals();
     if (lines.length === 0) {
       toast.error("Өөрчлөгдсөн тоо алга.");
@@ -253,17 +261,26 @@ export function ArrivalRegister({
         )}
       </div>
 
+      {!correcting && canReceive && <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg bg-surface p-3">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => {
+          setDraft(Object.fromEntries(products.flatMap((p) => (p.variants ?? []).map((v) => [draftKey(p.roundId, v.key), String(v.remainingQty)]))));
+          setPreview(null);
+        }}>Үлдсэн бүгдийг бөглөх</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setDraft({}); setPreview(null); }}>Тоонуудыг цэвэрлэх</Button>
+        <label className="ml-auto flex items-center gap-2 text-[12px]"><input type="checkbox" checked={onlyRemaining} onChange={(e) => setOnlyRemaining(e.target.checked)} />Дутуу мөрүүд</label>
+      </div>}
       <div className="flex flex-col gap-4">
-        {products.map((p) => (
+        {products.filter((p) => correcting || !onlyRemaining || (p.variants ?? []).some((v) => v.remainingQty > 0)).map((p) => (
           <ProductArrivalRows
             key={p.roundId}
             product={p}
             valueOf={(v) => (correcting ? totalValueOf(p, v) : addValueOf(p, v))}
             canEdit={correcting ? canCorrect : canReceive}
             remainingHint={!correcting}
+            onlyRemaining={onlyRemaining && !correcting}
             onChange={(key, value) => {
               setPreview(null);
-              setDraft((prev) => ({ ...prev, [draftKey(p.roundId, key)]: value.replace(/\D/g, "") }));
+              setDraft((prev) => ({ ...prev, [draftKey(p.roundId, key)]: value }));
             }}
           />
         ))}
@@ -271,7 +288,7 @@ export function ArrivalRegister({
 
       {canReceive && !correcting && preview && (
         <div className="mt-4 rounded-[10px] border border-line bg-surface p-3">
-          <div className="text-[14px] font-medium">Хуваарилалтын preview</div>
+          <div className="text-[14px] font-medium">Хэн хэдэн ширхэг авах вэ?</div>
           <p className="mt-1 mb-3 text-[13px] text-muted">{preview.fifoNote}</p>
           {preview.lines.map((line) => (
             <div key={`${line.roundId}-${line.label}`} className="mb-3 last:mb-0">
@@ -295,8 +312,8 @@ export function ArrivalRegister({
       )}
 
       {(canReceive || canCorrect) && (
-        <div className="mt-4 rounded-[10px] border border-line p-3">
-          <div className="text-[14px] font-medium">Гэмтэл / зөрүү</div>
+        <details className="mt-4 rounded-[10px] border border-line p-3">
+          <summary className="cursor-pointer text-[14px] font-medium">Гэмтэл / зөрүү бүртгэх · заавал биш</summary>
           <p className="mt-1 mb-2 text-[12px] text-muted">
             Борлуулах үлдэгдэл, төлбөрт автоматаар нөлөөлөхгүй. Зөвхөн бүртгэл.
           </p>
@@ -342,7 +359,7 @@ export function ArrivalRegister({
           <div className="mt-2">
             <Input value={noteText} onChange={setNoteText} placeholder="Тайлбар" />
           </div>
-        </div>
+        </details>
       )}
 
       {canCorrect && correcting && (
@@ -377,12 +394,14 @@ function ProductArrivalRows({
   valueOf,
   canEdit,
   remainingHint,
+  onlyRemaining,
   onChange,
 }: {
   product: BatchProduct;
   valueOf: (v: BatchArrivalVariant) => string;
   canEdit: boolean;
   remainingHint: boolean;
+  onlyRemaining: boolean;
   onChange: (variantKey: string, value: string) => void;
 }) {
   const variants = product.variants ?? [];
@@ -397,7 +416,7 @@ function ProductArrivalRows({
         <div className="min-w-0">
           <div className="truncate text-[14px] font-medium">{product.name}</div>
           <div className="text-[12px] text-muted">
-            {product.orderedQty} ш · {product.customerCount} хүн
+            {variants.reduce((sum, v) => sum + v.orderedQty, 0)} ш · энэ багцад
           </div>
         </div>
       </div>
@@ -409,10 +428,10 @@ function ProductArrivalRows({
           <span className="text-right">{remainingHint ? "Энэ удаа" : "Нийт ирсэн"}</span>
           <span className="text-right">Дутуу</span>
         </div>
-        {variants.map((v: BatchArrivalVariant) => {
+        {variants.filter((v) => !onlyRemaining || v.remainingQty > 0).map((v: BatchArrivalVariant) => {
           const locked = v.handedOverQty ?? 0;
           const raw = valueOf(v);
-          const entered = Math.max(0, Math.round(Number(raw.replace(/\D/g, "") || "0")));
+          const entered = parseWholeQuantity(raw || "0") ?? 0;
           const remaining = remainingHint
             ? Math.max(0, v.remainingQty - entered)
             : Math.max(0, v.orderedQty - entered);

@@ -497,6 +497,7 @@ export default function AdminOrdersPage() {
                   <Th>Статус</Th>
                   {showDeleted ? <Th>Үлдсэн</Th> : <Th>Багц</Th>}
                   <Th>Огноо</Th>
+                  <Th>Үйлдэл</Th>
                 </tr>
               </thead>
               <tbody>
@@ -571,6 +572,10 @@ export default function AdminOrdersPage() {
                     <Td className="tnum whitespace-nowrap text-[13px] text-ink-2">
                       {dayLabel(showDeleted && order.deletedAt ? order.deletedAt : order.createdAt)}
                     </Td>
+                    <Td><div className="flex gap-2">
+                      {!showDeleted && canWrite && !order.isLeasing && !order.isResale && order.dueAmount > 0 && <Button size="sm" variant="outline" onClick={() => setOpenId(order.id)}>Төлбөр</Button>}
+                      {!showDeleted && order.status === "ARRIVED" && <Link href={"/workspace/shop/handover?code=" + encodeURIComponent(order.code)} className="inline-flex min-h-9 items-center rounded-lg border border-line px-3 text-[12px] text-ink no-underline">Олгох</Link>}
+                    </div></Td>
                   </tr>
                 ))}
               </tbody>

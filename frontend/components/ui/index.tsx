@@ -1,6 +1,6 @@
 "use client";
 
-import type { KeyboardEventHandler, ReactNode, Ref } from "react";
+import type { ButtonHTMLAttributes, KeyboardEventHandler, ReactNode, Ref } from "react";
 
 /*
  * Дизайн системийн үндсэн элементүүд.
@@ -27,7 +27,7 @@ export function Card({
   );
 }
 
-type ButtonProps = {
+type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick" | "type"> & {
   children: ReactNode;
   onClick?: () => void;
   type?: "button" | "submit";
@@ -49,6 +49,7 @@ export function Button({
   loading,
   full,
   className = "",
+  ...rest
 }: ButtonProps) {
   // `bar` — дизайны үндсэн CTA (сагс, ирсэн, амжилттай) 48px өндөртэй.
   const heights = {
@@ -69,6 +70,7 @@ export function Button({
   // өнгө нь хэвээр үлдэнэ. Зөвхөн жинхэнэ disabled үед л бүдгэрнэ.
   return (
     <button
+      {...rest}
       type={type}
       onClick={onClick}
       disabled={disabled || loading}

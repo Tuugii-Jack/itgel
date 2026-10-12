@@ -65,7 +65,7 @@ export default function AdminReturnsPage() {
   const [calendar, setCalendar] = useState<ReturnsCalendar | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [data, setData] = useState<ReturnsList | null>(null);
-  const [tab, setTab] = useState<Tab>("products");
+  const [tab, setTab] = useState<Tab>("payouts");
   const [loadingCal, setLoadingCal] = useState(true);
   const [loadingList, setLoadingList] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,7 +101,7 @@ export default function AdminReturnsPage() {
         .then((c) => {
           if (!alive) return;
           setCalendar(c);
-          setSelected([]);
+          setSelected(c.days.map((day) => day.date));
           setData(null);
         })
         .catch((e) => alive && setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй."))

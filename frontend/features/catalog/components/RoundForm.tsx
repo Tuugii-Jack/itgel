@@ -1,4 +1,6 @@
 "use client";
+import { parseMoneyInput } from "@/lib/moneyInput";
+import { parseWholeQuantity } from "@/lib/adminWorkflow";
 
 import { useEffect, useMemo, useState } from "react";
 import { PageHead, Select } from "@/components/admin/shared";
@@ -76,13 +78,13 @@ export function RoundForm({
       .catch(() => undefined);
   }, []);
 
-  const sell = Number(sellPrice) || 0;
+  const sell = parseMoneyInput(sellPrice) ?? 0;
   const hasOptions = (product.options?.length ?? 0) > 0;
   const optionPrices = optionRows
-    .filter((r) => Number(r.sell) > 0)
+    .filter((r) => (parseMoneyInput(r.sell) ?? 0) > 0)
     .map((r) => ({
       selections: r.selections,
-      sellPrice: Number(r.sell) || sell || 0,
+      sellPrice: parseMoneyInput(r.sell) ?? sell,
       costPrice: 0,
     }));
   const skuStocks = skuRows.map((r) => ({
@@ -114,6 +116,10 @@ export function RoundForm({
   };
 
   const save = async () => {
+    if (busy) return;
+    if ((sellPrice.trim() && parseMoneyInput(sellPrice) === null) || optionRows.some((r) => r.sell.trim() && parseMoneyInput(r.sell) === null) || skuRows.some((r) => parseWholeQuantity(r.stock || "0") === null) || parseWholeQuantity(stock || "0") === null) {
+      setError("Үнэ болон үлдэгдлийг бүхэл тоогоор зөв оруулна уу."); return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -219,7 +225,7 @@ export function RoundForm({
             <Field label="Зарах үнэ">
               <Input
                 value={sellPrice}
-                onChange={(v) => setSellPrice(v.replace(/\D/g, ""))}
+                onChange={(v) => setSellPrice(v)}
                 inputMode="numeric"
               />
             </Field>
@@ -309,7 +315,7 @@ export function RoundForm({
               <Field label="Үлдэгдэл">
                 <Input
                   value={stock}
-                  onChange={(v) => setStock(v.replace(/\D/g, ""))}
+                  onChange={(v) => setStock(v)}
                   inputMode="numeric"
                 />
               </Field>

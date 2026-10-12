@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { appendOptionValues } from "@/lib/adminWorkflow";
 import { Button, Input } from "@/components/ui";
 
 export function ChipEditor({
@@ -15,9 +16,9 @@ export function ChipEditor({
   const [draft, setDraft] = useState("");
 
   const add = () => {
-    const value = draft.trim();
-    if (!value || values.includes(value)) return;
-    onChange([...values, value]);
+    const next = appendOptionValues(values, draft);
+    if (next.length === values.length) return;
+    onChange(next);
     setDraft("");
   };
 
@@ -41,6 +42,7 @@ export function ChipEditor({
           </span>
         ))}
       </div>
+      <p className="mb-0 mt-2 text-[12px] text-muted">Олон утгыг таслал эсвэл шинэ мөрөөр оруулж болно. Жишээ: S, M, L, XL</p>
       <div className="flex gap-2">
         <div className="flex-1">
           <Input

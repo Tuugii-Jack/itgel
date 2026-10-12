@@ -30,7 +30,7 @@ import { syncOrderStorageFee } from '../../services/storageFee.js';
 import { listOrdersByProduct, ordersByProductDates } from '../../services/ordersByProduct.js';
 import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
 import { attachItgelToItems } from '../../services/itgelSettlement.js';
-import { staffPhoneFields } from '../../services/phoneOtp.js';
+import { resolveAdminOrderCustomer } from '../../services/adminOrderCustomer.js';
 
 export const adminOrdersRouter = Router();
 
@@ -334,8 +334,8 @@ const createOrderBody = z
     phone: phoneSchema.optional(),
     name: z.string().trim().min(1).max(80).optional(),
     note: z.string().trim().max(500).optional(),
-    status: z.enum(['NEW', 'CONFIRMED']).default('CONFIRMED'),
-    markPaid: z.boolean().default(true),
+    status: z.enum(['NEW', 'CONFIRMED']).default('NEW'),
+    markPaid: z.boolean().default(false),
     items: z
       .array(
         z.object({
@@ -352,11 +352,11 @@ const createOrderBody = z
       .max(30),
   })
   .superRefine((body, ctx) => {
-    if (!body.customerId && !body.email) {
+    if (!body.customerId && !body.email && !body.phone) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Хэрэглэгч эсвэл и-мэйл оруулна уу.',
-        path: ['email'],
+        message: 'Хэрэглэгч сонгох эсвэл утас/и-мэйл оруулна уу.',
+        path: ['phone'],
       });
     }
   });
@@ -369,47 +369,7 @@ adminOrdersRouter.post(
     const body = req.body as z.infer<typeof createOrderBody>;
     const actor = actorOf(req);
 
-    let customerId = body.customerId ?? null;
-
-    if (!customerId) {
-      const email = body.email!;
-      const existing = await prisma.customer.findUnique({ where: { email } });
-      if (existing) {
-        customerId = existing.id;
-        const patch: {
-          phone?: string | null;
-          phoneVerifiedAt?: Date | null;
-          name?: string | null;
-          emailVerifiedAt?: Date;
-        } = {};
-        if (body.phone && existing.phone !== body.phone) {
-          const phoneTaken = await prisma.customer.findFirst({
-            where: { phone: body.phone, NOT: { id: existing.id } },
-          });
-          if (phoneTaken) throw conflict('Энэ утас өөр бүртгэлтэй холбогдсон.');
-          Object.assign(patch, staffPhoneFields(body.phone));
-        }
-        if (body.name && body.name !== existing.name) patch.name = body.name;
-        if (!existing.emailVerifiedAt) patch.emailVerifiedAt = new Date();
-        if (Object.keys(patch).length > 0) {
-          await prisma.customer.update({ where: { id: existing.id }, data: patch });
-        }
-      } else {
-        if (body.phone) {
-          const phoneTaken = await prisma.customer.findFirst({ where: { phone: body.phone } });
-          if (phoneTaken) throw conflict('Энэ утас өөр бүртгэлтэй холбогдсон.');
-        }
-        const created = await prisma.customer.create({
-          data: {
-            email,
-            ...staffPhoneFields(body.phone ?? null),
-            name: body.name ?? null,
-            emailVerifiedAt: new Date(),
-          },
-        });
-        customerId = created.id;
-      }
-    }
+    const customerId = body.customerId ?? await resolveAdminOrderCustomer(body);
 
     const order = await createOrder({
       customerId,

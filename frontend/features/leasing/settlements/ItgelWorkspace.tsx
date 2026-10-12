@@ -1,4 +1,6 @@
 "use client";
+import { SearchField } from "@/components/admin/SearchField";
+import { downloadReportCsv } from "@/lib/reportCsv";
 
 import { deferEffect } from "@/lib/deferEffect";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -520,7 +522,7 @@ export function ItgelWorkspace({
         </label>
         <label className="flex min-w-0 flex-1 flex-col gap-1 text-[12px] text-muted">
           Хайлт
-          <Input value={search} onChange={setSearch} placeholder="Захиалга, хэрэглэгч, бараа" />
+          <SearchField value={search} onChange={setSearch} placeholder="Захиалга, хэрэглэгч, бараа" />
         </label>
         <label className="flex flex-col gap-1 text-[12px] text-muted">
           Төлөв
@@ -629,6 +631,15 @@ export function ItgelWorkspace({
 
       {tab === "unpaid" && (
         <>
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            {canSelectPay && <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => {
+              const available = lines.filter((line) => line.selectable && line.remainingAmount > 0);
+              setSelected(new Map(available.map((line) => [line.id, { remaining: line.remainingAmount, orderId: line.orderId }])));
+            }}>Харагдаж буй боломжит мөрүүдийг сонгох</Button>}
+            {selected.size > 0 && <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelected(new Map())}>Сонголт цэвэрлэх</Button>}
+            <Button size="sm" variant="outline" disabled={lines.length === 0} onClick={() => downloadReportCsv("itgel-settlements.csv", ["Захиалга", "Хэрэглэгч", "Бараа", "Ширхэг", "Нийт", "Орсон", "Үлдэгдэл", "Төлөв"], lines.map((line) => [line.orderCode, line.customerName, line.productName, line.qty, line.amount, line.paidAmount, line.remainingAmount, line.statusLabel]))}>Жагсаалт CSV татах</Button>
+            <span className="ml-auto text-[12px] text-muted">{lines.length} мөр ачаалагдсан</span>
+          </div>
           {listTotals && (
             <p className="mb-3 mt-0 text-[13px] text-ink-2">
               Шүүлтэд {listTotals.count} мөр · үлдэгдэл {money(listTotals.remainingAmount)}

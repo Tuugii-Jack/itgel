@@ -17,6 +17,7 @@ export function useDeliveries(tab: DeliveriesTab) {
   const [selectedDistricts, setSelectedDistricts] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState("");
   const [zoneFilter, setZoneFilter] = useState<"" | "city" | "aimag">("");
+  const [search, setSearch] = useState("");
   const [rows, setRows] = useState<AdminDelivery[]>([]);
   const [couriers, setCouriers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -65,10 +66,12 @@ export function useDeliveries(tab: DeliveriesTab) {
   );
 
   const visibleRows = useMemo(() => {
-    const zoned = zoneFilter ? workRows.filter((r) => placeZone(r.district) === zoneFilter) : workRows;
+    const needle = search.trim().toLowerCase();
+    const searched = needle ? workRows.filter((r) => [r.order.code, r.order.customer.name, r.order.customer.phone, r.addressText, r.courierName].some((text) => text?.toLowerCase().includes(needle))) : workRows;
+    const zoned = zoneFilter ? searched.filter((r) => placeZone(r.district) === zoneFilter) : searched;
     if (selectedDistricts.size === 0) return zoned;
     return zoned.filter((r) => selectedDistricts.has(r.district));
-  }, [workRows, zoneFilter, selectedDistricts]);
+  }, [workRows, zoneFilter, selectedDistricts, search]);
 
   const groups = useMemo(() => groupDeliveriesByDistrict(visibleRows), [visibleRows]);
   const zones = useMemo(() => splitDeliveryZones(groups), [groups]);
@@ -139,6 +142,7 @@ export function useDeliveries(tab: DeliveriesTab) {
   };
 
   return {
+    search, setSearch,
     selectedDays,
     setSelectedDays,
     selectedDistricts,

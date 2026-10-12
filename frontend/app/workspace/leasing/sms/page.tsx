@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { WorkspaceDialog } from "@/components/admin/WorkspaceDialog";
+import { SearchField } from "@/components/admin/SearchField";
+import type { AdminCustomer } from "@/lib/types";
 import { PageHead } from "@/components/admin/shared";
 import { Button, Card, ErrorNote, Field, Textarea } from "@/components/ui";
 import { leasingApi, ApiError } from "@/lib/api";
@@ -36,6 +39,11 @@ export default function LeasingSmsPage() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerRows, setCustomerRows] = useState<AdminCustomer[]>([]);
+  const [pickedPhones, setPickedPhones] = useState<Set<string>>(new Set());
+  const [customerLoading, setCustomerLoading] = useState(false);
   const [draft, setDraft] = useState<{
     sender: string | null;
     text: string;
@@ -50,7 +58,18 @@ export default function LeasingSmsPage() {
   const phones = overLimit ? parsed.phones.slice(0, MAX_PHONES) : parsed.phones;
   const chars = [...text].length;
   const canPreview =
-    phones.length >= 1 && !overLimit && text.trim().length >= 1 && chars <= MAX_CHARS;
+    phones.length >= 1 && !overLimit && parsed.invalid.length === 0 && text.trim().length >= 1 && chars <= MAX_CHARS;
+  useEffect(() => {
+    if (!pickerOpen) return;
+    let active = true;
+    const timer = setTimeout(async () => {
+      setCustomerLoading(true);
+      try { const list = await leasingApi.customers({ q: customerQuery.trim() || undefined, pageSize: 30 }); if (active) setCustomerRows(list.data); }
+      catch (e) { if (active) setError(e instanceof ApiError ? e.message : "Хэрэглэгч хайж чадсангүй."); }
+      finally { if (active) setCustomerLoading(false); }
+    }, 250);
+    return () => { active = false; clearTimeout(timer); };
+  }, [pickerOpen, customerQuery]);
 
   const preview = async () => {
     if (!canPreview || busy) return;
@@ -121,6 +140,10 @@ export default function LeasingSmsPage() {
         hint="Нэг эсвэл олон 8 оронтой дугаар руу ижил мессеж илгээнэ."
       />
       <Card className="flex flex-col gap-4 p-4">
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => { setPickedPhones(new Set(phones)); setCustomerQuery(""); setPickerOpen(true); }}>Хэрэглэгчээс сонгох</Button>
+          <Button size="sm" variant="ghost" disabled={busy || phones.length === 0} onClick={() => { setRawPhones(phones.join("\n")); setDraft(null); }}>Зөв дугаарыг үлдээж давхардлыг хасах</Button>
+        </div>
         <Field
           label="Утасны дугаар"
           hint="Нэг мөрөнд нэг, эсвэл таслалаар. Ихдээ 40."
@@ -196,6 +219,17 @@ export default function LeasingSmsPage() {
           </div>
         )}
       </Card>
+      <WorkspaceDialog open={pickerOpen} onClose={() => setPickerOpen(false)} title="SMS хүлээн авах хэрэглэгчид">
+        <div className="p-4"><SearchField value={customerQuery} onChange={setCustomerQuery} maxLength={60} placeholder="Хэрэглэгчийн нэр, утас хайх" autoFocus />
+          <div className="mt-3 max-h-[45dvh] overflow-y-auto divide-y divide-line">
+            {customerLoading ? <p className="text-[13px] text-muted">Хайж байна…</p> : customerRows.filter((customer) => customer.phone).map((customer) => <label key={customer.id} className="flex min-h-14 cursor-pointer items-center gap-3 py-3">
+              <input type="checkbox" checked={pickedPhones.has(customer.phone!)} disabled={!pickedPhones.has(customer.phone!) && pickedPhones.size >= MAX_PHONES} onChange={() => setPickedPhones((prev) => { const next = new Set(prev); if (next.has(customer.phone!)) next.delete(customer.phone!); else next.add(customer.phone!); return next; })} />
+              <span className="text-[14px]">{customer.name || "Хэрэглэгч"}<span className="ml-2 text-[12px] text-muted">{phoneLabel(customer.phone)}</span></span>
+            </label>)}
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3 border-t border-line pt-3"><span className="text-[12px] text-muted">{pickedPhones.size} / {MAX_PHONES} дугаар</span><Button onClick={() => { setRawPhones([...pickedPhones].join("\n")); setDraft(null); setPickerOpen(false); }}>Сонгосон дугааруудыг нэмэх</Button></div>
+        </div>
+      </WorkspaceDialog>
     </div>
   );
 }
