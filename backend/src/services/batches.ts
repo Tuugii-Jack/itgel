@@ -66,6 +66,7 @@ export async function findOrderIdsForBatch(
     paidAmount: true,
     refundedAmount: true,
     leasingFee: true,
+    shopPaidAmount: true,
   } as const;
 
   const byBatch = await tx.order.findMany({
@@ -134,7 +135,7 @@ export async function attachOrdersForRound(
       status: { notIn: FROZEN_ORDER_STATUSES },
       OR: [{ batchId: null }, { batchId }],
     },
-    select: { id: true, subtotal: true, paidAmount: true, refundedAmount: true, leasingFee: true },
+    select: { id: true, subtotal: true, paidAmount: true, refundedAmount: true, leasingFee: true, shopPaidAmount: true },
   });
   const orderIds = paidOrders.filter(isProductPaid).map((o) => o.id);
   if (orderIds.length === 0) return 0;

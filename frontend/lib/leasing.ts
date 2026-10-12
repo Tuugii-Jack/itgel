@@ -1,4 +1,5 @@
 import { dayKey, daysBetween } from "@/lib/format";
+import { wholeTugrikFee } from "./leasingMoney";
 import type { LeasingPayPlan, LeasingPlanStep, LeasingPlanStepStatus } from "@/lib/types";
 
 export interface LeasingFeeTier {
@@ -68,7 +69,7 @@ export function leasingFeeOf(
   tiers: LeasingFeeTier[] = FALLBACK_LEASING_FEE_TIERS,
 ): number {
   if (!Number.isFinite(subtotal) || subtotal <= 0) return 0;
-  return Math.round(subtotal * (leasingRatePercent(subtotal, tiers) / 100));
+  return wholeTugrikFee(subtotal, leasingRatePercent(subtotal, tiers));
 }
 
 export function formatLeasingPercent(percent: number): string {

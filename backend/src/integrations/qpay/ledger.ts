@@ -2,7 +2,7 @@ import { audit } from '../../lib/audit.js';
 import { AppError, conflict, notFound } from '../../lib/errors.js';
 import { lockOrder } from '../../lib/orderLock.js';
 import { prisma } from '../../prisma.js';
-import { confirmLeasingIfFeePaid, recordPayment, recordPaymentWithTotals } from '../../services/payments.js';
+import { confirmLeasingIfFeePaid, recordPaymentWithTotals } from '../../services/payments.js';
 import { applySettlementQpayPayment } from '../../services/itgelSettlementPay.js';
 import {
   cancelQpayInvoice,
@@ -147,7 +147,7 @@ export async function findOrderByQpayInvoice(invoiceId: string) {
   const order = await prisma.order.findFirst({
     where: { qpayInvoiceId: invoiceId, deletedAt: null }, select,
   });
-  return order ? { ...order, qpayAccount: qpayAccountForOrder(order) } : null;
+  return order ? { ...order, qpayAccount: qpayAccountForOrder(order), purpose: 'ORDER' } : null;
 }
 
 /** Нэхэмжлэлийг QPay дээр цуцалж, захиалгаас id-г авна. */
@@ -204,29 +204,39 @@ export async function recordQpayRefund(input: {
   }
 
   const reference = `qpay-refund:${input.paymentId}`;
-  const existing = await prisma.payment.findFirst({
-    where: { orderId: order.id, reference, kind: 'REFUND' },
-  });
-  if (existing) {
-    return { orderId: order.id, orderCode: order.code, recorded: false, error: null };
+  if (order.purpose === 'ITGEL_SETTLEMENT' || !order.id) {
+    return { orderId: null, orderCode: null, recorded: false,
+      error: 'Итгэлд төлөх тооцооны буцаалтыг захиалгын дэвтэрт бичих боломжгүй.' };
   }
 
-  const amount = Math.round(input.amount);
-  if (!Number.isFinite(amount) || amount <= 0) {
+  const amount = input.amount;
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
     return { orderId: order.id, orderCode: order.code, recorded: false, error: null };
   }
 
   try {
-    await recordPayment({
-      orderId: order.id,
-      kind: 'REFUND',
-      amount,
-      method: 'QPAY',
-      reference,
-      note: input.note,
-      actor: input.actor,
+    const recorded = await prisma.$transaction(async (tx) => {
+      await lockOrder(tx, order.id);
+      // Давхар хүсэлт шалгалт + бичилт хоёрыг нэг түгжээний дотор гүйцэтгэнэ.
+      const existing = await tx.payment.findFirst({
+        where: { orderId: order.id, reference, kind: 'REFUND' },
+      });
+      if (existing) return false;
+      await rememberQpayInvoice(order.id, input.invoiceId!, order.qpayAccount, tx);
+      await recordPaymentWithTotals(tx, {
+        orderId: order.id,
+        kind: 'REFUND',
+        amount,
+        method: 'QPAY',
+        reference,
+        qpayInvoiceId: input.invoiceId!,
+        payeeKind: order.qpayAccount === 'shop' ? 'SHOP' : 'LEASING',
+        note: input.note,
+        actor: input.actor,
+      });
+      return true;
     });
-    return { orderId: order.id, orderCode: order.code, recorded: true, error: null };
+    return { orderId: order.id, orderCode: order.code, recorded, error: null };
   } catch (e) {
     const message = e instanceof AppError ? e.message : 'Дэвтэрт буцаалт бичиж чадсангүй.';
     return { orderId: order.id, orderCode: order.code, recorded: false, error: message };
@@ -239,6 +249,8 @@ export async function reverseQpayPayment(input: {
   mode: 'cancel' | 'refund';
   actor: string;
   kind?: QpayAccountKind;
+  /** Захиалгын endpoint дээр төлбөрийн харьяаллыг QPay буцаахаас ӨМНӨ шалгана. */
+  expectedOrderId?: string;
 }): Promise<{
   payment: QpayPaymentDetail;
   recorded: boolean;
@@ -248,6 +260,16 @@ export async function reverseQpayPayment(input: {
 }> {
   const kind = input.kind ?? 'shop';
   const payment = await getQpayPayment(input.paymentId, kind);
+  const order = payment.invoiceId ? await findOrderByQpayInvoice(payment.invoiceId) : null;
+  if (input.expectedOrderId && order?.id !== input.expectedOrderId) {
+    throw conflict('QPay төлбөр энэ захиалгад хамаарахгүй.');
+  }
+  if (order && order.qpayAccount !== kind) {
+    throw conflict('QPay төлбөрийн данс зөрсөн.');
+  }
+  if (order?.purpose === 'ITGEL_SETTLEMENT') {
+    throw conflict('Итгэлд төлөх тооцооны төлбөрийг захиалгын буцаалтаар буцаах боломжгүй.');
+  }
   if (input.mode === 'cancel') await cancelQpayPayment(input.paymentId, kind);
   else await refundQpayPayment(input.paymentId, kind);
 

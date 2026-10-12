@@ -3,6 +3,7 @@ import { prisma } from '../prisma.js';
 import { conflict, notFound } from '../lib/errors.js';
 import { leasingFeeOf, leasingFeeSnapshot, leasingView } from '../lib/leasing.js';
 import { getSettingsCached, leasingTiersOf } from './settings.js';
+import { lockOrder } from '../lib/orderLock.js';
 
 /**
  * Захиалгын мөнгөн дүнгийн цорын ганц эх сурвалж.
@@ -32,6 +33,8 @@ export interface OrderTotals {
   refundedAmount: number;
   /** Цэвэр орлого: төлсөн − буцаасан. */
   netPaid: number;
+  /** SHOP дансанд орсон цэвэр мөнгө; лизингийн шимтгэлд ашиглахгүй. */
+  shopPaidAmount?: number;
   /** Үлдсэн өрийн хаалт — Payment мөр биш. */
   writtenOffAmount: number;
   /** total − netPaid − writtenOffAmount. Сөрөг бол илүү төлсөн байна. */
@@ -40,6 +43,12 @@ export interface OrderTotals {
 
 /** Захиалгын дүнг дэвтэр ба мөрүүдээс дахин бодож, кэшийг шинэчилнэ. */
 export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderTotals> {
+  if (tx === prisma) {
+    return prisma.$transaction(async (lockedTx) => {
+      await lockOrder(lockedTx, orderId);
+      return recalcOrderTotals(lockedTx, orderId);
+    });
+  }
   const order = await tx.order.findUnique({
     where: { id: orderId },
     select: {
@@ -104,6 +113,7 @@ export async function recalcOrderTotals(tx: Tx, orderId: string): Promise<OrderT
     leasingFee,
     paidAmount,
     refundedAmount,
+    shopPaidAmount,
     writtenOffAmount: order.writtenOffAmount,
   });
 
@@ -132,6 +142,7 @@ export function computeTotals(input: {
   leasingFee?: number;
   paidAmount: number;
   refundedAmount: number;
+  shopPaidAmount?: number | null;
   writtenOffAmount?: number;
 }): OrderTotals {
   const storageFee = input.storageFee ?? 0;
@@ -150,6 +161,7 @@ export function computeTotals(input: {
     paidAmount: input.paidAmount,
     refundedAmount: input.refundedAmount,
     netPaid,
+    shopPaidAmount: Math.max(0, input.shopPaidAmount ?? 0),
     writtenOffAmount,
     dueAmount: total - netPaid - writtenOffAmount,
   };
@@ -181,7 +193,7 @@ export function confirmThreshold(totals: {
 
 /** Захиалга баталгаажих болзол: бараа бүрэн төлөгдсөн байх (карго/агуулах хамаарахгүй). */
 export function fullyPaid(totals: OrderTotals): boolean {
-  return totals.netPaid >= confirmThreshold(totals);
+  return isProductPaid(totals);
 }
 
 /** Барааны үнэ төлөгдсөн эсэх — карго/агуулахын үлдэгдэл энд хамаарахгүй. */
@@ -190,9 +202,12 @@ export function isProductPaid(order: {
   paidAmount: number;
   refundedAmount: number;
   leasingFee?: number | null;
+  shopPaidAmount?: number | null;
 }): boolean {
   const net = order.paidAmount - order.refundedAmount;
-  if ((order.leasingFee ?? 0) > 0) return net >= order.leasingFee!;
+  if ((order.leasingFee ?? 0) > 0) {
+    return net - Math.max(0, order.shopPaidAmount ?? 0) >= order.leasingFee!;
+  }
   return net >= order.subtotal;
 }
 
@@ -276,7 +291,9 @@ export const PAYMENT_STATE_LABEL: Record<PaymentState, string> = {
 
 /** Буцаалт нь цэвэр орлогоос хэтрэхгүй байх. */
 export function assertRefundable(totals: OrderTotals, amount: number): void {
-  if (amount <= 0) throw conflict('Буцаах дүн 0-ээс их байх ёстой.');
+  if (!Number.isSafeInteger(amount) || amount <= 0) {
+    throw conflict('Буцаах дүн 0-ээс их бүхэл төгрөг байх ёстой.');
+  }
   if (amount > totals.netPaid) {
     throw conflict(
       `Буцаах дүн цэвэр орлогоос хэтэрсэн. Боломжит дээд хэмжээ: ${totals.netPaid}₮.`,
@@ -296,6 +313,7 @@ export async function loadOrderTotals(orderId: string): Promise<OrderTotals> {
       leasingFee: true,
       paidAmount: true,
       refundedAmount: true,
+      shopPaidAmount: true,
       writtenOffAmount: true,
     },
   });

@@ -48,7 +48,7 @@ export async function recordPaymentWithTotals(
   tx: Tx,
   input: RecordPaymentInput,
 ): Promise<{ payment: Payment; totals: OrderTotals }> {
-  if (!Number.isInteger(input.amount) || input.amount <= 0) {
+  if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
     throw conflict('Дүн 0-ээс их бүхэл тоо байх ёстой.');
   }
 
@@ -146,6 +146,7 @@ export async function confirmLeasingIfFeePaid(orderId: string, actor: string): P
     await changeOrderStatus(order.id, 'CONFIRMED', {
       actor,
       reason: 'Лизингийн шимтгэл төлөгдсөн',
+      requirePayment: true,
     });
   }
   const latest = await prisma.order.findFirst({

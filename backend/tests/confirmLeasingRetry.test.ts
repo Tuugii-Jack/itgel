@@ -11,7 +11,7 @@ vi.mock('../src/prisma.js', () => ({
     order: { findFirst: mocks.findFirst },
   },
 }));
-vi.mock('../src/services/orders.js', () => ({
+vi.mock('../src/modules/orders/lifecycle.js', () => ({
   changeOrderStatus: (...args: unknown[]) => mocks.changeOrderStatus(...args),
 }));
 vi.mock('../src/services/itgelSettlement.js', () => ({

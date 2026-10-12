@@ -507,7 +507,7 @@ adminOrdersRouter.patch(
       }
     }
 
-    await changeOrderStatus(orderId, status, { actor: actorOf(req), reason });
+    await changeOrderStatus(orderId, status, { actor: actorOf(req), reason, requirePayment: !force });
 
     const order = await prisma.order.findUniqueOrThrow({
       where: { id: orderId },
@@ -601,6 +601,7 @@ adminOrdersRouter.post(
         paidAmount: true,
         refundedAmount: true,
         leasingFee: true,
+        shopPaidAmount: true,
       },
     });
     const byId = new Map(orders.map((o) => [o.id, o]));
@@ -621,7 +622,7 @@ adminOrdersRouter.post(
             throw conflict(`Төлбөр дутуу: ${confirmThreshold(totals) - totals.netPaid}₮ ороогүй байна.`);
           }
         }
-        await changeOrderStatus(id, status, { actor, reason });
+        await changeOrderStatus(id, status, { actor, reason, requirePayment: !force });
         succeeded.push(id);
       } catch (error) {
         failed.push({

@@ -40,7 +40,8 @@ npm run dev                   # http://localhost:4000
 | --- | --- |
 | `npm run dev` | Хөгжүүлэлтийн сервер (watch) |
 | `npm run build` / `npm start` | Production build ба ажиллуулах |
-| `npm test` | Бизнес логикийн тест (51 тест) |
+| `npm test` | Бизнес логик, HTTP, зэрэгцээ үйлдлийн тест — isolated env шаарддаг |
+| `npm run test:isolated` | `ITGEL_TEST_DATABASE_URL`-д заасан тусдаа локал санд бүх тест; QPay/SMS/storage mock |
 | `npm run test:e2e` | Бүтэн урсгалын тест — сервер ажиллаж байх шаардлагатай |
 | `npm run typecheck` | TypeScript шалгалт |
 | `npm run seed -- --force` | Өгөгдлийг **бүхэлд нь устгаад** шинээр үүсгэнэ |

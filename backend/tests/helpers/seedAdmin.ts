@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../src/prisma.js';
 import { signAdminToken } from '../../src/lib/jwt.js';
 import type { AdminRoleName } from '../../src/lib/adminRoles.js';
@@ -7,14 +8,22 @@ function token(): string {
   return randomUUID().replace(/-/g, '').slice(0, 10);
 }
 
-function digits(raw: string, len: number): string {
-  const n = raw.replace(/[a-f]/g, '1').replace(/\D/g, '2').slice(0, len);
-  return n.padEnd(len, '0');
+async function createWithPhone<T>(prefix: string, create: (phone: string) => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const phone = `${prefix}${String(randomInt(0, 10_000_000)).padStart(7, '0')}`;
+    try {
+      return await create(phone);
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002' ||
+          !Array.isArray(error.meta?.target) || !error.meta.target.includes('phone')) throw error;
+    }
+  }
+  throw new Error('Тестийн давхцахгүй утасны дугаар үүсгэж чадсангүй.');
 }
 
 export async function seedAdmin(role: AdminRoleName = 'STAFF') {
   const t = token();
-  const admin = await prisma.adminUser.create({
+  const admin = await createWithPhone('8', (phone) => prisma.adminUser.create({
     data: {
       email: `${role.toLowerCase()}-${t}@itgel.test`,
       name: `${role} ${t}`,
@@ -23,12 +32,12 @@ export async function seedAdmin(role: AdminRoleName = 'STAFF') {
       phoneVerifiedAt: new Date(),
       loginPhones: {
         create: {
-          phone: `8${digits(t, 7)}`,
+          phone,
           verifiedAt: new Date(),
         },
       },
     },
-  });
+  }));
   const jwt = signAdminToken({
     sub: admin.id,
     email: admin.email,
@@ -53,8 +62,8 @@ export async function seedCatalog() {
       status: 'ACTIVE',
     },
   });
-  const customer = await prisma.customer.create({
-    data: { phone: `9${digits(t, 7)}`, name: `Cust ${t}` },
-  });
+  const customer = await createWithPhone('9', (phone) => prisma.customer.create({
+    data: { phone, name: `Cust ${t}` },
+  }));
   return { category, product, round, customer, t };
 }

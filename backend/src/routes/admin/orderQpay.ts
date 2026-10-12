@@ -158,6 +158,7 @@ adminOrderQpayRouter.post(
       mode: 'cancel',
       actor: actorOf(req),
       kind: qpayAccountForOrder(order),
+      expectedOrderId: order.id,
     });
     res.json({ data: result });
   }),
@@ -176,6 +177,7 @@ adminOrderQpayRouter.post(
       mode: 'refund',
       actor: actorOf(req),
       kind: qpayAccountForOrder(order),
+      expectedOrderId: order.id,
     });
     res.json({ data: result });
   }),

@@ -4,6 +4,7 @@ import { diffUbDays } from '../lib/date.js';
 import { remainingStoredQtyOf } from '../lib/itemQty.js';
 import { getSettingsCached } from './settings.js';
 import { recalcOrderTotals } from './money.js';
+import { lockOrder, lockOrders } from '../lib/orderLock.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -137,6 +138,8 @@ export async function syncOrdersStorageFees(
   const settings = await getSettingsCached();
   if (settings.storageFeePerDay <= 0) return 0;
 
+  if (client !== prisma) await lockOrders(client, ids);
+
   const orders = await client.order.findMany({
     where: { id: { in: ids } },
     select: {
@@ -160,6 +163,12 @@ export async function syncOrdersStorageFees(
     const targetFee = targetStorageFee(order, breakdown);
     if (targetFee === order.storageFee) continue;
 
+    if (client === prisma) {
+      const fresh = await syncOrderStorageFee(order.id, now);
+      if (fresh.fee !== order.storageFee) updated += 1;
+      continue;
+    }
+
     await client.order.update({
       where: { id: order.id },
       data: { storageFee: targetFee },
@@ -176,6 +185,10 @@ export async function syncOrderStorageFee(
   now = new Date(),
   client: Tx | typeof prisma = prisma,
 ): Promise<StorageFeeBreakdown> {
+  if (client === prisma) {
+    return prisma.$transaction((tx) => syncOrderStorageFee(orderId, now, tx));
+  }
+  await lockOrder(client, orderId);
   const settings = await getSettingsCached();
   const order = await client.order.findUnique({
     where: { id: orderId },
@@ -241,12 +254,8 @@ export async function syncAllStorageFees(now = new Date()): Promise<number> {
     );
     const targetFee = targetStorageFee(order, breakdown);
     if (targetFee === order.storageFee) continue;
-    await prisma.order.update({
-      where: { id: order.id },
-      data: { storageFee: targetFee },
-    });
-    await recalcOrderTotals(prisma, order.id);
-    updated += 1;
+    const fresh = await syncOrderStorageFee(order.id, now);
+    if (fresh.fee !== order.storageFee) updated += 1;
   }
   return updated;
 }

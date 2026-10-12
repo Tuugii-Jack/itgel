@@ -33,6 +33,8 @@ const STATUS_TIMESTAMP: Partial<Record<OrderStatus, keyof Prisma.OrderUpdateInpu
 
 export interface StatusChangeOptions {
   actor: string;
+  /** Админы төлбөрийн шалгалт — төлөв солихтой нэг түгжээ дотор. */
+  requirePayment?: boolean;
   /** Багц ахих үед олон алхмыг дараалуулан гүйцэтгэнэ. */
   reason?: string;
   now?: Date;
@@ -59,6 +61,10 @@ export async function changeOrderStatus(
         `"${ORDER_STATUS_LABEL[order.status]}" төлвөөс "${ORDER_STATUS_LABEL[to]}" руу шилжих боломжгүй.`,
         { from: order.status, to },
       );
+    }
+
+    if (to === 'CONFIRMED' && options.requirePayment && !isProductPaid(order)) {
+      throw conflict('Төлбөр дутуу байна. Төлбөрийг бүртгэсний дараа баталгаажуулна уу.');
     }
 
     if (to === 'CANCELLED') {

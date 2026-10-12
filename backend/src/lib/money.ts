@@ -1,5 +1,12 @@
 /** Мөнгөн тооцоо — бүгд бүхэл тоо (₮). Float хэрэглэхгүй. */
 
+/** Эерэг бүхэл дүнгийн харьцаа. Завсрын үржвэр Number-ийн нарийвчлалыг алдахгүй. */
+export function moneyRatio(amount: number, numerator: number, denominator: number, round = false): number {
+  const product = BigInt(amount) * BigInt(numerator);
+  const divisor = BigInt(denominator);
+  return Number(round ? (product * 2n + divisor) / (divisor * 2n) : product / divisor);
+}
+
 export interface PricedItem {
   qty: number;
   unitPrice: number;
@@ -33,7 +40,7 @@ export function splitAttributedAmount(
   }
   let allocated = 0;
   for (const share of shares) {
-    const part = share.subtotal <= 0 ? 0 : Math.floor((amount * share.subtotal) / allSubtotal);
+    const part = share.subtotal <= 0 ? 0 : moneyRatio(amount, share.subtotal, allSubtotal);
     byOwner[share.ownerId] = part;
     allocated += part;
   }
@@ -44,7 +51,7 @@ export function splitAttributedAmount(
 export function attributedShare(amount: number, ownSubtotal: number, allSubtotal: number): number {
   if (amount <= 0 || ownSubtotal <= 0 || allSubtotal <= 0) return 0;
   if (ownSubtotal >= allSubtotal) return amount;
-  return Math.floor((amount * ownSubtotal) / allSubtotal);
+  return moneyRatio(amount, ownSubtotal, allSubtotal);
 }
 
 /** Лизингийн дэвтэр — SHOP карго төлбөрийг алгасна. `null` болон LEASING тооцогдоно. */

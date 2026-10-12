@@ -17,8 +17,8 @@ test("safe next rejects open redirects and retired admin paths", () => {
 });
 
 test("workspace home follows role without picking a higher one", () => {
-  assert.equal(workspaceHome("LEASING"), "/workspace/leasing");
-  assert.equal(workspaceHome("STAFF"), "/workspace/shop");
-  assert.equal(workspaceHome("ADMIN"), "/workspace/shop");
+  assert.equal(workspaceHome("LEASING"), "/workspace/leasing/today");
+  assert.equal(workspaceHome("STAFF"), "/workspace/shop/today");
+  assert.equal(workspaceHome("ADMIN"), "/workspace/shop/today");
   assert.equal(workspaceHome("OWNER"), "/workspace");
 });

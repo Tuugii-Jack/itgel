@@ -3,6 +3,7 @@ import { prisma } from '../../prisma.js';
 import { audit } from '../../lib/audit.js';
 import { conflict, notFound } from '../../lib/errors.js';
 import { lockOrder } from '../../lib/orderLock.js';
+import { leasingFeeSnapshot } from '../../lib/leasing.js';
 import { optionsFromVariants, selectionsOf, sizeColorFromSelections } from '../../lib/options.js';
 import { skuKeyOf } from '../../lib/skuStock.js';
 import { recalcOrderTotals } from '../../services/money.js';
@@ -177,7 +178,8 @@ function buildPreview(
     remainingSubtotal <= 0
       ? 0
       : order.subtotal > 0 && order.leasingFee > 0
-        ? Math.round(remainingSubtotal * (order.leasingFee / order.subtotal))
+        ? leasingFeeSnapshot({ isLeasing: true, previousSubtotal: order.subtotal,
+            previousFee: order.leasingFee, nextSubtotal: remainingSubtotal, fallbackFee: order.leasingFee })
         : order.leasingFee;
   const remainingCargo = remainingActiveQty <= 0 ? 0 : order.cargoFee;
   const dueAfterTransfer =

@@ -388,15 +388,15 @@ export async function daySummary(input: {
   const [settlementRows, paymentRows] = await Promise.all([
     prisma.$queryRaw<Array<Record<string, unknown>>>`
       SELECT
-        coalesce(sum("remainingAmount") FILTER (WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK')), 0)::int AS "totalUnpaidRemaining",
+        coalesce(sum("remainingAmount") FILTER (WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK')), 0)::bigint AS "totalUnpaidRemaining",
         count(*) FILTER (WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK'))::int AS "totalUnpaidCount",
-        coalesce(sum(amount) FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}), 0)::int AS "createdOnDayAmount",
+        coalesce(sum(amount) FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}), 0)::bigint AS "createdOnDayAmount",
         count(*) FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to})::int AS "createdOnDayCount",
         count(DISTINCT "sourceOrderId") FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to})::int AS "createdOnDayOrders",
-        coalesce(sum("remainingAmount") FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}), 0)::int AS "remainingAmount",
+        coalesce(sum("remainingAmount") FILTER (WHERE "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}), 0)::bigint AS "remainingAmount",
         coalesce(sum("remainingAmount") FILTER (
           WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK') AND "confirmedAt" < ${from}
-        ), 0)::int AS "priorUnpaidAmount",
+        ), 0)::bigint AS "priorUnpaidAmount",
         count(*) FILTER (
           WHERE status IN ('OPEN', 'INVOICED', 'PENDING_BANK') AND "confirmedAt" < ${from}
         )::int AS "priorUnpaidCount"
@@ -407,15 +407,15 @@ export async function daySummary(input: {
       SELECT
         coalesce(sum(amount) FILTER (
           WHERE status = 'CONFIRMED' AND "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}
-        ), 0)::int AS "paidOnDayAmount",
+        ), 0)::bigint AS "paidOnDayAmount",
         count(*) FILTER (
           WHERE status = 'CONFIRMED' AND "confirmedAt" >= ${from} AND "confirmedAt" <= ${to}
         )::int AS "paidOnDayCount",
-        coalesce(sum(amount) FILTER (WHERE status = 'CONFIRMED' AND "confirmedAt" IS NULL), 0)::int AS "paidUnknownAmount",
+        coalesce(sum(amount) FILTER (WHERE status = 'CONFIRMED' AND "confirmedAt" IS NULL), 0)::bigint AS "paidUnknownAmount",
         count(*) FILTER (WHERE status = 'CONFIRMED' AND "confirmedAt" IS NULL)::int AS "paidUnknownCount",
-        coalesce(sum(amount) FILTER (WHERE status = 'PENDING' AND method = 'BANK_TRANSFER'), 0)::int AS "pendingBankAmount",
+        coalesce(sum(amount) FILTER (WHERE status = 'PENDING' AND method = 'BANK_TRANSFER'), 0)::bigint AS "pendingBankAmount",
         count(*) FILTER (WHERE status = 'PENDING' AND method = 'BANK_TRANSFER')::int AS "pendingBankCount",
-        coalesce(sum(amount) FILTER (WHERE status = 'PENDING' AND method = 'QPAY'), 0)::int AS "pendingQpayAmount",
+        coalesce(sum(amount) FILTER (WHERE status = 'PENDING' AND method = 'QPAY'), 0)::bigint AS "pendingQpayAmount",
         count(*) FILTER (WHERE status = 'PENDING' AND method = 'QPAY')::int AS "pendingQpayCount"
       FROM "ItgelSettlementPayment"
       WHERE TRUE ${ownerSql}

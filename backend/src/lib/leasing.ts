@@ -1,5 +1,6 @@
 import { badRequest, forbidden } from './errors.js';
 import { addDays, diffUbDays, startOfUbDay, ubDateString } from './date.js';
+import { moneyRatio } from './money.js';
 
 /**
  * Лизингийн төлбөр — үнийн шатлалаар шимтгэл + үндсэн 100%.
@@ -121,7 +122,7 @@ export function leasingFeeSnapshot(input: {
 }): number {
   if (!input.isLeasing) return 0;
   if (input.previousSubtotal > 0 && input.previousFee > 0) {
-    return Math.round(input.nextSubtotal * (input.previousFee / input.previousSubtotal));
+    return moneyRatio(input.nextSubtotal, input.previousFee, input.previousSubtotal, true);
   }
   return input.fallbackFee;
 }
@@ -198,7 +199,7 @@ export function leasingFeeOf(
 ): number {
   if (!Number.isFinite(subtotal) || subtotal <= 0) return 0;
   const rate = leasingRatePercent(subtotal, tiers);
-  return Math.round(subtotal * (rate / 100));
+  return moneyRatio(subtotal, Math.round(rate * 10), 1_000, true);
 }
 
 /** Төлөөгүй захиалгын QPay ↔ лизинг шилжилт. */

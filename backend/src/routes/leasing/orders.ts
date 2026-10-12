@@ -501,7 +501,7 @@ leasingOrdersRouter.patch(
       }
     }
 
-    await changeOrderStatus(orderId, status, { actor: actorOf(req), reason });
+    await changeOrderStatus(orderId, status, { actor: actorOf(req), reason, requirePayment: !force });
     res.json({ data: await scopedLeasingOrderResponse(req.auth!, orderId) });
   }),
 );
@@ -554,6 +554,7 @@ leasingOrdersRouter.post(
         paidAmount: true,
         refundedAmount: true,
         leasingFee: true,
+        shopPaidAmount: true,
         isLeasing: true,
         payeeKind: true,
         items: {
@@ -580,7 +581,7 @@ leasingOrdersRouter.post(
             throw conflict(`Төлбөр дутуу: ${confirmThreshold(totals) - totals.netPaid}₮ ороогүй байна.`);
           }
         }
-        await changeOrderStatus(id, status, { actor, reason });
+        await changeOrderStatus(id, status, { actor, reason, requirePayment: !force });
         succeeded.push(id);
       } catch (error) {
         failed.push({

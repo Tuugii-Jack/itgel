@@ -3,6 +3,7 @@ import { prisma } from '../prisma.js';
 import { itemSelections } from '../lib/options.js';
 import { skuKeyOf } from '../lib/skuStock.js';
 import { recalcOrderTotals } from './money.js';
+import { lockOrder } from '../lib/orderLock.js';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -39,6 +40,10 @@ export function lineCargoFee(
  * Ирж авах, хүргэлт — аль ч аргаар карго тооцогдоно.
  */
 export async function syncOrderCargoFee(tx: Db, orderId: string): Promise<number> {
+  if (tx === prisma) {
+    return prisma.$transaction((lockedTx) => syncOrderCargoFee(lockedTx, orderId));
+  }
+  await lockOrder(tx, orderId);
   const order = await tx.order.findUnique({
     where: { id: orderId },
     select: { id: true, status: true, cargoFee: true },
@@ -95,7 +100,7 @@ export async function syncCargoFeesForRounds(tx: Db, roundIds: string[]): Promis
     },
     select: { orderId: true },
   });
-  const orderIds = [...new Set(items.map((i) => i.orderId))];
+  const orderIds = [...new Set(items.map((i) => i.orderId))].sort();
   for (const orderId of orderIds) {
     await syncOrderCargoFee(tx, orderId);
   }

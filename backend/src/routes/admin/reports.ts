@@ -114,7 +114,7 @@ adminReportsRouter.get(
 
     const sold = series.reduce((sum, s) => sum + s.sold, 0);
     const returned = series.reduce((sum, s) => sum + s.returned, 0);
-    const orders = series.reduce((sum, s) => sum + s.orders, 0);
+    const orders = new Set([...buckets.values()].flatMap((bucket) => [...bucket.orders])).size;
 
     res.json({
       data: {
