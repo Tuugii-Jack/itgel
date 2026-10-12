@@ -197,7 +197,7 @@ export function OrderDetail({
             {lockShopPayments
               ? " Лизингээр авсан тул төлбөрийг лизингийн админ бүртгэнэ."
               : canWritePayments
-              ? " Дансаа шалгаад доор төлбөрийг бүртгэнэ үү — мэдэгдэл нь төлбөр орсны баталгаа биш."
+              ? " QPay төлбөрийг шалгана уу — энэ мэдэгдэл нь төлбөр орсны баталгаа биш."
               : " Мэдэгдэл нь төлбөр орсны баталгаа биш."}
           </div>
         </Card>
@@ -222,8 +222,8 @@ export function OrderDetail({
         <Card className="mb-4 border-warn bg-warn-bg p-4">
           <div className="text-[14px] leading-[1.5] text-warn">
             <span className="tnum font-medium">{money(shortfall.missing)}</span> ороогүй
-            байна. Мөнгийг өөр сувгаар авсан бол доорх төлбөрийн хэсэгт бүртгэнэ үү.
-            Бүртгэхгүйгээр үргэлжлүүлбэл захиалга дутуу төлбөртэй хэвээр үлдэнэ.
+            байна. QPay төлбөрийг шалгана уу.
+            Төлөгдөөгүй үед үргэлжлүүлбэл захиалга дутуу төлбөртэй хэвээр үлдэнэ.
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
@@ -370,7 +370,7 @@ export function OrderDetail({
               }
             />
           )}
-          {view === "payment" && totals.dueAmount <= 0 && <Card className="border-ok bg-ok-bg p-4 text-[14px] text-ok">Төлбөр бүрэн орсон.<Button full variant="outline" className="mt-3" onClick={() => setSection("goods")}>Бараа ба олголт харах</Button></Card>}
+          {view === "payment" && totals.dueAmount <= 0 && <Card className="border-ok bg-ok-bg p-4 text-[14px] text-ok">{order.debtClosedAt ? "Үлдэгдэл өр хаагдсан. Хаасан дүн нь төлсөн мөнгө биш." : "Төлбөр бүрэн орсон."}<Button full variant="outline" className="mt-3" onClick={() => setSection("goods")}>Бараа ба олголт харах</Button></Card>}
         </div>
       </div>
 

@@ -1,10 +1,11 @@
-/** Explicitly authorized production probe: create unpaid QA invoices, verify, cancel and clean up only QA records. */
+/** Authorized current-database probe: create unpaid QA invoices, verify, cancel and clean up only QA records. */
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../src/prisma.js';
 import { signAdminToken, signCustomerToken } from '../src/lib/jwt.js';
 
 if (process.env.ITGEL_QPAY_LIFECYCLE_PROBE !== 'YES') throw new Error('Explicit QA opt-in is required.');
-const api = 'https://api.itgelshop.mn/api';
+const api = process.env.ITGEL_QPAY_LIFECYCLE_API ?? 'https://api.itgelshop.mn/api';
+if (api !== 'https://api.itgelshop.mn/api' && api !== 'http://127.0.0.1:4018/api') throw new Error('Unexpected QA API host.');
 const tag = `QPAY-QA-${randomUUID()}`;
 const ids = { admins: [] as string[], orders: [] as string[], products: [] as string[], rounds: [] as string[], invoices: [] as string[], settlementPayments: [] as string[], customer: '' };
 const steps: { step: string; ok: boolean; bankLinks?: number; amount?: number }[] = [];
@@ -20,14 +21,15 @@ async function request<T>(token: string, path: string, method = 'GET', body?: un
 async function main() {
   const category = await prisma.category.findFirst({ select: { id: true } });
   if (!category) throw new Error('No category for the hidden QA fixture.');
-  for (const role of ['ADMIN', 'LEASING'] as const) {
-    const admin = await prisma.adminUser.create({ data: { email: `${tag}-${role}@itgel.test`, name: `${tag} ${role}`, passwordHash: 'qa-no-password-login', role } });
+  for (const role of ['ADMIN', 'LEASING', 'OWNER'] as const) {
+    const admin = await prisma.adminUser.create({ data: { email: `${tag}-${role}@itgel.test`, name: `${tag} ${role}`, passwordHash: 'qa-no-password-login', role, phoneVerifiedAt: new Date() } });
     ids.admins.push(admin.id);
   }
-  const [admin, operator] = await prisma.adminUser.findMany({ where: { id: { in: ids.admins } }, orderBy: { role: 'asc' } });
-  if (!admin || !operator || admin.role !== 'ADMIN' || operator.role !== 'LEASING') throw new Error('QA roles missing.');
+  const [admin, operator, owner] = await prisma.adminUser.findMany({ where: { id: { in: ids.admins } }, orderBy: { role: 'asc' } });
+  if (!admin || !operator || !owner || admin.role !== 'ADMIN' || operator.role !== 'LEASING' || owner.role !== 'OWNER') throw new Error('QA roles missing.');
   const adminToken = signAdminToken({ sub: admin.id, email: admin.email, role: admin.role, tv: admin.tokenVersion });
   const operatorToken = signAdminToken({ sub: operator.id, email: operator.email, role: operator.role, tv: operator.tokenVersion });
+  const ownerToken = signAdminToken({ sub: owner.id, email: owner.email, role: owner.role, tv: owner.tokenVersion });
   await request(adminToken, '/admin/auth/me');
   await request(operatorToken, '/leasing/finance/itgel/payment-options');
   const customer = await prisma.customer.create({ data: { name: tag } }); ids.customer = customer.id;
@@ -46,7 +48,8 @@ async function main() {
     if (!invoice.qrText || !invoice.urls?.length || invoice.amount !== (leasing ? 100 : 1000)) throw new Error('Incomplete customer QR or wrong amount.');
     const status = await request<{ paidAmount: number }>(customerToken, `/orders/${order.code}/qpay/verify`, 'POST', {});
     if (status.paidAmount !== 0) { paid = true; throw new Error('QA invoice received money; preserve records for reconciliation.'); }
-    await request(leasing ? operatorToken : adminToken, `/${leasing ? 'leasing' : 'admin'}/orders/${order.id}/qpay/invoice`, 'DELETE');
+    // A fee-unpaid loan is deliberately invisible to leasing staff; the temporary owner can cancel its QA invoice.
+    await request(leasing ? ownerToken : adminToken, `/admin/orders/${order.id}/qpay/invoice`, 'DELETE');
     steps.push({ step: leasing ? 'customer-leasing-qpay-create-verify-cancel' : 'customer-itgel-qpay-create-verify-cancel', ok: true, bankLinks: invoice.urls.length, amount: invoice.amount });
     if (leasing) {
       const item = order.items[0]!;
