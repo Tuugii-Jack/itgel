@@ -91,6 +91,16 @@ test("uncertain QPay stays pending and is not treated as paid or cancelled", () 
   assert.equal(pending?.invoice ?? null, null);
 });
 
+test("owner selection cannot restore another owner's saved QR", () => {
+  const rows = [
+    { id: "qa", ownerAdminId: "a", method: "QPAY", status: "PENDING" },
+    { id: "qb", ownerAdminId: "b", method: "QPAY", status: "PENDING" },
+  ];
+  assert.equal(restoredQpay(rows, null), null);
+  assert.equal(restoredQpay(rows, "b")?.id, "qb");
+  assert.equal(restoredQpay(rows, "missing"), null);
+});
+
 test("switching user starts from empty pay UI state", () => {
   const cleared = emptyPayUiState();
   assert.equal(cleared.selected.size, 0);

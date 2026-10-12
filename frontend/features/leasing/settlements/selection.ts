@@ -11,6 +11,7 @@ export type SelectableSettlement = {
 
 export type PendingQpay = {
   id: string;
+  ownerAdminId?: string;
   method: string;
   status: string;
   invoice?: SettlementInvoice | null;
@@ -71,8 +72,9 @@ export function addSettlementSelection(
   return next;
 }
 
-export function restoredQpay(pending: PendingQpay[]): PendingQpay | null {
-  return pending.find((row) => row.method === "QPAY" && row.status === "PENDING") ?? null;
+export function restoredQpay(pending: PendingQpay[], ownerAdminId?: string | null): PendingQpay | null {
+  if (ownerAdminId === null) return null;
+  return pending.find((row) => row.method === "QPAY" && row.status === "PENDING" && (!ownerAdminId || row.ownerAdminId === ownerAdminId)) ?? null;
 }
 
 export function payRequestFromPreview(preview: LivePreview) {

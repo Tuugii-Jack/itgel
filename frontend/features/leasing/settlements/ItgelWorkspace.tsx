@@ -240,7 +240,7 @@ export function ItgelWorkspace({
     return () => { active = false; };
   }, [canPay]);
 
-  const restoredPendingQpay = restoredQpay(pending);
+  const restoredPendingQpay = restoredQpay(pending, ownerRequired ? ownerQuery ?? null : undefined);
   const activePaymentId = paymentId ?? restoredPendingQpay?.id ?? null;
   const activeInvoice = invoice ?? restoredPendingQpay?.invoice ?? null;
   const activeInvoicePending = Boolean(
@@ -445,7 +445,7 @@ export function ItgelWorkspace({
   };
 
   const verify = async (id: string) => {
-    if (!canPay || busy) return;
+    if (!canSelectPay || busy) return;
     setBusy(true);
     try {
       const st = await leasingApi.itgelVerify(id);
@@ -464,7 +464,7 @@ export function ItgelWorkspace({
   };
 
   const resume = async (id: string) => {
-    if (!canPay || busy) return;
+    if (!canSelectPay || busy) return;
     setBusy(true);
     try {
       const result = await leasingApi.itgelResume(id);
@@ -484,7 +484,7 @@ export function ItgelWorkspace({
   };
 
   const cancelInvoice = async (id: string) => {
-    if (!canPay || busy) return;
+    if (!canSelectPay || busy) return;
     setBusy(true);
     try {
       await leasingApi.itgelCancel(id);
@@ -667,7 +667,7 @@ export function ItgelWorkspace({
         </div>
       )}
 
-      {canPay && (invoiceCreating || activeInvoice || activeInvoicePending) && (
+      {canSelectPay && (invoiceCreating || activeInvoice || activeInvoicePending) && (
         <Card className="mb-4 flex flex-col items-center gap-3 p-4">
           <div className="text-[15px] font-medium">
             {invoiceCreating
@@ -814,7 +814,7 @@ export function ItgelWorkspace({
                               {line.lockedReason && (
                                 <div className="mt-1 flex flex-col gap-2 sm:flex-row">
                                   <span className="text-[12px] text-warn">{line.lockedReason}</span>
-                                  {line.lockPaymentId && canPay && (
+                                  {line.lockPaymentId && canSelectPay && (!ownerRequired || line.ownerAdminId === ownerQuery) && (
                                     <div className="flex flex-wrap gap-2">
                                       <Button size="sm" variant="outline" onClick={() => void resume(line.lockPaymentId!)}>
                                         Үргэлжлүүлэх
@@ -867,7 +867,7 @@ export function ItgelWorkspace({
                       </div>
                     </div>
                     <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                      {p.method === "QPAY" && canPay && (
+                      {p.method === "QPAY" && canSelectPay && (!ownerRequired || p.ownerAdminId === ownerQuery) && (
                         <>
                           <Button size="sm" variant="outline" loading={busy} onClick={() => void resume(p.id)}>
                             Үргэлжлүүлэх
