@@ -14,7 +14,8 @@ async function fixture() {
 async function submit(body: unknown, role: 'ADMIN' | 'STAFF' = 'ADMIN') {
   const admin = await seedAdmin(role);
   const response = await fetch(server.url + '/api/admin/orders', { method: 'POST', headers: admin.headers, body: JSON.stringify(body) });
-  return { status: response.status, json: await response.json() };
+  const json = await response.json() as { data: { id: string; customer: { id: string } } };
+  return { status: response.status, json };
 }
 describe('админы хялбар захиалга үүсгэх', () => {
   it('утас дангаар шинэ хэрэглэгч үүсгэж, анхдагчаар орлого бүртгэхгүй', async () => {
@@ -47,7 +48,7 @@ describe('админы хялбар захиалга үүсгэх', () => {
     expect(result.status).toBe(201);
     const order = await prisma.order.findUniqueOrThrow({ where: { id: result.json.data.id }, include: { payments: true } });
     expect(order.paidAmount).toBe(order.subtotal); expect(order.payments).toHaveLength(1);
-    expect(order.payments[0].method).toBe('CASH');
+    expect(order.payments[0]!.method).toBe('CASH');
   });
   it('туслах админд үүсгэх эрх олгохгүй, холбоо барихгүй хүсэлтийг хориглоно', async () => {
     const seed = await fixture();
