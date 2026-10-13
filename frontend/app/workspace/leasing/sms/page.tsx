@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { sendSmsChunks, smsSubsetToken, SmsBatchError } from "@/lib/smsBatch";
 import { WorkspaceDialog } from "@/components/admin/WorkspaceDialog";
 import { SearchField } from "@/components/admin/SearchField";
 import type { AdminCustomer } from "@/lib/types";
@@ -38,6 +39,7 @@ export default function LeasingSmsPage() {
   const [rawPhones, setRawPhones] = useState("");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sendProgress, setSendProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [customerQuery, setCustomerQuery] = useState("");
@@ -100,7 +102,15 @@ export default function LeasingSmsPage() {
     setBusy(true);
     setError(null);
     try {
-      const result = await leasingApi.sendSms(draft.phones, draft.text, draft.previewToken, crypto.randomUUID());
+      const sendKey = crypto.randomUUID();
+      const batches = await sendSmsChunks(draft.phones, async (chunk) => leasingApi.sendSms(
+        chunk, draft.text, await smsSubsetToken(chunk.map((phone) => ({ id: phone, text: draft.text })), "leasing"), sendKey,
+      ), (completed, total) => setSendProgress({ completed, total }));
+      const result = batches.reduce((total, row) => ({
+        sent: total.sent + row.sent, pending: (total.pending ?? 0) + (row.pending ?? 0),
+        delivered: (total.delivered ?? 0) + (row.delivered ?? 0), unknown: (total.unknown ?? 0) + (row.unknown ?? 0),
+        failed: [...total.failed, ...row.failed],
+      }), { sent: 0, pending: 0, delivered: 0, unknown: 0, failed: [] as { phone: string; error: string }[] });
       const fail = result.failed.length;
       if (fail > 0) {
         setError(
@@ -125,7 +135,7 @@ export default function LeasingSmsPage() {
         setDraft(null);
       }
     } catch (e) {
-      const message = e instanceof ApiError ? e.message : "Илгээж чадсангүй.";
+      const message = e instanceof ApiError || e instanceof SmsBatchError ? e.message : "Илгээж чадсангүй.";
       setError(message);
       toast.error(message);
     } finally {
@@ -201,6 +211,7 @@ export default function LeasingSmsPage() {
         ) : (
           <div className="flex flex-col gap-3 rounded-[10px] border border-line bg-surface p-3">
             <div className="text-[14px] font-medium">Илгээхээс өмнө шалгах</div>
+            {busy && <div role="status" className="text-[13px] text-ink-2">SMS илгээж байна: {sendProgress.completed} / {sendProgress.total}</div>}
             <div className="text-[13px] text-ink-2">
               Суваг: лизинг{draft.sender ? ` · ${draft.sender}` : ""}
             </div>

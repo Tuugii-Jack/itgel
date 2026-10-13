@@ -58,6 +58,7 @@ export function OrderDetail({
     order,
     ledger,
     qpay,
+    qpayLoading,
     loading,
     busyKey,
     busy,
@@ -280,6 +281,7 @@ export function OrderDetail({
           <PaymentLedger payments={ledger.payments} />
           </div>
           <div hidden={view !== "payment"}>
+          {qpayLoading && <Card className="p-4 text-[13px] text-muted">QPay мэдээллийг ачаалж байна…</Card>}
           <OrderQpayCard
             orderId={order.id}
             qpay={qpay}

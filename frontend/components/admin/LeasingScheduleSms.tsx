@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { sendSmsChunks, smsSubsetToken, SmsBatchError } from "@/lib/smsBatch";
 import { deferEffect } from "@/lib/deferEffect";
 import { useOnKeyChange } from "@/lib/syncKey";
 import { Button, Card, ErrorNote, Skeleton, Textarea } from "@/components/ui";
@@ -114,6 +115,7 @@ export function LeasingScheduleSms({
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [smsTick, setSmsTick] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [sendProgress, setSendProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [template, setTemplate] = useState(() => defaultLeasingSmsTemplate(kind));
   const [savedTemplate, setSavedTemplate] = useState(() => defaultLeasingSmsTemplate(kind));
@@ -238,11 +240,14 @@ export function LeasingScheduleSms({
     setBusy(true);
     setError(null);
     try {
-      const result = await leasingApi.sendScheduleSms(
+      const sendKey = crypto.randomUUID();
+      const batches = await sendSmsChunks(confirmDraft.recipients, async (chunk) => {
+        const chunkIds = chunk.map((row) => row.orderId);
+        return leasingApi.sendScheduleSms(
         kind,
-        orderIds,
+        chunkIds,
         sendTemplate,
-        orderIds
+        chunkIds
           .map((id) => {
             const order = sendable.find((row) => row.id === id);
             const text = overrides[id];
@@ -252,9 +257,15 @@ export function LeasingScheduleSms({
             return { orderId: id, text };
           })
           .filter((row): row is { orderId: string; text: string } => row !== null),
-        confirmDraft.previewToken,
-        crypto.randomUUID(),
-      );
+        await smsSubsetToken(chunk.map((row) => ({ id: row.orderId, text: row.text })), "leasing", "order"),
+        sendKey,
+        );
+      }, (completed, total) => setSendProgress({ completed, total }));
+      const result = batches.reduce((total, row) => ({
+        sent: total.sent + row.sent, skipped: total.skipped + row.skipped,
+        pending: (total.pending ?? 0) + (row.pending ?? 0), delivered: (total.delivered ?? 0) + (row.delivered ?? 0),
+        unknown: (total.unknown ?? 0) + (row.unknown ?? 0), failed: [...total.failed, ...row.failed],
+      }), { sent: 0, skipped: 0, pending: 0, delivered: 0, unknown: 0, failed: [] as { orderId: string; code: string; error: string }[] });
       const fail = result.failed.length;
       if (fail > 0) {
         setError(
@@ -296,7 +307,7 @@ export function LeasingScheduleSms({
         return next;
       });
     } catch (e) {
-      const message = e instanceof ApiError ? e.message : "SMS илгээж чадсангүй.";
+      const message = e instanceof ApiError || e instanceof SmsBatchError ? e.message : "SMS илгээж чадсангүй.";
       setError(message);
       toast.error(message);
     } finally {
@@ -456,6 +467,7 @@ export function LeasingScheduleSms({
         {confirming && confirmDraft && (
           <div className="mt-3 rounded-[10px] border border-line bg-surface p-3">
             <div className="text-[14px] font-medium">Илгээхээс өмнө шалгах</div>
+            {busy && <div role="status" className="mt-2 text-[13px] text-ink-2">SMS илгээж байна: {sendProgress.completed} / {sendProgress.total}</div>}
             <p className="mt-1 mb-2 text-[12px] text-muted">
               Суваг: лизинг{confirmDraft.sender ? ` · ${confirmDraft.sender}` : ""}.
               Засвар зөвхөн энэ илгээлтэд.

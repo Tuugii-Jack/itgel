@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { sendSmsChunks, smsSubsetToken, SmsBatchError } from "@/lib/smsBatch";
 import { Button, Card, Empty, ErrorNote, Field, Textarea } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
 import { phoneLabel } from "@/lib/format";
@@ -17,6 +18,7 @@ export function ArrivalSmsPanel({
 }) {
   const toast = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [sendProgress, setSendProgress] = useState({ completed: 0, total: 0 });
   const [preview, setPreview] = useState<ArrivalSmsPreview | null>(null);
   const [commonText, setCommonText] = useState("");
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -56,13 +58,25 @@ export function ArrivalSmsPanel({
     try {
       const live = await refreshPreview(commonText.trim() ? { commonText } : undefined);
       if (!live.previewToken) throw new Error("Preview token алга.");
-      const result = await adminApi.sendBatchArrivalSms(batch.id, {
+      const sendKey = crypto.randomUUID();
+      const sendSingle = () => adminApi.sendBatchArrivalSms(batch.id, {
         orderId,
         resend: resend || undefined,
         previewToken: live.previewToken,
         commonText: commonText.trim() || undefined,
-        sendKey: crypto.randomUUID(),
+        sendKey,
       });
+      const batches = orderId ? [await sendSingle()] : await sendSmsChunks(live.recipients, async (chunk) => adminApi.sendBatchArrivalSms(batch.id, {
+        orderIds: chunk.map((row) => row.orderId),
+        previewToken: await smsSubsetToken(chunk.map((row) => ({ id: row.orderId, text: row.text })), "shop", "order"),
+        commonText: commonText.trim() || undefined,
+        sendKey,
+      }), (completed, total) => setSendProgress({ completed, total }));
+      const result = batches.reduce((total, row) => ({
+        sent: total.sent + row.sent, skipped: total.skipped + row.skipped,
+        pending: (total.pending ?? 0) + (row.pending ?? 0), delivered: (total.delivered ?? 0) + (row.delivered ?? 0),
+        unknown: (total.unknown ?? 0) + (row.unknown ?? 0), failed: [...total.failed, ...row.failed],
+      }), { sent: 0, skipped: 0, pending: 0, delivered: 0, unknown: 0, failed: [] as { orderId: string; code: string; error: string }[] });
       const fail = result.failed.length;
       if (fail > 0 && result.sent === 0) {
         toast.error(result.failed[0]?.error ?? "Хүргэлт амжилтгүй.");
@@ -81,7 +95,7 @@ export function ArrivalSmsPanel({
       setComposeFor(null);
       onSent();
     } catch (e) {
-      toast.error(e instanceof ApiError ? e.message : "SMS илгээж чадсангүй.");
+      toast.error(e instanceof ApiError || e instanceof SmsBatchError ? e.message : "SMS илгээж чадсангүй.");
     } finally {
       setBusyId(null);
     }
@@ -113,6 +127,7 @@ export function ArrivalSmsPanel({
       </div>
 
       {previewError && <div className="mb-3 text-[13px] text-warn">{previewError}</div>}
+      {busyId === "all" && <div role="status" className="mb-3 text-[13px] text-ink-2">SMS илгээж байна: {sendProgress.completed} / {sendProgress.total}</div>}
 
       {composeFor && (
         <div className="mb-3 rounded-[10px] border border-line bg-surface p-3">

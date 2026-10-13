@@ -1,7 +1,7 @@
 "use client";
 
 import { deferEffect } from "@/lib/deferEffect";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Metric, PageHead, Select, Table, Td, Th } from "@/components/admin/shared";
 import { Button, Card, Empty, ErrorNote, Input, Skeleton } from "@/components/ui";
 import { ProductForm } from "@/components/admin/ProductForm";
@@ -16,7 +16,7 @@ import type { AdminCategory, AdminProduct } from "@/lib/types";
  * Бараа = каталогийн загвар (нэр, зураг, хэмжээ).
  * Зарах гаргалт нь «Урьдчилсан захиалга үүсгэх» / «Бэлэн гаргах»-аар тусад нь.
  */
-const PRODUCTS_PAGE_SIZE = 100;
+const PRODUCTS_PAGE_SIZE = 30;
 
 export default function ProductsPage() {
   const toast = useToast();
@@ -36,6 +36,7 @@ export default function ProductsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [moreLoading, setMoreLoading] = useState(false);
+  const loadGeneration = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const busy = busyAction !== null;
 
@@ -51,15 +52,19 @@ export default function ProductsPage() {
         q: query || undefined,
         page,
         pageSize: PRODUCTS_PAGE_SIZE,
+        view: "templates",
       }),
     [category, query],
   );
 
   const load = useCallback(async () => {
+    const generation = ++loadGeneration.current;
     setError(null);
     setRefreshing(true);
+    setMoreLoading(false);
     try {
       const [list, cats] = await Promise.all([fetchProducts(1), adminApi.categories()]);
+      if (generation !== loadGeneration.current) return;
       setRows(list.data);
       setPageMeta({
         page: list.meta?.page ?? 1,
@@ -69,29 +74,40 @@ export default function ProductsPage() {
       setCategories(cats);
       setSelected(new Set());
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (generation === loadGeneration.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [fetchProducts]);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const requests = loadGeneration;
+    const cancel = deferEffect(() => { void load(); });
+    return () => { cancel(); requests.current++; };
+  }, [load]);
 
   const loadMore = async () => {
+    if (moreLoading || refreshing) return;
+    const generation = loadGeneration.current;
     setMoreLoading(true);
     try {
       const list = await fetchProducts(pageMeta.page + 1);
-      setRows((prev) => [...prev, ...list.data]);
+      if (generation !== loadGeneration.current) return;
+      setRows((prev) => [...prev, ...list.data.filter((row) => !prev.some((existing) => existing.id === row.id))]);
       setPageMeta({
         page: list.meta?.page ?? pageMeta.page + 1,
         pages: list.meta?.pages ?? pageMeta.pages,
         total: list.meta?.total ?? pageMeta.total,
       });
     } catch (e) {
+      if (generation !== loadGeneration.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setMoreLoading(false);
+      if (generation === loadGeneration.current) setMoreLoading(false);
     }
   };
 

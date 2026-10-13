@@ -27,7 +27,7 @@ export async function notifyOrderConfirmed(order: Order): Promise<boolean> {
 
 /** Захиалга ирснийг мэдэгдэх SMS. Админ товчоор л илгээнэ. Хүлээн авсан үед arrivalNotifiedAt тавина. */
 export async function notifyArrival(
-  order: Order & { items?: ArrivalSmsItem[] },
+  order: Order & { items?: ArrivalSmsItem[]; customer?: { phone: string | null } },
   opts: { resend?: boolean; text?: string; confirmKey?: string } = {},
 ): Promise<{
   ok: boolean;
@@ -64,7 +64,7 @@ export async function notifyArrival(
     return { ok: true, skipped: true };
   }
 
-  const customer = await prisma.customer.findUnique({ where: { id: order.customerId } });
+  const customer = order.customer ?? await prisma.customer.findUnique({ where: { id: order.customerId }, select: { phone: true } });
   if (!customer?.phone) return { ok: false, error: 'Утасны дугаар алга.' };
 
   const text = opts.text ? assertSmsText(opts.text) : smsTemplates.arrived(order.code);

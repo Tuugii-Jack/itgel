@@ -9,9 +9,11 @@ import { env } from '../../env.js';
 import { assertSmsText, smsPreviewToken, smsSegmentOf } from '../../lib/smsCompose.js';
 import {
   parseSmsPhones,
+  smsProviderOf,
   smsStatusLabel,
 } from '../../services/sms.js';
 import { dispatchSms } from '../../services/smsDispatch.js';
+import { mapConcurrent } from '../../lib/mapConcurrent.js';
 
 export const leasingSmsRouter = Router();
 
@@ -96,15 +98,19 @@ leasingSmsRouter.post(
     let delivered = 0;
     let unknown = 0;
 
-    for (const phone of parsed.phones) {
-      const hit = smsLimiter.hit(actor);
-      if (!hit.allowed) {
-        failed.push({
-          phone,
-          error: 'Хэт олон SMS илгээлээ. 1 цагийн дараа оролдоно уу.',
-        });
-        continue;
-      }
+    const baseProvider = smsProviderOf('leasing');
+    const provider = {
+      name: baseProvider.name,
+      tracksDelivery: baseProvider.tracksDelivery,
+      send: async (message: { phone: string; text: string }) => {
+        const hit = smsLimiter.hit(actor);
+        if (!hit.allowed) {
+          return { accepted: false as const, error: 'Хэт олон SMS илгээлээ. 1 цагийн дараа оролдоно уу.', status: 'failed' as const };
+        }
+        return baseProvider.send(message);
+      },
+    };
+    const results = await mapConcurrent(parsed.phones, 4, async (phone) => {
       const { send } = await dispatchSms({
         channel: 'leasing',
         purpose: 'leasing_custom',
@@ -113,7 +119,17 @@ leasingSmsRouter.post(
         relatedType: 'custom',
         relatedId: phone,
         confirmKey: body.sendKey,
+        provider,
       });
+      return send;
+    });
+    for (const [index, result] of results.entries()) {
+      const phone = parsed.phones[index]!;
+      if (result.status === 'rejected') {
+        failed.push({ phone, error: 'SMS-ийн хариуг баталгаажуулж чадсангүй. Илгээлтийн төлөвийг шалгана уу.' });
+        continue;
+      }
+      const send = result.value;
       if (!send.accepted) {
         failed.push({ phone, error: send.error ?? 'SMS илгээгдсэнгүй.' });
         continue;

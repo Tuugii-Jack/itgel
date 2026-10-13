@@ -302,7 +302,7 @@ export class HttpSmsProvider implements SmsProvider {
     const to = smsPhoneOf(message.phone);
     if (!to) return smsResult({ accepted: false, status: 'failed', error: 'Утасны дугаар буруу.' });
     try {
-      const res = await fetchWithTimeout(this.url, {
+      const { res, body } = await fetchWithTimeout(this.url, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -314,7 +314,7 @@ export class HttpSmsProvider implements SmsProvider {
         return smsResult({
           accepted: false,
           status: 'failed',
-          error: await smsHttpError(res),
+          error: smsErrorFromBody(res.status, body),
         });
       }
       return smsResult({ accepted: true, status: 'queued' });
@@ -356,7 +356,7 @@ export class CallProSmsProvider implements SmsProvider {
 
   private async postSend(from: string, to: string, text: string): Promise<SmsSendResult> {
     try {
-      const res = await fetchWithTimeout(callProSendUrl(this.baseUrl), {
+      const { res, body } = await fetchWithTimeout(callProSendUrl(this.baseUrl), {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -364,7 +364,6 @@ export class CallProSmsProvider implements SmsProvider {
         },
         body: JSON.stringify({ from, to, text }),
       });
-      const body = await readJson(res);
       return callProSendOutcome(res.status, body);
     } catch (error) {
       return smsResult({
@@ -380,11 +379,10 @@ export class CallProSmsProvider implements SmsProvider {
     const id = messageId.trim();
     if (!id) return { status: 'unknown', error: 'message_id алга.' };
     try {
-      const res = await fetchWithTimeout(callProDetailUrl(this.baseUrl, id), {
+      const { res, body } = await fetchWithTimeout(callProDetailUrl(this.baseUrl, id), {
         method: 'GET',
         headers: { 'x-api-key': this.apiKey },
       });
-      const body = await readJson(res);
       if (res.status === 401 || res.status === 403) {
         return { status: 'unknown', error: smsErrorFromBody(res.status, body) };
       }
@@ -401,11 +399,14 @@ export class CallProSmsProvider implements SmsProvider {
   }
 }
 
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+async function fetchWithTimeout(url: string, init: RequestInit): Promise<{ res: Response; body: Record<string, unknown> }> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), SMS_HTTP_TIMEOUT_MS);
   try {
-    return await fetch(url, { ...init, signal: ctrl.signal });
+    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    // Keep the deadline active through the body; headers alone are not a complete response.
+    const body = await readJson(res);
+    return { res, body };
   } finally {
     clearTimeout(timer);
   }
@@ -424,10 +425,6 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
   } catch {
     return { error: text.slice(0, 200) };
   }
-}
-
-async function smsHttpError(res: Response): Promise<string> {
-  return smsErrorFromBody(res.status, await readJson(res));
 }
 
 function smsErrorFromBody(status: number, body: Record<string, unknown>): string {

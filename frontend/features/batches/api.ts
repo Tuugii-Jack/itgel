@@ -74,6 +74,7 @@ export const adminBatchesApi = {
     batchId: string,
     body?: {
       orderId?: string;
+      orderIds?: string[];
       resend?: boolean;
       previewToken?: string;
       sendKey: string;

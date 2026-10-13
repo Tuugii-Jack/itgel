@@ -70,6 +70,24 @@ async function liveAdmin(payload: AdminToken): Promise<AdminToken | null> {
 
 type AuthKind = 'customer' | 'admin';
 
+// A request can pass several role guards. Validate each credential once within
+// that request, while every new HTTP request still checks live role/revocation.
+const requestCredentials = new WeakMap<Request, Map<string, Promise<TokenPayload | null>>>();
+
+function requestPayload(req: Request, token: string): Promise<TokenPayload | null> {
+  let credentials = requestCredentials.get(req);
+  if (!credentials) {
+    credentials = new Map();
+    requestCredentials.set(req, credentials);
+  }
+  let payload = credentials.get(token);
+  if (!payload) {
+    payload = payloadFromToken(token);
+    credentials.set(token, payload);
+  }
+  return payload;
+}
+
 async function payloadFromToken(token: string): Promise<TokenPayload | null> {
   const own = verifyToken(token);
   if (own) {
@@ -99,7 +117,7 @@ async function authenticate(req: Request, kind?: AuthKind): Promise<TokenPayload
   });
 
   for (const token of tokens) {
-    const payload = await payloadFromToken(token);
+    const payload = await requestPayload(req, token);
     if (!payload) continue;
     if (kind === 'admin' && !isAdminRole(payload.role)) continue;
     if (kind === 'customer' && payload.role !== 'CUSTOMER') continue;

@@ -46,16 +46,17 @@ export default function LeasingReadyPage() {
     const generation = ++loadGeneration.current;
     setLoading(true);
     setError(null);
+    void leasingApi.readyStock().then((value) => {
+      if (generation === loadGeneration.current) setStock(value);
+    }).catch(() => undefined);
     try {
-      const [list, cats, stockSummary] = await Promise.all([
-        leasingApi.products({ pageSize: 100, page, q: query || undefined }),
+      const [list, cats] = await Promise.all([
+        leasingApi.products({ pageSize: 30, page, q: query || undefined }),
         leasingApi.categories(),
-        leasingApi.readyStock().catch(() => null),
       ]);
       if (generation !== loadGeneration.current) return;
       setProducts(list.data); setPages(list.meta?.pages ?? 1);
       setCategories(cats);
-      if (stockSummary) setStock(stockSummary);
     } catch (e) {
       if (generation !== loadGeneration.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");

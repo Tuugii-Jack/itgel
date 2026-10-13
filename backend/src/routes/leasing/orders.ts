@@ -40,6 +40,7 @@ import { syncOrderStorageFee } from '../../services/storageFee.js';
 import { getSettingsCached, leasingPayGapsOf } from '../../services/settings.js';
 import { stripSmsUrls } from '../../services/sms.js';
 import { dispatchSms } from '../../services/smsDispatch.js';
+import { mapConcurrent } from '../../lib/mapConcurrent.js';
 import { env } from '../../env.js';
 import { smsPreviewToken, smsSegmentOf } from '../../lib/smsCompose.js';
 import {
@@ -769,7 +770,7 @@ leasingOrdersRouter.post(
     let delivered = 0;
     let unknown = 0;
 
-    for (const row of draft.recipients) {
+    const results = await mapConcurrent(draft.recipients, 4, async (row) => {
       const { send } = await dispatchSms({
         channel: 'leasing',
         purpose: 'leasing_schedule',
@@ -779,6 +780,15 @@ leasingOrdersRouter.post(
         relatedId: row.orderId,
         confirmKey: body.sendKey,
       });
+      return send;
+    });
+    for (const [index, result] of results.entries()) {
+      const row = draft.recipients[index]!;
+      if (result.status === 'rejected') {
+        failed.push({ orderId: row.orderId, code: row.code, error: 'SMS-ийн хариуг баталгаажуулж чадсангүй. Илгээлтийн төлөвийг шалгана уу.' });
+        continue;
+      }
+      const send = result.value;
       if (!send.accepted) {
         failed.push({ orderId: row.orderId, code: row.code, error: send.error ?? 'SMS илгээгдсэнгүй.' });
         continue;

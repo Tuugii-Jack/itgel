@@ -106,6 +106,7 @@ adminBatchesRouter.post(
     params: idParams,
     body: z.object({
       orderId: z.string().min(1).optional(),
+      orderIds: z.array(z.string().min(1)).min(1).max(20).optional(),
       resend: z.boolean().optional(),
       previewToken: z.string().min(8).max(128),
       sendKey: z.string().trim().min(8).max(128),
@@ -117,8 +118,9 @@ adminBatchesRouter.post(
     }),
   }),
   asyncHandler(async (req, res) => {
-    const { orderId, resend, previewToken, commonText, overrides, sendKey } = req.body as {
+    const { orderId, orderIds, resend, previewToken, commonText, overrides, sendKey } = req.body as {
       orderId?: string;
+      orderIds?: string[];
       resend?: boolean;
       previewToken?: string;
       commonText?: string;
@@ -129,6 +131,7 @@ adminBatchesRouter.post(
       data: await sendBatchArrivalSms({
         batchId: param(req, 'id'),
         orderId,
+        orderIds,
         resend,
         actor: actorOf(req),
         previewToken,

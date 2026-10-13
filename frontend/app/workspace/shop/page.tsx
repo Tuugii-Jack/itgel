@@ -45,7 +45,7 @@ const STATUSES: OrderStatus[] = [
   "CANCELLED",
 ];
 
-const ORDERS_PAGE_SIZE = 100;
+const ORDERS_PAGE_SIZE = 30;
 
 export default function AdminOrdersPage() {
   const toast = useToast();
@@ -102,21 +102,21 @@ export default function AdminOrdersPage() {
     setMoreLoading(false);
     setError(null);
     setRefreshing(true);
+    void adminApi.summary().then((value) => {
+      if (gen === loadGen.current) setSummary(value);
+    }).catch(() => undefined);
+    void adminApi.batches({ pageSize: 100 }).then((value) => {
+      if (gen === loadGen.current) setBatches(value.data);
+    }).catch(() => undefined);
     try {
-      const [s, list, b] = await Promise.all([
-        adminApi.summary(),
-        fetchOrders(1),
-        adminApi.batches({ pageSize: 100 }),
-      ]);
+      const list = await fetchOrders(1);
       if (gen !== loadGen.current) return;
-      setSummary(s);
       setOrders(list.data);
       setPageMeta({
         page: list.meta?.page ?? 1,
         pages: list.meta?.pages ?? 1,
         total: list.meta?.total ?? list.data.length,
       });
-      setBatches(b.data);
       setSelected(new Set());
     } catch (e) {
       if (gen !== loadGen.current) return;
@@ -128,7 +128,11 @@ export default function AdminOrdersPage() {
 
   const markChanged = useDeferredReload(load, !openId);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const requests = loadGen;
+    const cancel = deferEffect(() => { void load(); });
+    return () => { cancel(); requests.current++; };
+  }, [load]);
 
   const loadMore = async () => {
     if (moreLoading) return;

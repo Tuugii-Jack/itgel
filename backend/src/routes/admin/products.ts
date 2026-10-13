@@ -39,6 +39,7 @@ const listQuery = z.object({
   type: z.enum(['order', 'ready']).optional(),
   q: z.string().trim().min(1).max(100).optional(),
   includeDeleted: z.coerce.boolean().default(false),
+  view: z.enum(['templates']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -64,7 +65,7 @@ adminProductsRouter.get(
   validate({ query: listQuery }),
   asyncHandler(async (req, res) => {
     const q = query<z.infer<typeof listQuery>>(req);
-    scheduleCloseExpired();
+    if (q.view !== 'templates') scheduleCloseExpired();
 
     const roundFilter: Prisma.ProductRoundWhereInput = {
       deletedAt: null,
@@ -81,6 +82,24 @@ adminProductsRouter.get(
       ...(q.q ? { name: { contains: q.q, mode: 'insensitive' } } : {}),
       ...(filteringRounds ? { rounds: { some: roundFilter } } : {}),
     };
+
+    // The template editor needs names/options/images, not every release's
+    // option prices, stock matrix and order statistics.
+    if (q.view === 'templates') {
+      const [total, products] = await Promise.all([
+        prisma.product.count({ where }),
+        prisma.product.findMany({
+          where, orderBy: { updatedAt: 'desc' }, skip: (q.page - 1) * q.pageSize, take: q.pageSize,
+          include: {
+            category: true, variants: { orderBy: { sortOrder: 'asc' } }, sizeChart: { orderBy: { sortOrder: 'asc' } },
+            _count: { select: { rounds: { where: { deletedAt: null } } } },
+          },
+        }),
+      ]);
+      res.json({ data: products.map((product) => ({ ...adminProduct(product), roundCount: product._count.rounds })),
+        meta: { total, page: q.page, pageSize: q.pageSize, pages: Math.ceil(total / q.pageSize) } });
+      return;
+    }
 
     const [total, products] = await Promise.all([
       prisma.product.count({ where }),

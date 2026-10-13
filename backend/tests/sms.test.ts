@@ -22,6 +22,7 @@ function jsonRes(body: unknown, status = 200) {
 
 describe('CallPro SMS contract', () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -82,6 +83,23 @@ describe('CallPro SMS contract', () => {
     });
     expect(result.status).toBe('unknown');
     expect(result.accepted).toBe(false);
+  });
+
+  it('headers arrive but the response body stalls: deadline still aborts, with no resend', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => new Response(new ReadableStream({
+      start(controller) {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted body'); error.name = 'AbortError';
+          controller.error(error);
+        }, { once: true });
+      },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = new CallProSmsProvider('k', '72123456').send({ phone: '99112233', text: 'hi' });
+    await vi.advanceTimersByTimeAsync(8001);
+    expect(await pending).toMatchObject({ accepted: false, status: 'unknown', error: 'SMS хүсэлт timeout.' });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it('GET delivered event бол delivered', async () => {

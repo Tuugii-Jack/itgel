@@ -95,4 +95,10 @@ describe('notifyArrival', () => {
     expect(result).toMatchObject({ ok: true, skipped: true });
     expect(mocks.dispatchSms).not.toHaveBeenCalled();
   });
+
+  it('batch-loaded customer phone avoids a query for every recipient', async () => {
+    expect(await notifyArrival({ ...arrivedOrder, customer: { phone: '99112233' } } as never)).toMatchObject({ ok: true });
+    expect(mocks.customer.findUnique).not.toHaveBeenCalled();
+    expect(mocks.dispatchSms).toHaveBeenCalledWith(expect.objectContaining({ phone: '99112233' }));
+  });
 });

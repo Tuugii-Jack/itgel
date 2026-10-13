@@ -26,7 +26,7 @@ import { leasingArrivalUnpaid } from "@/lib/leasing";
 import { useDeferredReload } from "@/lib/useDeferredReload";
 import type { AdminOrderRow } from "@/lib/types";
 
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 30;
 
 type GoodsFilter =
   | "arrived_unpaid"
@@ -93,10 +93,13 @@ export default function LeasingOrdersPage() {
     setLoading(true);
     setMoreLoading(false);
     setError(null);
+    // The summary can finish after the actionable order rows appear.
+    void leasingApi.summary().then((value) => {
+      if (gen === loadGen.current) setSummary(value);
+    }).catch(() => undefined);
     try {
-      const [s, list] = await Promise.all([leasingApi.summary(), fetchOrders(1)]);
+      const list = await fetchOrders(1);
       if (gen !== loadGen.current) return;
-      setSummary(s);
       setOrders(list.data);
       setPageMeta({
         page: list.meta?.page ?? 1,
@@ -118,7 +121,11 @@ export default function LeasingOrdersPage() {
     setPageMeta({ page: 1, pages: 1, total: 0 });
   });
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const requests = loadGen;
+    const cancel = deferEffect(() => { void load(); });
+    return () => { cancel(); requests.current++; };
+  }, [load]);
 
   const selectGoods = (next: GoodsFilter) => {
     if (next === goods) return;

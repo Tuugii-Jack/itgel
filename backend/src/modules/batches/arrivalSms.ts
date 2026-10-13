@@ -7,6 +7,7 @@ import { assertSmsText, smsPreviewToken, smsSegmentOf } from '../../lib/smsCompo
 import { findOrderIdsForBatch } from '../../services/batches.js';
 import { smsTemplates, type SmsLifecycleStatus } from '../../services/sms.js';
 import { notifyArrival } from '../orders/notify.js';
+import { mapConcurrent } from '../../lib/mapConcurrent.js';
 
 function arrivalTextOf(code: string, commonText?: string, override?: string) {
   if (override?.trim()) return assertSmsText(override.replaceAll('{code}', code));
@@ -112,6 +113,7 @@ export async function previewBatchArrivalSms(
 export async function sendBatchArrivalSms(opts: {
   batchId: string;
   orderId?: string;
+  orderIds?: string[];
   resend?: boolean;
   actor: string;
   previewToken?: string;
@@ -127,7 +129,13 @@ export async function sendBatchArrivalSms(opts: {
   if (!opts.sendKey?.trim()) {
     throw badRequest('Илгээлтийн түлхүүр алга.');
   }
-  if (opts.previewToken !== preview.previewToken) {
+  if (orderId && opts.orderIds) throw badRequest('Нэг захиалга эсвэл жагсаалт сонгоно уу.');
+  const requestedIds = opts.orderIds ? new Set(opts.orderIds) : null;
+  const recipients = requestedIds ? preview.recipients.filter((row) => requestedIds.has(row.orderId)) : preview.recipients;
+  const expectedToken = requestedIds
+    ? smsPreviewToken(recipients.map((row) => ({ id: row.orderId, text: row.text })), { channel: 'shop', relatedType: 'order' })
+    : preview.previewToken;
+  if (opts.previewToken !== expectedToken) {
     throw conflict('Preview-ийн дараа хүлээн авагч эсвэл мессеж өөрчлөгдсөн. Дахин шалгана уу.');
   }
   const batch = await prisma.batch.findFirst({
@@ -145,8 +153,8 @@ export async function sendBatchArrivalSms(opts: {
     throw badRequest('Энэ захиалга энэ багцад алга.');
   }
   const targetRecipients = orderId
-    ? preview.recipients.filter((row) => row.orderId === orderId)
-    : preview.recipients;
+    ? recipients.filter((row) => row.orderId === orderId)
+    : recipients;
   const textByOrder = new Map(targetRecipients.map((row) => [row.orderId, row.text]));
   const targetIds = orderId ? [orderId] : targetRecipients.map((row) => row.orderId);
   const orders = await prisma.order.findMany({
@@ -156,6 +164,7 @@ export async function sendBatchArrivalSms(opts: {
       status: { not: 'CANCELLED' },
     },
     include: {
+      customer: { select: { phone: true } },
       items: {
         select: {
           cancelledAt: true,
@@ -178,16 +187,24 @@ export async function sendBatchArrivalSms(opts: {
   let failedCount = 0;
   let unknown = 0;
 
-  for (const order of orders) {
+  const results = await mapConcurrent(orders, 4, async (order) => {
     if (!orderId && !isArrivalSmsEligible(order)) {
-      skipped.push(order.id);
-      continue;
+      return { ok: true, skipped: true };
     }
-    const result = await notifyArrival(order, {
+    return notifyArrival(order, {
       resend: Boolean(resend) && forceSingle,
       text: textByOrder.get(order.id),
       confirmKey: opts.sendKey,
     });
+  });
+  for (const [index, outcome] of results.entries()) {
+    const order = orders[index]!;
+    if (outcome.status === 'rejected') {
+      failed.push({ orderId: order.id, code: order.code, error: 'SMS-ийн хариуг баталгаажуулж чадсангүй. Илгээлтийн төлөвийг шалгана уу.' });
+      failedCount += 1;
+      continue;
+    }
+    const result = outcome.value;
     if (result.skipped) skipped.push(order.id);
     else if (result.ok) {
       sent.push(order.id);

@@ -51,6 +51,7 @@ export function useOrderDetail({
   const [order, setOrder] = useState<AdminOrderDetail | null>(null);
   const [ledger, setLedger] = useState<PaymentLedger | null>(null);
   const [qpay, setQpay] = useState<AdminOrderQpay | null>(null);
+  const [qpayLoading, setQpayLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   /** Аль үйлдэл явж байгааг заана — зөвхөн тухайн товч spinner-тэй харагдана. */
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -83,16 +84,22 @@ export function useOrderDetail({
     const gen = ++loadGen.current;
     if (!background) setLoading(true);
     setError(null);
+    setQpay(null);
+    setQpayLoading(true);
+    // Invoice metadata must not block the order and its authoritative ledger.
+    void api.orderQpay(orderId).then((value) => {
+      if (gen === loadGen.current) setQpay(value);
+    }).catch(() => undefined).finally(() => {
+      if (gen === loadGen.current) setQpayLoading(false);
+    });
     try {
-      const [o, l, q] = await Promise.all([
+      const [o, l] = await Promise.all([
         api.order(orderId),
         api.ledger(orderId),
-        api.orderQpay(orderId).catch(() => null),
       ]);
       if (gen !== loadGen.current) return;
       setOrder(o);
       setLedger(l);
-      setQpay(q);
     } catch (e) {
       if (gen !== loadGen.current) return;
       setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
@@ -101,7 +108,11 @@ export function useOrderDetail({
     }
   }, [orderId, api]);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const requests = loadGen;
+    const cancel = deferEffect(() => { void load(); });
+    return () => { cancel(); requests.current++; };
+  }, [load]);
 
   useOnKeyChange(orderId, () => {
     setSmsOpen(false);
@@ -169,7 +180,7 @@ export function useOrderDetail({
       }
       toast.success(smsStatusLabel(result.smsStatus ?? "queued"));
       setSmsOpen(false);
-      await load();
+      void load(true);
       onChanged();
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "SMS илгээгдсэнгүй.";
@@ -246,6 +257,7 @@ export function useOrderDetail({
     order,
     ledger,
     qpay,
+    qpayLoading,
     loading,
     busyKey,
     busy,

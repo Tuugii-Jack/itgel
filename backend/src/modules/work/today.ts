@@ -528,7 +528,9 @@ export async function loadTodayCardRows(input: {
         });
       }
     }
-    const matched = [...byOrder.values()];
+    // A DB scan without ordering can change between page requests. Keep a
+    // stable order so every pickable order is returned exactly once.
+    const matched = [...byOrder.values()].sort((a, b) => a.id.localeCompare(b.id));
     return {
       card: input.card,
       meta: pageMeta(matched.length, page, pageSize),
