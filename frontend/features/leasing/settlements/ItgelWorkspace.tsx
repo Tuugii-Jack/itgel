@@ -93,12 +93,14 @@ function groupByOrder(lines: SettlementLine[]) {
 export function ItgelWorkspace({
   variant,
   canPay,
+  canRegisterBank = false,
   canConfirmBank,
   showOwnerFilter,
   canWriteOrder,
 }: {
   variant: "leasing" | "admin";
   canPay: boolean;
+  canRegisterBank?: boolean;
   canConfirmBank: boolean;
   showOwnerFilter: boolean;
   canWriteOrder: boolean;
@@ -145,9 +147,10 @@ export function ItgelWorkspace({
   const paymentSubmitting = useRef(false);
 
   const ownerQuery = ownerAdminId || undefined;
-  const ownerRequired = showOwnerFilter && canPay;
+  const ownerRequired = showOwnerFilter && (canPay || canRegisterBank);
   const canSelectPay = canPay && (!ownerRequired || Boolean(ownerAdminId));
-  const canBankPay = canSelectPay && paymentOptions?.manualBankAllowed === true;
+  const canSelectRows = (canPay || canRegisterBank) && (!ownerRequired || Boolean(ownerAdminId));
+  const canBankPay = canRegisterBank && canSelectRows && paymentOptions?.manualBankAllowed === true;
   const selectionScope = [ownerQuery, from, to, q, status].join("|");
   useOnKeyChange(selectionScope, () => {
     setSelected(new Map()); setPreview(null); setCustomOpen(false); setBankOpen(false);
@@ -233,12 +236,13 @@ export function ItgelWorkspace({
     return () => { cancel(); requests.current++; };
   }, [load]);
   useEffect(() => {
-    if (!canPay) return;
+    if (!canPay && !canRegisterBank) return;
     let active = true;
-    void leasingApi.itgelPaymentOptions().then((options) => { if (active) setPaymentOptions(options); })
+    const request = variant === 'admin' ? adminApi.settlementBankOptions() : leasingApi.itgelPaymentOptions();
+    void request.then((options) => { if (active) setPaymentOptions(options); })
       .catch(() => { if (active) setPaymentOptions(null); });
     return () => { active = false; };
-  }, [canPay]);
+  }, [canPay, canRegisterBank, variant]);
 
   const restoredPendingQpay = restoredQpay(pending, ownerRequired ? ownerQuery ?? null : undefined);
   const activePaymentId = paymentId ?? restoredPendingQpay?.id ?? null;
@@ -362,7 +366,7 @@ export function ItgelWorkspace({
     amount?: number,
     allocations?: { settlementId: string; amount: number }[],
   ) => {
-    if (!canSelectPay || paymentSubmitting.current || busy || loading) return;
+    if (!(method === 'BANK_TRANSFER' ? canBankPay : canSelectPay) || paymentSubmitting.current || busy || loading) return;
     if (method === "BANK_TRANSFER" && !canBankPay) return;
     const request = allocations && amount !== undefined ? payRequestFromPreview({ amount, allocations }) : { settlementIds: [...selected.keys()], amount, allocations };
     const { settlementIds } = request;
@@ -379,7 +383,7 @@ export function ItgelWorkspace({
     setBusy(true);
     if (method === "QPAY") setInvoiceCreating(true);
     try {
-      const result = await leasingApi.itgelPay({
+      const body = {
         settlementIds,
         method,
         amount: request.amount,
@@ -388,7 +392,10 @@ export function ItgelWorkspace({
         bankRef: method === "BANK_TRANSFER" ? bankRef : undefined,
         bankDate: method === "BANK_TRANSFER" ? bankDate : undefined,
         receiptUrl: method === "BANK_TRANSFER" && receiptUrl ? receiptUrl : undefined,
-      });
+      };
+      const result = variant === 'admin'
+        ? await adminApi.registerSettlementBank({ ...body, ownerAdminId: ownerQuery!, bankRef, bankDate })
+        : await leasingApi.itgelPay(body);
       if (method === "QPAY") {
         showInvoice(result);
         if (result.invoice?.qrText || result.invoice?.qrImage || result.invoice?.invoiceId) {
@@ -399,8 +406,9 @@ export function ItgelWorkspace({
           toast.error("QPay хариу ирээгүй. Амжилттай гэж үзэхгүй.");
         }
       } else {
-        toast.success("Шилжүүлэг бүртгэгдлээ. Үндсэн админ батална.");
+        toast.success("Гүйлгээ хадгалагдлаа. Хүлээгдэж буй хэсгээс дүнг тулгаж батална.");
         setBankOpen(false);
+        setBankRef(''); setReceiptUrl('');
       }
       setCustomOpen(false);
       setSelected(new Map());
@@ -546,7 +554,7 @@ export function ItgelWorkspace({
   }
 
   return (
-    <div className={canSelectPay && selectedAmount > 0 ? "pb-64 sm:pb-28" : ""}>
+    <div className={canSelectRows && selectedAmount > 0 ? "pb-64 sm:pb-28" : ""}>
       <PageHead
         title={variant === "leasing" ? "Итгэлд төлөх" : "Лизингийн тооцоо"}
         hint={
@@ -561,7 +569,7 @@ export function ItgelWorkspace({
         <ol className="m-0 list-decimal space-y-1 pl-5 text-[13px] text-ink-2">
           <li>{ownerRequired ? "Хариуцагчаа сонгоод төлөх захиалгын мөрүүдийг чагтална." : "Доорх жагсаалтаас төлөх захиалгын мөрүүдийг чагтална."}</li>
           <li>QPay-ээр QR уншуулах эсвэл банкны апп нээж төлнө. Хэсэгчлэн төлөх бол дүнгээ оруулна.</li>
-          {paymentOptions?.manualBankAllowed && <li>Лизингийн админ дансны гүйлгээ бүртгэх эрхтэй. Лавлагаа, огноог үндсэн админ баталсны дараа үлдэгдэл буурна.</li>}
+          <li>Дансны орлогыг зөвхөн үндсэн ADMIN бүртгэнэ.</li>
         </ol>
         <div className="flex flex-wrap gap-2">
           <Button loading={busy} disabled={!canSelectPay || selectedAmount <= 0 || loading || paymentOptions?.qpayReady === false} onClick={() => void pay("QPAY")}>QPay-ээр төлөх{selectedAmount > 0 ? ` · ${money(selectedAmount)}` : ""}</Button>
@@ -571,6 +579,12 @@ export function ItgelWorkspace({
         <p className="m-0 text-[12px] text-muted">{selected.size ? `${selected.size} мөр · ${selectedOrders} захиалга сонгосон. ` : "Төлбөрийн товч идэвхжүүлэхийн тулд мөрөө сонгоно уу. "}Нэг удаад ихдээ 50 мөр төлнө.</p>
         {paymentOptions?.qpayReady === false && <p className="m-0 text-[13px] text-warn">Итгэлийн QPay одоогоор идэвхгүй. Үндсэн админтай холбогдоно уу.</p>}
 
+      </Card>}
+
+      {canRegisterBank && <Card className="mb-5 flex flex-col gap-3 p-4">
+        <div className="font-medium">Дансаар орсон төлбөр</div>
+        <p className="m-0 text-[13px] text-ink-2">Эзэн болон тооцоогоо сонгоод, бодитоор орсон гүйлгээг бүртгэнэ. Зөвхөн ADMIN эрхтэй. QPay төлбөрийг энд давхар нэмэхгүй.</p>
+        <Button variant="outline" disabled={!canBankPay || selectedAmount <= 0 || busy || loading} onClick={() => { setPreview(null); setCustomAmount(String(selectedAmount)); setBankOpen(true); }}>Дансны гүйлгээ бүртгэх{selectedAmount > 0 ? ` · ${money(selectedAmount)}` : ''}</Button>
       </Card>}
 
       <div className="mb-4 flex flex-wrap gap-2">
@@ -616,7 +630,7 @@ export function ItgelWorkspace({
               onChange={(e) => setOwnerAdminId(e.target.value)}
               className="h-11 min-w-44 rounded-[8px] border border-line bg-bg px-3 text-[14px]"
             >
-              <option value="">{canPay ? "Эзэн сонгоно уу" : "Бүгд"}</option>
+              <option value="">{ownerRequired ? "Эзэн сонгоно уу" : "Бүгд"}</option>
               {operators.map((op) => (
                 <option key={op.id} value={op.id}>
                   {op.name}
@@ -717,7 +731,7 @@ export function ItgelWorkspace({
       {tab === "unpaid" && (
         <>
           <div className="mb-4 flex flex-wrap items-center gap-2">
-            {canSelectPay && <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => {
+            {canSelectRows && <Button size="sm" variant="outline" disabled={busy || loading} onClick={() => {
               const available = lines.filter((line) => line.selectable && line.remainingAmount > 0);
               setSelected(addSettlementSelection(new Map(), available));
             }}>Харагдаж буй боломжит мөрүүдийг сонгох</Button>}
@@ -742,7 +756,7 @@ export function ItgelWorkspace({
                   <Card key={group.orderId} className="p-3 sm:p-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div className="flex min-w-0 items-start gap-3">
-                        {canSelectPay && selectable.length > 0 && (
+                        {canSelectRows && selectable.length > 0 && (
                           <input
                             type="checkbox"
                             className="mt-1 h-5 w-5"
@@ -787,7 +801,7 @@ export function ItgelWorkspace({
                       <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
                         {group.items.map((line) => (
                           <div key={line.id} className="flex items-start gap-3 rounded-[8px] bg-surface px-3 py-2">
-                            {canSelectPay && line.selectable ? (
+                            {canSelectRows && line.selectable ? (
                               <input
                                 type="checkbox"
                                 className="mt-1 h-5 w-5"
@@ -985,7 +999,7 @@ export function ItgelWorkspace({
         </>
       )}
 
-      {canSelectPay && tab === "unpaid" && selectedAmount > 0 && (
+      {canSelectRows && tab === "unpaid" && selectedAmount > 0 && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-bg p-3 sm:p-4">
           <div className="mx-auto flex max-w-5xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-[14px]">
@@ -993,10 +1007,10 @@ export function ItgelWorkspace({
               <span className="tnum font-medium">{money(selectedAmount)}</span>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <Button loading={busy} disabled={loading || paymentOptions?.qpayReady === false} className="min-h-11 w-full sm:w-auto" onClick={() => void pay("QPAY")}>
+              {canPay && <Button loading={busy} disabled={loading || paymentOptions?.qpayReady === false} className="min-h-11 w-full sm:w-auto" onClick={() => void pay("QPAY")}>
                 QPay-ээр төлөх
-              </Button>
-              <Button
+              </Button>}
+              {canPay && <Button
                 variant="outline"
                 disabled={busy || loading}
                 className="min-h-11 w-full sm:w-auto"
@@ -1007,8 +1021,8 @@ export function ItgelWorkspace({
                 }}
               >
                 Дүн оруулж төлөх
-              </Button>
-              {canBankPay && <Button variant="ghost" disabled={busy || loading} className="min-h-11 w-full sm:w-auto" onClick={() => { setPreview(null); setBankOpen(true); }}>
+              </Button>}
+              {canBankPay && <Button variant="outline" disabled={busy || loading} className="min-h-11 w-full sm:w-auto" onClick={() => { setPreview(null); setCustomAmount(String(selectedAmount)); setBankOpen(true); }}>
                 Дансны гүйлгээ бүртгэх
               </Button>}
             </div>
@@ -1070,11 +1084,13 @@ export function ItgelWorkspace({
       {bankOpen && canBankPay && (
         <Card className="fixed inset-x-3 bottom-3 z-30 flex max-h-[85dvh] max-w-[480px] flex-col gap-3 overflow-auto p-4 sm:left-auto sm:bottom-24 sm:right-6">
           <div className="text-[15px] font-medium">Дансаар шилжүүлсэн</div>
+          <div className="rounded-lg bg-surface p-3 text-[13px]">Хариуцагч: {operators.find((operator) => operator.id === ownerAdminId)?.name ?? '—'}<div className="mt-1 text-ink-2">Хүлээн авагч: {paymentOptions?.recipientName ?? 'Итгэл'}</div></div>
+          <Field label="Орсон дүн" hint={`Хамгийн ихдээ ${money(selectedAmount)}`}><Input disabled={busy} value={customAmount} onChange={setCustomAmount} inputMode="numeric" /></Field>
           <p className="m-0 text-[13px] text-ink-2">
-            Баримт оруулсан төдийд өр хаагдахгүй. Дүн: {money(preview?.amount ?? selectedAmount)}
+            Баримт оруулсан төдийд өр хаагдахгүй. Бүртгэх дүн: {parseMoneyInput(customAmount, selectedAmount) !== null ? money(parseMoneyInput(customAmount, selectedAmount)!) : '—'}
           </p>
-          <Field label="Гүйлгээний лавлагаа">
-            <Input disabled={busy} value={bankRef} onChange={setBankRef} />
+          <Field label="Банкны гүйлгээний дугаар" hint="Банкны нэр + давтагдашгүй дугаар. QPay төлбөрийг давхар нэмэхгүй.">
+            <Input disabled={busy} value={bankRef} onChange={setBankRef} maxLength={120} />
           </Field>
           <Field label="Огноо">
             <Input disabled={busy} type="date" value={bankDate} onChange={setBankDate} />
@@ -1085,16 +1101,15 @@ export function ItgelWorkspace({
           <div className="flex gap-2">
             <Button
               loading={busy}
-              disabled={!bankRef.trim() || !bankDate || loading}
+              disabled={!bankRef.trim() || !bankDate || loading || parseMoneyInput(customAmount, selectedAmount) === null}
               onClick={() =>
                 void pay(
                   "BANK_TRANSFER",
-                  preview?.amount,
-                  preview?.allocations.map((line) => ({ settlementId: line.settlementId, amount: line.amount })),
+                  parseMoneyInput(customAmount, selectedAmount) ?? undefined,
                 )
               }
             >
-              Мэдэгдэх
+              Гүйлгээ хадгалах
             </Button>
             <Button disabled={busy} variant="ghost" onClick={() => setBankOpen(false)}>
               Болих

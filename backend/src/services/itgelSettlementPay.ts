@@ -143,6 +143,7 @@ export async function createSettlementPayment(input: {
     throw conflict('Итгэлийн QPay одоогоор идэвхжээгүй.', { code: 'QPAY_NOT_READY' });
   }
   if (input.method === 'BANK_TRANSFER') {
+    if (input.role !== 'ADMIN') throw forbidden('Дансны орлогыг зөвхөн үндсэн ADMIN бүртгэнэ.');
     if (!input.bankRef?.trim()) throw conflict('Гүйлгээний лавлагаа оруулна уу.');
     if (!input.bankDate || !Number.isFinite(input.bankDate.getTime())) throw badRequest('Шилжүүлгийн огноог зөв оруулна уу.');
   }
@@ -153,6 +154,14 @@ export async function createSettlementPayment(input: {
 
   const uniqueIds = [...new Set(input.settlementIds)];
   const payment = await prisma.$transaction(async (tx) => {
+    const bankReference = input.bankRef?.trim().toUpperCase();
+    if (input.method === 'BANK_TRANSFER') {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`manual-bank:${bankReference}`}))`;
+      const customerReceipt = await tx.payment.findFirst({ where: { kind: 'PAYMENT', reference: { equals: bankReference, mode: 'insensitive' } } });
+      if (customerReceipt) throw conflict('Энэ гүйлгээ хэрэглэгчийн захиалгад аль хэдийн бүртгэгдсэн.');
+      const qpayReceipt = await tx.itgelSettlementPayment.findFirst({ where: { method: 'QPAY', OR: [{ qpayInvoiceId: { equals: bankReference, mode: 'insensitive' } }, { senderInvoiceNo: { equals: bankReference, mode: 'insensitive' } }] } });
+      if (qpayReceipt) throw conflict('Энэ гүйлгээ Итгэлийн QPay-д бүртгэгдсэн. Дансаар давхар нэмэхгүй.');
+    }
     const rows = await lockSettlementRows(tx, uniqueIds);
     if (rows.length !== uniqueIds.length) throw notFound('Тооцоо олдсонгүй.');
     const owners = new Set(rows.map((row) => row.ownerAdminId));
@@ -192,6 +201,7 @@ export async function createSettlementPayment(input: {
       if (existing.amount !== plan.amount || !sameAllocation(plan.allocations, allocationsOf(existing.lines))) {
         throw conflict('Идэвхтэй нэхэмжлэл өөр дүнтэй байна. Эхлээд цуцална уу.');
       }
+      if (input.method === 'BANK_TRANSFER' && existing.bankRef?.trim().toUpperCase() !== bankReference) throw conflict('Идэвхтэй дансны бүртгэл өөр гүйлгээний дугаартай байна.');
       return existing;
     }
 
@@ -213,6 +223,11 @@ export async function createSettlementPayment(input: {
     );
     if (!plan.ok) throw badRequest(plan.message);
 
+    if (input.method === 'BANK_TRANSFER') {
+      const duplicate = await tx.itgelSettlementPayment.findFirst({ where: { method: 'BANK_TRANSFER', bankRef: { equals: bankReference, mode: 'insensitive' }, status: { in: ['PENDING', 'CONFIRMED'] } } });
+      if (duplicate) throw conflict('Энэ банкны гүйлгээ өөр тооцоонд аль хэдийн бүртгэгдсэн.');
+    }
+
     const created = await tx.itgelSettlementPayment.create({
       data: {
         ownerAdminId,
@@ -220,7 +235,7 @@ export async function createSettlementPayment(input: {
         amount: plan.amount,
         status: 'PENDING',
         senderInvoiceNo: input.method === 'QPAY' ? undefined : null,
-        bankRef: input.bankRef?.trim() || null,
+        bankRef: bankReference || null,
         bankDate: input.bankDate ?? null,
         receiptUrl: input.receiptUrl?.trim() || null,
         claimedBy: `admin:${input.actorAdminId}`,

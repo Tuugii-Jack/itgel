@@ -113,6 +113,7 @@ export const adminOrdersApi = {
       method?: PaymentMethod;
       reference?: string;
       note?: string;
+      payeeKind?: 'SHOP' | 'LEASING';
     },
   ) =>
     request<{ payment: Payment; totals: OrderTotals }>(

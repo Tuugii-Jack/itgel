@@ -1,8 +1,10 @@
 "use client";
 
-import { Card } from "@/components/ui";
+import { Badge, Card } from "@/components/ui";
 import { dayTimeLabel, money } from "@/lib/format";
 import type { PaymentLedger as PaymentLedgerData } from "@/lib/types";
+
+const METHOD_LABEL: Record<string, string> = { BANK_TRANSFER: 'Дансаар', QPAY: 'QPay', CASH: 'Бэлэн', CARD: 'Карт', OTHER: 'Бусад', LEASING: 'Лизинг' };
 
 export function PaymentLedger({
   payments,
@@ -15,18 +17,20 @@ export function PaymentLedger({
       {payments.length === 0 ? (
         <p className="m-0 text-[13px] text-muted">Бичилт алга. Мөнгө ороогүй байна.</p>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="divide-y divide-line">
           {payments.map((p) => (
-            <div key={p.id} className="flex items-start justify-between gap-3 text-[14px]">
+            <div key={p.id} className="flex items-start justify-between gap-3 py-4 text-[14px] first:pt-0 last:pb-0">
               <div className="min-w-0">
-                <div>
-                  {p.kind === "PAYMENT" ? "Орлого" : "Буцаалт"}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{p.kind === "PAYMENT" ? "Орлого" : "Буцаалт"}</span>
+                  <Badge tone={p.method === 'QPAY' ? 'ok' : p.method === 'BANK_TRANSFER' ? 'info' : 'neutral'}>{METHOD_LABEL[p.method] ?? p.method}</Badge>
                   {p.reference && (
-                    <span className="tnum text-[13px] text-muted"> · {p.reference}</span>
+                    <span className="tnum max-w-full break-all text-[13px] text-muted"> · {p.reference}</span>
                   )}
                 </div>
                 <div className="text-[13px] text-muted">
                   {dayTimeLabel(p.createdAt)}
+                  {p.payeeKind ? ` · ${p.payeeKind === 'SHOP' ? 'Итгэл' : 'Лизинг'}` : ''}
                   {p.note ? ` · ${p.note}` : ""}
                 </div>
               </div>

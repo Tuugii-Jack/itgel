@@ -32,7 +32,7 @@ leasingFinanceRouter.get(
     res.json({ data: {
       recipientName: settings.storeName,
       qpayReady: isQpayReady('shop'),
-      manualBankAllowed: req.auth?.role === 'LEASING',
+      manualBankAllowed: false,
       maxSettlements: 50,
     } });
   }),
@@ -186,7 +186,7 @@ leasingFinanceRouter.post(
   validate({ body: payBody }),
   asyncHandler(async (req, res) => {
     const body = req.body as z.infer<typeof payBody>;
-    if (body.method === 'BANK_TRANSFER' && req.auth?.role !== 'LEASING') throw forbidden('Дансны бүртгэл хийх эрх зөвхөн лизингийн админд байна.');
+    if (body.method === 'BANK_TRANSFER') throw forbidden('Дансны орлогыг үндсэн ADMIN бүртгэнэ. Лизингийн хэсэгт QPay ашиглана.');
     const result = await createSettlementPayment({
       settlementIds: body.settlementIds,
       method: body.method,

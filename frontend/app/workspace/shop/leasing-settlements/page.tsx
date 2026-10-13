@@ -172,7 +172,8 @@ export default function AdminLeasingSettlementsPage() {
         key={user?.id ?? "admin-settlements"}
         variant="admin"
         canPay={false}
-        canConfirmBank={isFullAdmin(user?.role)}
+        canRegisterBank={user?.role === 'ADMIN'}
+        canConfirmBank={user?.role === 'ADMIN'}
         showOwnerFilter
         canWriteOrder={isFullAdmin(user?.role)}
       />

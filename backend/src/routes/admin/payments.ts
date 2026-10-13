@@ -13,6 +13,7 @@ import { asyncHandler, param, validate } from '../../middleware/validate.js';
 import { assertLeasingOrderMoneyWrite } from '../../modules/leasing/guards.js';
 import { loadOrderTotals, PAYMENT_STATE_LABEL, paymentState } from '../../services/money.js';
 import { cancelOrderItem, listPayments, recordPayment, serializePayment } from '../../services/payments.js';
+import { manualBankRecipients, recordManualBankPayment } from '../../services/manualBankPayment.js';
 
 /**
  * Төлбөрийн дэвтэр — /api/admin/orders/:id дээр залгагдана.
@@ -27,7 +28,7 @@ const methodEnum = z.enum(['BANK_TRANSFER', 'CASH', 'CARD', 'QPAY', 'OTHER']);
 async function loadLiveOrder(orderId: string) {
   const order = await prisma.order.findFirst({
     where: { id: orderId, deletedAt: null },
-    select: { id: true, isLeasing: true, payeeKind: true },
+    select: { id: true, isLeasing: true, payeeKind: true, status: true, debtClosedAt: true },
   });
   if (!order) throw notFound('Захиалга олдсонгүй.');
   return order;
@@ -119,6 +120,11 @@ adminPaymentsRouter.get(
         paymentState: state,
         paymentStateLabel: PAYMENT_STATE_LABEL[state],
         maxRefundable: mixedOwnership && !isOwnerRole(req.auth?.role) ? 0 : maxRefundable,
+        manualPayment: {
+          allowed: req.auth?.role === 'ADMIN' && !leasingPortal && order.status !== 'CANCELLED' && !order.debtClosedAt,
+          recipients: req.auth?.role === 'ADMIN' && !leasingPortal ? manualBankRecipients({ ...order, ...totals }) : [],
+          referenceRequired: true,
+        },
         mixedOwnership,
         attributedMoney,
       },
@@ -136,6 +142,7 @@ adminPaymentsRouter.post(
       method: methodEnum.optional(),
       reference: z.string().trim().max(120).optional(),
       note: z.string().trim().max(300).optional(),
+      payeeKind: z.enum(['SHOP', 'LEASING']).optional(),
     }),
   }),
   asyncHandler(async (req, res) => {
@@ -144,30 +151,24 @@ adminPaymentsRouter.post(
       method?: z.infer<typeof methodEnum>;
       reference?: string;
       note?: string;
+      payeeKind?: 'SHOP' | 'LEASING';
     };
 
-    if (req.auth?.role !== 'LEASING' || !req.baseUrl.startsWith('/api/leasing/') || (body.method ?? 'BANK_TRANSFER') !== 'BANK_TRANSFER') {
-      throw forbidden('Хэрэглэгчийн төлбөр QPay-ээр бүртгэгдэнэ. Дансны бүртгэлийг зөвхөн лизингийн админ хийнэ.');
+    if (req.auth?.role !== 'ADMIN' || !req.baseUrl.startsWith('/api/admin/') || (body.method ?? 'BANK_TRANSFER') !== 'BANK_TRANSFER') {
+      throw forbidden('Дансны орлогыг зөвхөн үндсэн ADMIN бүртгэнэ. QPay төлбөрийг гараар нэмэхгүй.');
     }
-
-    const order = await assertLeasingOrderMoneyWrite(param(req, 'id'), {
-      sub: req.auth?.sub ?? '',
-      role: req.auth?.role,
-    });
-
-    const { payment, totals } = await recordPayment({
-      orderId: order.id,
-      kind: 'PAYMENT',
+    const { payment, totals, replayed } = await recordManualBankPayment({
+      orderId: param(req, 'id'),
       amount: body.amount,
-      method: body.method,
-      reference: body.reference ?? null,
-      note: body.note ?? null,
-      actor: actorOf(req),
-      payeeKind: order.isLeasing || order.payeeKind === 'LEASING' ? 'LEASING' : 'SHOP',
+      reference: body.reference ?? '',
+      note: body.note,
+      payeeKind: body.payeeKind,
+      role: req.auth.role,
+      actorAdminId: req.auth.sub,
     });
 
-    res.status(201).json({
-      data: { payment: serializePayment(payment), totals },
+    res.status(replayed ? 200 : 201).json({
+      data: { payment: serializePayment(payment), totals, replayed },
     });
   }),
 );

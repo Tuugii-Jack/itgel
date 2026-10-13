@@ -100,6 +100,10 @@ export const adminReportsApi = {
       adminAuth,
     ).then((r) => r.data),
 
+  settlementBankOptions: () => request<import('@/features/leasing/settlements/types').SettlementPaymentOptions>('/admin/leasing-settlements/payment-options', adminAuth).then((r) => r.data),
+  registerSettlementBank: (body: { ownerAdminId: string; settlementIds: string[]; amount?: number; allocations?: { settlementId: string; amount: number }[]; bankRef: string; bankDate: string; receiptUrl?: string }) =>
+    request<import('@/features/leasing/settlements/types').SettlementPayResult>('/admin/leasing-settlements/bank-payment', { ...adminAuth, method: 'POST', body }).then((r) => r.data),
+
   checkSmsDelivery: () =>
     request<{ checked: number; delivered: number }>("/admin/settings/sms-delivery-check", {
       ...adminAuth,

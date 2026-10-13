@@ -71,10 +71,28 @@ async function arrival(seed: Awaited<ReturnType<typeof fixture>>, cargoFee = 0) 
 }
 
 describe('худалдан авагч → дэлгүүр → лизинг → бараа авах бүтэн урсгал', () => {
+  it('дансаар орсон бэлэн барааны төлбөрийг ADMIN бүртгээд бараа олгоход дэвтэр, нөөц давхардахгүй', async () => {
+    const seed = await fixture(false, true);
+    const before = await prisma.productRound.findUniqueOrThrow({ where: { id: seed.round.id } });
+    const body = { amount: 40_000, method: 'BANK_TRANSFER', reference: `BANK-FLOW-${randomUUID()}`, payeeKind: 'SHOP' };
+    await request(seed.admin, `/admin/orders/${seed.order.id}/payments`, 'POST', body, 201);
+    await request(seed.admin, `/admin/orders/${seed.order.id}/payments`, 'POST', body, 200);
+    await request(seed.admin, `/admin/orders/${seed.order.id}/status`, 'PATCH', { status: 'CONFIRMED' });
+    await request(seed.customer, `/orders/${seed.order.code}/fulfilment`, 'POST', { type: 'PICKUP', itemIds: seed.order.items.map((item) => item.id) });
+    const payload = { items: [{ itemId: seed.order.items[0]!.id, qty: 2, expectedHandedQty: 0 }], idempotencyKey: randomUUID() };
+    await request(seed.admin, '/admin/handover/partial', 'POST', payload);
+    await request(seed.admin, '/admin/handover/partial', 'POST', payload);
+    await request(seed.admin, `/admin/orders/${seed.order.id}/payments`, 'POST', body, 200);
+    const final = await request<{ status: string; paidAmount: number; dueAmount: number }>(seed.customer, `/orders/${seed.order.code}`);
+    expect(final).toMatchObject({ status: 'HANDED_OVER', paidAmount: 40_000, dueAmount: 0 });
+    expect(await prisma.payment.count({ where: { orderId: seed.order.id } })).toBe(1);
+    const after = await prisma.productRound.findUniqueOrThrow({ where: { id: seed.round.id } });
+    expect(after.stock).toBe(before.stock - 2); expect(after.reserved).toBe(0);
+  });
   it('лизингийн QPay, Итгэлд хэсэгчилсэн QPay + дансны баталгаа, карго, хэсэгчилсэн олголт', async () => {
     const seed = await fixture(true);
     const options = await request<{ qpayReady: boolean; manualBankAllowed: boolean }>(seed.operator, '/leasing/finance/itgel/payment-options');
-    expect(options.qpayReady).toBe(true); expect(options.manualBankAllowed).toBe(true);
+    expect(options.qpayReady).toBe(true); expect(options.manualBankAllowed).toBe(false);
     const owner = await seedAdmin('OWNER');
     const ownerOptions = await request<{ manualBankAllowed: boolean }>(owner, '/leasing/finance/itgel/payment-options');
     expect(ownerOptions.manualBankAllowed).toBe(false);
@@ -97,9 +115,13 @@ describe('худалдан авагч → дэлгүүр → лизинг → б
     await request(seed.operator, `/leasing/finance/itgel/payments/${partial.payment.id}/verify`, 'POST', {});
     settlement = await prisma.itgelSettlement.findUniqueOrThrow({ where: { id: settlement.id } });
     expect(settlement.paidAmount).toBe(7_000); expect(settlement.remainingAmount).toBe(33_000);
-    await request(seed.operator, '/leasing/finance/itgel/pay', 'POST', { method: 'BANK_TRANSFER', settlementIds: [settlement.id], bankRef: 'invalid-date', bankDate: 'not-a-date' }, 400);
-    const claim = await request<{ payment: { id: string } }>(seed.operator, '/leasing/finance/itgel/pay', 'POST', { method: 'BANK_TRANSFER', settlementIds: [settlement.id], bankRef: 'flow-ref', bankDate: '2026-10-12' }, 201);
+    await request(seed.operator, '/leasing/finance/itgel/pay', 'POST', { method: 'BANK_TRANSFER', settlementIds: [settlement.id], bankRef: 'invalid-date', bankDate: 'not-a-date' }, 403);
+    await request(seed.admin, '/admin/leasing-settlements/bank-payment', 'POST', { ownerAdminId: seed.operator.admin.id, settlementIds: [settlement.id], bankRef: 'invalid-date', bankDate: 'not-a-date' }, 400);
+    await request(seed.operator, '/leasing/finance/itgel/pay', 'POST', { method: 'BANK_TRANSFER', settlementIds: [settlement.id], bankRef: 'flow-ref', bankDate: '2026-10-12' }, 403);
+    const claim = await request<{ payment: { id: string } }>(seed.admin, '/admin/leasing-settlements/bank-payment', 'POST', { ownerAdminId: seed.operator.admin.id, settlementIds: [settlement.id], bankRef: randomUUID(), bankDate: '2026-10-12' }, 201);
     expect((await prisma.itgelSettlement.findUniqueOrThrow({ where: { id: settlement.id } })).remainingAmount).toBe(33_000);
+    await request(owner, '/admin/leasing-settlements/bank-payment', 'POST', { ownerAdminId: seed.operator.admin.id, settlementIds: [settlement.id], bankRef: randomUUID(), bankDate: '2026-10-12' }, 403);
+    await request(owner, `/admin/leasing-settlements/payments/${claim.payment.id}/confirm`, 'POST', {}, 403);
     await request(seed.operator, `/admin/leasing-settlements/payments/${claim.payment.id}/confirm`, 'POST', {}, 403);
     await request(seed.admin, `/admin/leasing-settlements/payments/${claim.payment.id}/confirm`, 'POST', {});
     await request(seed.admin, `/admin/leasing-settlements/payments/${claim.payment.id}/confirm`, 'POST', {});
@@ -127,7 +149,8 @@ describe('худалдан авагч → дэлгүүр → лизинг → б
 
   it('бэлэн бараа → хэрэглэгчийн QPay → хүргэлт → давтан батлахад орлого, ширхэг давхардахгүй', async () => {
     const seed = await fixture(false, true);
-    await request(seed.admin, `/admin/orders/${seed.order.id}/payments`, 'POST', { amount: 40_000, method: 'BANK_TRANSFER' }, 403);
+    const restrictedOwner = await seedAdmin('OWNER');
+    await request(restrictedOwner, `/admin/orders/${seed.order.id}/payments`, 'POST', { amount: 40_000, method: 'BANK_TRANSFER', reference: randomUUID() }, 403);
     await customerPay(seed);
     await request(seed.customer, `/orders/${seed.order.code}/qpay/verify`, 'POST', {});
     await request(seed.admin, `/admin/orders/${seed.order.id}/status`, 'PATCH', { status: 'CONFIRMED' });

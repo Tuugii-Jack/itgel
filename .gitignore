@@ -1,0 +1,3 @@
+# Obsidian's local UI state is private; the Markdown notes are versioned.
+**/.obsidian/
+.obsidian-itgel-sync.json

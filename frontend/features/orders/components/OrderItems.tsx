@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Card } from "@/components/ui";
+import { Package } from 'lucide-react';
+import { Badge, Card } from "@/components/ui";
 import { money } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
 import type { AdminOrderDetail } from "@/lib/types";
@@ -22,20 +23,27 @@ export function OrderItems({
 }) {
   const [openItgel, setOpenItgel] = useState<string | null>(null);
   return (
-    <Card className="divide-y divide-line">
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-line bg-surface px-5 py-4"><div className="text-[15px] font-medium">Захиалсан бараа</div><div className="text-[12px] text-muted">{order.items.filter((item) => !item.cancelled).length} идэвхтэй мөр</div></div>
+      <div className="divide-y divide-line">
       {order.items.map((item) => (
-        <div key={item.id} className="flex items-start justify-between gap-3 p-4">
-          <div className="min-w-0">
+        <div key={item.id} className={`flex flex-wrap items-start justify-between gap-4 p-5 ${item.cancelled ? 'bg-surface/60' : ''}`}>
+          <div className="hidden h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-secondary-soft text-secondary sm:flex"><Package className="h-5 w-5" aria-hidden="true" /></div>
+          <div className="min-w-0 flex-1">
             <div
               className={`text-[15px] leading-[1.4] ${item.cancelled ? "text-muted line-through" : ""}`}
             >
               {item.name}
             </div>
-            <div className="text-[13px] text-muted">
+            <div className="mt-1 text-[13px] text-muted">
               {formatSelections(item.selections, item.size, item.color)}
               {formatSelections(item.selections, item.size, item.color) ? " · " : ""}
               {item.qty} ш × {money(item.unitPrice)}
             </div>
+            {!item.cancelled && <div className="mt-3 flex flex-wrap gap-2">
+              <Badge tone={(item.arrivedQty ?? (item.arrivedAt ? item.qty : 0)) > 0 ? 'info' : 'neutral'}>Ирсэн {item.arrivedQty ?? (item.arrivedAt ? item.qty : 0)} / {item.qty}</Badge>
+              <Badge tone={(item.handedOverQty ?? (item.handedOverAt ? item.qty : 0)) > 0 ? 'ok' : 'neutral'}>Олгосон {item.handedOverQty ?? (item.handedOverAt ? item.qty : 0)} / {item.qty}</Badge>
+            </div>}
             {item.itgel && (
               <div className="mt-1">
                 <div className="text-[13px] text-ink-2">
@@ -65,7 +73,7 @@ export function OrderItems({
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-1">
-            <span className={`tnum text-[15px] ${item.cancelled ? "text-muted line-through" : ""}`}>
+            <span className={`tnum text-[16px] font-medium ${item.cancelled ? "text-muted line-through" : ""}`}>
               {money(item.total)}
             </span>
             {!item.cancelled && !item.handedOverAt && canCancelItems && order.status !== "HANDED_OVER" && (
@@ -78,6 +86,7 @@ export function OrderItems({
           </div>
         </div>
       ))}
+      </div>
     </Card>
   );
 }

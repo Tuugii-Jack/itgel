@@ -17,6 +17,7 @@ export interface Payment {
   /** Дэвтэрт харагдах чиглэлтэй дүн — буцаалт сөрөг. */
   signedAmount: number;
   method: PaymentMethod;
+  payeeKind?: 'SHOP' | 'LEASING' | null;
   reference: string | null;
   note: string | null;
   actor: string;
@@ -47,6 +48,11 @@ export interface PaymentLedger {
   paymentState: PaymentState;
   paymentStateLabel: string;
   maxRefundable: number;
+  manualPayment?: {
+    allowed: boolean;
+    recipients: { payeeKind: 'SHOP' | 'LEASING'; label: string; dueAmount: number }[];
+    referenceRequired: boolean;
+  };
   mixedOwnership?: boolean;
   attributedMoney?: boolean;
 }

@@ -7,32 +7,25 @@ import { WorkspaceDialog } from "@/components/admin/WorkspaceDialog";
 import { updateWorkspaceQuery, useWorkspaceQuery } from "@/lib/useWorkspaceQuery";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  BATCH_STAGE_LABEL,
   Metric,
-  OrderBadge,
-  LeasingBadge,
   ORDER_STATUS_LABEL,
   PageHead,
   Select,
-  Table,
-  Td,
-  Th,
 } from "@/components/admin/shared";
-import { Badge, Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
+import { Button, Card, Empty, ErrorNote, Skeleton } from "@/components/ui";
 import { OrderDetail } from "@/components/admin/OrderDetail";
+import { OrdersList } from "@/features/orders/components/OrdersList";
 import { OrderExportPanel } from "@/components/admin/OrderExportPanel";
 import { adminApi, ApiError } from "@/lib/api";
 import { isFullAdmin } from "@/lib/admin-role";
 import { useAdminSession } from "@/lib/admin-session";
 import { useDeferredReload } from "@/lib/useDeferredReload";
 import { useToast } from "@/lib/toast";
-import { customerNameLabel, dayLabel, money, phoneLabel } from "@/lib/format";
 import {
   downloadOrdersExcel,
   printOrders,
   type OrderExportSelection,
 } from "@/lib/orderExport";
-import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
 import type { AdminBatch, AdminOrderRow, AdminSummary, OrderStatus } from "@/lib/types";
 
 const STATUSES: OrderStatus[] = [
@@ -275,7 +268,7 @@ export default function AdminOrdersPage() {
         hint={
           showDeleted
             ? "Төлбөргүй устгасан захиалга — 10 хоног хадгалаад бүрмөсөн устана."
-            : "Бүх захиалгын урсгал, төлөв"
+            : "Хэрэглэгч, төлбөр, барааны явцыг нэг дор."
         }
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -355,9 +348,10 @@ export default function AdminOrdersPage() {
       </div>
       )}
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <Card className="mb-4 flex flex-wrap items-center gap-3 p-4">
         <button
           type="button"
+          aria-pressed={!showDeleted}
           onClick={() => setShowDeleted(false)}
           className={`h-10 cursor-pointer rounded-[8px] border px-3 text-[13px] ${
             !showDeleted ? "border-ink bg-ink text-white" : "border-line bg-bg text-ink"
@@ -367,6 +361,7 @@ export default function AdminOrdersPage() {
         </button>
         <button
           type="button"
+          aria-pressed={showDeleted}
           onClick={() => {
             setShowDeleted(true);
             setSelected(new Set());
@@ -407,7 +402,7 @@ export default function AdminOrdersPage() {
         {refreshing && (
           <span className="text-[13px] text-muted">Шинэчилж байна…</span>
         )}
-      </div>
+      </Card>
 
       {canWrite && selected.size > 0 && !showDeleted && (
         <Card className="sticky top-[76px] z-10 mb-4 flex flex-wrap items-center gap-3 border-secondary-muted bg-bg p-3">
@@ -476,166 +471,7 @@ export default function AdminOrdersPage() {
         <Empty>Захиалга олдсонгүй.</Empty>
       ) : (
         <>
-          {/* Desktop — хүснэгт */}
-          <div className="hidden md:block">
-            <Table>
-              <thead>
-                <tr>
-                  {canWrite && (
-                  <Th className="w-10">
-                    <input
-                      type="checkbox"
-                      aria-label="Бүгдийг сонгох"
-                      checked={selected.size === orders.length && orders.length > 0}
-                      onChange={(e) =>
-                        setSelected(e.target.checked ? new Set(orders.map((o) => o.id)) : new Set())
-                      }
-                    />
-                  </Th>
-                  )}
-                  <Th>Код</Th>
-                  <Th>Хэрэглэгч</Th>
-                  <Th>Бараа</Th>
-                  <Th>Дүн</Th>
-                  <Th>Төлбөр</Th>
-                  <Th>Статус</Th>
-                  {showDeleted ? <Th>Үлдсэн</Th> : <Th>Багц</Th>}
-                  <Th>Огноо</Th>
-                  <Th>Үйлдэл</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map((order) => (
-                  <tr key={order.id} className={selected.has(order.id) ? "bg-surface" : ""}>
-                    {canWrite && (
-                    <Td>
-                      <input
-                        type="checkbox"
-                        aria-label={`${order.code} сонгох`}
-                        checked={selected.has(order.id)}
-                        onChange={() => toggle(order.id)}
-                      />
-                    </Td>
-                    )}
-                    <Td className="whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => setOpenId(order.id)}
-                        className="tnum cursor-pointer border-0 bg-transparent p-0 text-ink underline"
-                      >
-                        {order.code}
-                      </button>
-                      {order.isLeasing && (
-                        <div className="mt-1">
-                          <LeasingBadge />
-                        </div>
-                      )}
-                    </Td>
-                    <Td>
-                      <div>{customerNameLabel(order.customer.name)}</div>
-                      <div className="tnum text-[13px] text-muted">
-                        {phoneLabel(order.customer.phone)}
-                      </div>
-                    </Td>
-                    <Td className="tnum">{order.itemCount} ш</Td>
-                    <Td className="tnum whitespace-nowrap">
-                      <div>{money(order.subtotal)}</div>
-                      {order.dueAmount > 0 && (
-                        <div className="text-[13px] text-warn">
-                          үлдэгдэл {money(order.dueAmount)}
-                        </div>
-                      )}
-                    </Td>
-                    <Td>
-                      <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                        {PAYMENT_LABEL_SHORT[order.paymentState]}
-                      </Badge>
-                      {order.paymentClaimedAt && order.dueAmount > 0 && (
-                        <div className="mt-1 text-[12px] text-info">Шилжүүлсэн гэсэн</div>
-                      )}
-                    </Td>
-                    <Td>
-                      <OrderBadge status={order.status} />
-                    </Td>
-                    {showDeleted ? (
-                      <Td className="tnum text-[13px] text-warn">
-                        {order.daysLeft != null ? `${order.daysLeft} хоног` : "—"}
-                      </Td>
-                    ) : (
-                      <Td className="text-[13px] text-ink-2">
-                        {order.batch ? (
-                          <>
-                            <div>{order.batch.name}</div>
-                            <div className="text-muted">{BATCH_STAGE_LABEL[order.batch.stage]}</div>
-                          </>
-                        ) : (
-                          "—"
-                        )}
-                      </Td>
-                    )}
-                    <Td className="tnum whitespace-nowrap text-[13px] text-ink-2">
-                      {dayLabel(showDeleted && order.deletedAt ? order.deletedAt : order.createdAt)}
-                    </Td>
-                    <Td><div className="flex gap-2">
-                      {!showDeleted && canWrite && !order.isLeasing && !order.isResale && order.dueAmount > 0 && <Button size="sm" variant="outline" onClick={() => setOpenId(order.id)}>Төлбөр</Button>}
-                      {!showDeleted && order.status === "ARRIVED" && <Link href={"/workspace/shop/handover?code=" + encodeURIComponent(order.code)} className="inline-flex min-h-9 items-center rounded-lg border border-line px-3 text-[12px] text-ink no-underline">Олгох</Link>}
-                    </div></Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-
-          {/* Утас — карт */}
-          <div className="flex flex-col gap-3 md:hidden">
-            {orders.map((order) => (
-              <Card key={order.id} className="p-4">
-                <div className="flex items-start justify-between gap-2">
-                  <label className="flex items-center gap-2">
-                    {canWrite && !showDeleted && (
-                      <input
-                        type="checkbox"
-                        aria-label={`${order.code} сонгох`}
-                        checked={selected.has(order.id)}
-                        onChange={() => toggle(order.id)}
-                      />
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setOpenId(order.id)}
-                      className="tnum cursor-pointer border-0 bg-transparent p-0 text-[15px] font-medium text-ink underline"
-                    >
-                      {order.code}
-                    </button>
-                  </label>
-                  <OrderBadge status={order.status} />
-                </div>
-                <div className="mt-2 text-[14px]">{customerNameLabel(order.customer.name)}</div>
-                <div className="tnum text-[13px] text-muted">
-                  {phoneLabel(order.customer.phone)} · {order.itemCount} бараа
-                </div>
-                <div className="mt-2 flex items-baseline justify-between">
-                  <span className="tnum text-[15px]">{money(order.subtotal)}</span>
-                  <span className="tnum text-[13px] text-muted">
-                    {dayLabel(showDeleted && order.deletedAt ? order.deletedAt : order.createdAt)}
-                  </span>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {order.isLeasing && <LeasingBadge />}
-                  <Badge tone={PAYMENT_TONE[order.paymentState]}>
-                    {PAYMENT_LABEL_SHORT[order.paymentState]}
-                  </Badge>
-                  {showDeleted && order.daysLeft != null && (
-                    <Badge tone="warn">Үлдсэн {order.daysLeft} хоног</Badge>
-                  )}
-                  {order.paymentClaimedAt && order.dueAmount > 0 && (
-                    <Badge tone="info">Шилжүүлсэн гэсэн</Badge>
-                  )}
-                  {!showDeleted && order.batch && <Badge tone="info">{order.batch.name}</Badge>}
-                </div>
-                </Card>
-            ))}
-          </div>
+          <OrdersList orders={orders} selected={selected} canWrite={canWrite} showDeleted={showDeleted} onToggle={toggle} onToggleAll={(checked) => setSelected(checked ? new Set(orders.map((order) => order.id)) : new Set())} onOpen={setOpenId} />
 
           {pageMeta.page < pageMeta.pages && (
             <div className="flex justify-center pt-4">

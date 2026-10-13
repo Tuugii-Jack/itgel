@@ -305,6 +305,7 @@ export function serializePayment(payment: Payment) {
     /** Дэвтэрт харагдах чиглэлтэй дүн. */
     signedAmount: payment.kind === 'REFUND' ? -payment.amount : payment.amount,
     method: payment.method,
+    payeeKind: payment.payeeKind,
     reference: payment.reference,
     note: payment.note,
     actor: payment.actor,

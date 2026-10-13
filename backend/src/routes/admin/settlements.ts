@@ -6,8 +6,11 @@ import { requireAdmin } from '../../middleware/auth.js';
 import { asyncHandler, query, validate } from '../../middleware/validate.js';
 import { unpaidAutoDeleteWhere } from '../../lib/unpaidCancel.js';
 import { getSettings } from '../../services/settings.js';
+import { forbidden } from '../../lib/errors.js';
+import { isQpayReady } from '../../services/qpay.js';
 import {
   assignMissingSettlementOwners,
+  createSettlementPayment,
   confirmBankSettlementPayment,
   daySummary,
   listMissingSettlementOrders,
@@ -20,6 +23,23 @@ import {
 export const adminSettlementsRouter = Router();
 
 adminSettlementsRouter.use(requireAdmin);
+
+adminSettlementsRouter.get('/payment-options', asyncHandler(async (req, res) => {
+  const settings = await getSettings();
+  res.json({ data: { recipientName: settings.storeName, qpayReady: isQpayReady('shop'), manualBankAllowed: req.auth?.role === 'ADMIN', maxSettlements: 50 } });
+}));
+
+adminSettlementsRouter.post('/bank-payment', validate({ body: z.object({
+  ownerAdminId: z.string().min(1), settlementIds: z.array(z.string().min(1)).min(1).max(50),
+  amount: z.number().int().positive().optional(),
+  allocations: z.array(z.object({ settlementId: z.string().min(1), amount: z.number().int().positive() })).max(50).optional(),
+  bankRef: z.string().trim().min(1).max(120), bankDate: z.string().date(),
+  receiptUrl: z.string().url().optional(), note: z.string().trim().max(300).optional(),
+}) }), asyncHandler(async (req, res) => {
+  if (req.auth?.role !== 'ADMIN') throw forbidden('Дансны орлогыг зөвхөн үндсэн ADMIN бүртгэнэ.');
+  const result = await createSettlementPayment({ ...req.body, method: 'BANK_TRANSFER', role: req.auth.role, actorAdminId: req.auth.sub, bankDate: new Date(req.body.bankDate) });
+  res.status(201).json({ data: { payment: { id: result.payment.id, amount: result.payment.amount, status: result.payment.status }, invoice: null, invoicePending: false } });
+}));
 
 adminSettlementsRouter.get(
   '/missing-owners',
@@ -159,6 +179,7 @@ adminSettlementsRouter.post(
   '/payments/:id/confirm',
   validate({ params: z.object({ id: z.string().min(1) }) }),
   asyncHandler(async (req, res) => {
+    if (req.auth?.role !== 'ADMIN') throw forbidden('Дансны орлогыг зөвхөн үндсэн ADMIN батална.');
     await confirmBankSettlementPayment({
       paymentId: String(req.params.id),
       actorAdminId: req.auth!.sub,
