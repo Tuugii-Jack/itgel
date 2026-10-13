@@ -252,6 +252,20 @@ npm run seed                # (сонголтоор) жишиг өгөгдөл
 
 ## Нэмэлт тэмдэглэл
 
+### Monorepo root-оос Vercel CLI deploy
+
+Backend-ийн project-ийг сонгосны дараа `backend/vercel.json`-ийг зааж байршуулна:
+
+```bash
+vercel deploy --prod --yes --local-config backend/vercel.json --regions hnd1
+```
+
+Тохиргоонд cron, PDF-ийн asset болон API-ийн бүс байна. Root-оос config-гүй
+deploy хийвэл backend доторх бүс хэрэгжихгүй байж болно. Deploy дуусмагц
+`vercel inspect`-ийн function нь `[hnd1]`, `/health`-ийн `x-vercel-id` нь
+`::hnd1::` болохыг шалгана. Build machine-ийн `iad1` нь function-ийн ажиллах
+бүсийг хэлэхгүй. [Vercel-ийн бүсийн тохиргоо](https://vercel.com/docs/functions/configuring-functions/region).
+
 Промптод байхгүй ч ажиллахад шаардлагатай тул нэмсэн зүйлс:
 
 - `POST /api/admin/auth/login` ба `AdminUser` хүснэгт — админ JWT авах гарц.

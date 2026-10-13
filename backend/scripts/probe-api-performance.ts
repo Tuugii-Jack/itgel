@@ -8,6 +8,9 @@ if (process.env.ITGEL_PERFORMANCE_PROBE !== 'YES') throw new Error('Explicit QA 
 const api = process.env.ITGEL_PERFORMANCE_API ?? 'https://api.itgelshop.mn/api';
 if (!['https://api.itgelshop.mn/api', 'http://127.0.0.1:4018/api'].includes(api)) throw new Error('Unexpected API host.');
 const tag = `PERF-QA-${randomUUID()}`;
+const probeAbort = new AbortController();
+process.once('SIGINT', () => probeAbort.abort());
+process.once('SIGTERM', () => probeAbort.abort());
 let adminId: string | undefined;
 const rows: { path: string; sample: number; ms: number; timing: string | null; bytes: number; status: number }[] = [];
 try {
@@ -30,7 +33,7 @@ try {
   for (const sample of [1, 2, 3]) {
     for (const path of paths) {
       const started = performance.now();
-      const response = await fetch(api + path, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(60_000) });
+      const response = await fetch(api + path, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.any([AbortSignal.timeout(60_000), probeAbort.signal]) });
       const body = await response.text();
       const row = { path: path.replace(/\/[a-z0-9]{20,}/g, '/:id'), sample, ms: Math.round(performance.now() - started), timing: response.headers.get('server-timing'), bytes: Buffer.byteLength(body), status: response.status };
       rows.push(row);
