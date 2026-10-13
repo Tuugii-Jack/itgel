@@ -93,6 +93,7 @@ function roundListWhere(q: OrdersByProductQuery, now: Date): Prisma.ProductRound
   if (q.q) parts.push({ product: { name: { contains: q.q, mode: 'insensitive' } } });
   return {
     deletedAt: null,
+    ownerKind: 'SHOP',
     ...(parts.length > 0 ? { AND: parts } : {}),
     orderItems: { some: liveItemWhere },
   };
@@ -132,7 +133,7 @@ export async function listOrdersByProduct(q: OrdersByProductQuery): Promise<{
     prisma.productRound.count({ where }),
     prisma.productRound.findMany({
       where,
-      orderBy: [{ closeAt: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ closeAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       skip: (q.page - 1) * q.pageSize,
       take: q.pageSize,
       include: {
@@ -238,6 +239,7 @@ export async function ordersByProductDates(closed: ClosedFilter): Promise<
   const rounds = await prisma.productRound.findMany({
     where: {
       deletedAt: null,
+      ownerKind: 'SHOP',
       closeAt: { not: null },
       ...closedWhere(closed, now),
       orderItems: { some: liveItemWhere },

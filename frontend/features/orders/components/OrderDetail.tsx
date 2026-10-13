@@ -43,6 +43,7 @@ export function OrderDetail({
   api = adminApi,
   canWrite: canWriteProp,
   workspace: workspaceProp,
+  backLabel = 'Захиалгын жагсаалт руу',
 }: {
   orderId: string;
   onClose: () => void;
@@ -50,6 +51,7 @@ export function OrderDetail({
   api?: OrderWorkspaceApi;
   canWrite?: boolean;
   workspace?: "shop" | "leasing";
+  backLabel?: string;
 }) {
   const [section, setSection] = useState("auto");
   useOnKeyChange(orderId, () => setSection('auto'));
@@ -111,7 +113,7 @@ export function OrderDetail({
 
   return (
     <div className="mx-auto max-w-[1180px]">
-      <button type="button" onClick={onClose} className="mb-4 inline-flex min-h-9 items-center gap-2 text-[13px] text-ink-2 hover:text-ink"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Захиалгын жагсаалт руу</button>
+      <button type="button" onClick={onClose} className="mb-4 inline-flex min-h-9 items-center gap-2 text-[13px] text-ink-2 hover:text-ink"><ArrowLeft className="h-4 w-4" aria-hidden="true" />{backLabel}</button>
       <Card className="mb-5 p-5 sm:p-6 [&_.workspace-pagehead]:mb-4">
       <PageHead
         title={order.code}

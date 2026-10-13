@@ -19,6 +19,7 @@ import { replaceRoundOptionPrices } from '../../lib/optionPrices.js';
 import { replaceRoundSkuStocks, skuStockSum, syncRoundAvailable } from '../../lib/skuStock.js';
 import { selectionsOf, sizeColorFromSelections, tallyVariants } from '../../lib/options.js';
 import { diffUbDays } from '../../lib/date.js';
+import { SHOP_STAFF_ORDER_WHERE } from '../../lib/leasing.js';
 import { productStatus, roundFields } from '../../modules/catalog/productFields.js';
 
 /**
@@ -73,7 +74,7 @@ adminRoundsRouter.get(
     if (!round || round.ownerKind === 'LEASING') throw notFound('Тойрог олдсонгүй.');
 
     const items = await prisma.orderItem.findMany({
-      where: { roundId: round.id, order: { deletedAt: null } },
+      where: { roundId: round.id, order: { deletedAt: null, ...SHOP_STAFF_ORDER_WHERE } },
       include: { order: { include: { customer: true } } },
       orderBy: { order: { createdAt: 'desc' } },
     });

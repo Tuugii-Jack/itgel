@@ -1,13 +1,17 @@
 "use client";
 
 import { deferEffect } from "@/lib/deferEffect";
-import { useCallback, useEffect, useState } from "react";
-import { Metric, OrderBadge, PageHead, Table, Td, Th } from "@/components/admin/shared";
-import { Badge, Button, Card, Empty, ErrorNote, Spinner } from "@/components/ui";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Metric, PageHead, ProductStatusBadge } from "@/components/admin/shared";
+import { Button, Card, ErrorNote, Skeleton } from "@/components/ui";
 import { adminApi, ApiError } from "@/lib/api";
-import { dayLabel, money, phoneLabel } from "@/lib/format";
+import { money } from "@/lib/format";
 import { formatSelections } from "@/lib/options";
-import { PAYMENT_LABEL_SHORT, PAYMENT_TONE } from "@/lib/payment";
+import { RoundBuyerList } from "@/features/orders/components/RoundBuyerList";
+import { ProductOrderExport } from "@/features/orders/components/ProductOrderExport";
+import { roundBuyerCounts } from "@/features/orders/productOrderView";
+import { useOnKeyChange } from "@/lib/syncKey";
+import { ArrowLeft, Package } from "lucide-react";
 import {
   closeHint,
   DEFAULT_PRODUCT_PRINT,
@@ -41,25 +45,33 @@ export function RoundBuyers({
   const [printOpen, setPrintOpen] = useState(false);
   const [printOpts, setPrintOpts] = useState<ProductPrintOptions>(DEFAULT_PRODUCT_PRINT);
 
+  const requests = useRef(0);
+  const [printBusy, setPrintBusy] = useState<"print" | "excel" | null>(null);
+  const [printError, setPrintError] = useState<string | null>(null);
+  useOnKeyChange(roundId, () => { setData(null); setPrintOpen(false); setPrintError(null); });
+
   const load = useCallback(async () => {
+    const generation = ++requests.current;
     setLoading(true);
     setError(null);
     try {
-      setData(await adminApi.roundOrders(roundId));
+      const value = await adminApi.roundOrders(roundId);
+      if (generation === requests.current) setData(value);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
+      if (generation === requests.current) setError(e instanceof ApiError ? e.message : "Ачаалж чадсангүй.");
     } finally {
-      setLoading(false);
+      if (generation === requests.current) setLoading(false);
     }
   }, [roundId]);
 
-  useEffect(() => deferEffect(() => { void load(); }), [load]);
+  useEffect(() => {
+    const current = requests; const cancel = deferEffect(() => { void load(); });
+    return () => { cancel(); current.current++; };
+  }, [load]);
 
   if (loading) {
     return (
-      <div className="flex justify-center py-16">
-        <Spinner className="text-muted" />
-      </div>
+      <div><Button variant="ghost" onClick={onClose}>Буцах</Button><Skeleton className="mb-4 h-36 rounded-xl" /><Skeleton className="h-72 rounded-xl" /></div>
     );
   }
 
@@ -68,27 +80,24 @@ export function RoundBuyers({
       <div>
         <PageHead
           title="Худалдан авагчид"
-          actions={
-            <Button variant="ghost" onClick={onClose}>
-              Буцах
-            </Button>
-          }
+          actions={<Button variant="ghost" onClick={onClose}>Буцах</Button>}
         />
-        <ErrorNote>{error ?? "Мэдээлэл алга."}</ErrorNote>
+        <ErrorNote>{error ?? "Мэдээлэл алга."}</ErrorNote><Button className="mt-4" variant="outline" onClick={() => void load()}>Дахин ачаалах</Button>
       </div>
     );
   }
 
   const { round, summary, orders } = data;
-  const live = orders.filter((o) => !o.cancelled);
-  const cancelled = orders.filter((o) => o.cancelled);
+  const counts = roundBuyerCounts(orders);
   const closed = round.closed ?? round.status === "CLOSED";
 
   return (
-    <div className="max-w-[1000px]">
+    <div className="mx-auto max-w-[1180px]">
+      <button type="button" onClick={onClose} className="mb-4 inline-flex min-h-9 items-center gap-2 text-[13px] text-ink-2"><ArrowLeft className="h-4 w-4" aria-hidden="true" />Буцах</button>
+      <Card className="mb-5 p-5 sm:p-6">
       <PageHead
         title={round.name}
-        hint={`#${round.roundNo} гаргалт · ${money(round.sellPrice)} · ${closeHint({
+        hint={`#${round.roundNo} гаргалт · ${closeHint({
           closed,
           closeAt: round.closeAt,
           daysOpen: round.daysOpen ?? null,
@@ -96,109 +105,40 @@ export function RoundBuyers({
         })}`}
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => setPrintOpen((v) => !v)}>
+            <Button variant="outline" size="sm" aria-expanded={printOpen} onClick={() => setPrintOpen((v) => !v)}>
               Хэвлэх / Excel
-            </Button>
-            <Button variant="ghost" onClick={onClose}>
-              Буцах
             </Button>
           </div>
         }
       />
 
-      {printOpen && (
-        <Card className="mb-5 flex flex-col gap-3 p-4">
-          <div className="text-[14px] font-medium">Хэвлэх / Excel сонголт</div>
-          <div className="flex flex-wrap gap-x-5 gap-y-2">
-            <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-              <input
-                type="checkbox"
-                checked={printOpts.customers}
-                onChange={(e) => {
-                  const v = e.target.checked;
-                  setPrintOpts((o) => ({
-                    ...o,
-                    customers: v,
-                    phone: v ? o.phone : false,
-                    code: v ? o.code : false,
-                  }));
-                }}
-              />
-              Худалдан авагчид
-            </label>
-            <label
-              className={`flex items-center gap-2 text-[13px] ${printOpts.customers ? "cursor-pointer" : "cursor-not-allowed text-muted"}`}
-            >
-              <input
-                type="checkbox"
-                checked={printOpts.phone}
-                disabled={!printOpts.customers}
-                onChange={(e) => setPrintOpts((o) => ({ ...o, phone: e.target.checked }))}
-              />
-              Утас
-            </label>
-            <label
-              className={`flex items-center gap-2 text-[13px] ${printOpts.customers ? "cursor-pointer" : "cursor-not-allowed text-muted"}`}
-            >
-              <input
-                type="checkbox"
-                checked={printOpts.code}
-                disabled={!printOpts.customers}
-                onChange={(e) => setPrintOpts((o) => ({ ...o, code: e.target.checked }))}
-              />
-              Захиалгын код
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-[13px]">
-              <input
-                type="checkbox"
-                checked={printOpts.amounts}
-                onChange={(e) => setPrintOpts((o) => ({ ...o, amounts: e.target.checked }))}
-              />
-              Үнэ
-            </label>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              onClick={() =>
-                printProductOrders([roundOrdersToPrintProduct(data)], printOpts, {
-                  title: data.round.name,
-                  hint: closeHint({
-                    closed,
-                    closeAt: round.closeAt,
-                    daysOpen: round.daysOpen ?? null,
-                    daysSinceClose: round.daysSinceClose ?? null,
-                  }),
-                  countLabel: `${summary.qty} ш`,
-                })
-              }
-            >
-              Хэвлэх
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                downloadProductOrdersExcel([roundOrdersToPrintProduct(data)], printOpts, {
-                  filename: productExcelFilename(data.round.name),
-                })
-              }
-            >
-              Excel татах
-            </Button>
-          </div>
-        </Card>
-      )}
+      <div className="flex flex-wrap items-center gap-3 border-t border-line pt-4 text-[13px]"><ProductStatusBadge status={round.status} /><span className="text-muted">Үндсэн үнэ <span className="tnum text-ink">{money(round.sellPrice)}</span></span></div>
+      </Card>
+
+      {printOpen && <ProductOrderExport options={printOpts} onChange={setPrintOpts} busy={printBusy}
+        scopeLabel="Энэ гаргалтын бүх идэвхтэй барааны задаргаа экспортод орно. Доорх хайлт, шүүлт хэвлэх тоог өөрчлөхгүй."
+        onExport={(mode) => {
+          if (printBusy) return;
+          setPrintBusy(mode);
+          setPrintError(null);
+          try {
+            const products = [roundOrdersToPrintProduct(data)];
+            if (mode === 'excel') downloadProductOrdersExcel(products, printOpts, { filename: productExcelFilename(round.name) });
+            else printProductOrders(products, printOpts, { title: round.name, countLabel: summary.qty + ' ш', hint: closeHint({ closed, closeAt: round.closeAt, daysOpen: round.daysOpen ?? null, daysSinceClose: round.daysSinceClose ?? null }) });
+          } catch { setPrintError(mode === 'excel' ? 'Excel татаж чадсангүй.' : 'Хэвлэж чадсангүй.'); }
+          finally { setPrintBusy(null); }
+        }} />}
+      {printError && <div className="mb-4"><ErrorNote>{printError}</ErrorNote></div>}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Metric label="Хэдэн хүн авсан" value={summary.customerCount} />
+        <Metric label="Худалдан авагч" value={summary.customerCount} sub={counts.active + " захиалга"} />
         <Metric label="Нийт ширхэг" value={summary.qty} tone="info" />
-        <Metric label="Орлого" value={money(summary.revenue)} />
+        <Metric label="Барааны нийт дүн" value={money(summary.revenue)} sub="Орсон төлбөрийн дүн биш" />
         <Metric
-          label="Төлбөр дутуу"
-          value={summary.unpaidCount}
-          tone={summary.unpaidCount > 0 ? "warn" : "ok"}
-          sub={summary.unpaidCount > 0 ? "Мөнгө ороогүй" : "Бүгд төлсөн"}
+          label="Үлдэгдэлтэй захиалга"
+          value={counts.unpaid}
+          tone={counts.unpaid > 0 ? "warn" : "ok"}
+          sub="Нэг кодыг нэг удаа тоолно"
         />
       </div>
 
@@ -207,7 +147,7 @@ export function RoundBuyers({
         <Card className="mb-5 p-4">
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <div>
-              <div className="text-[15px] font-medium">Захиалах тоо</div>
+              <div className="flex items-center gap-2 text-[15px] font-medium"><Package className="h-4 w-4 text-secondary" aria-hidden="true" />Захиалах тоо</div>
               <div className="text-[13px] text-muted">
                 Нийлүүлэгч рүү явуулах задаргаа
               </div>
@@ -215,7 +155,7 @@ export function RoundBuyers({
             <span className="tnum text-[20px] font-medium">{summary.qty} ш</span>
           </div>
           {(summary.byKind ?? []).length > 0 && (
-            <div className="mb-4 flex flex-col gap-3">
+            <details className="mb-4 rounded-lg border border-line p-3"><summary className="cursor-pointer text-[13px] text-ink-2">Өнгө, хэмжээ тус бүрийн нийлбэр</summary><div className="mt-3 flex flex-col gap-3">
               {summary.byKind!.map((kind) => (
                 <div key={kind.kind}>
                   <div className="mb-1.5 text-[13px] text-ink-2">{kind.kind}</div>
@@ -232,13 +172,13 @@ export function RoundBuyers({
                   </div>
                 </div>
               ))}
-            </div>
+            </div></details>
           )}
-          <div className="flex flex-wrap gap-2">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {summary.byVariant.map((v, i) => (
               <div
                 key={i}
-                className="flex items-baseline gap-2 rounded-[8px] border border-line bg-surface px-3 py-2"
+                className="flex items-center justify-between gap-3 rounded-lg border border-line px-3 py-3"
               >
                 <span className="text-[14px]">
                   {formatSelections(v.selections, v.size, v.color) || "Сонголтгүй"}
@@ -249,136 +189,16 @@ export function RoundBuyers({
           </div>
           <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[13px] text-ink-2">
             <span>
-              Дүн <span className="tnum">{money(summary.revenue)}</span>
+              Барааны дүн <span className="tnum">{money(summary.revenue)}</span>
             </span>
             {summary.cancelledCount > 0 && (
-              <span className="text-danger">{summary.cancelledCount} цуцлагдсан</span>
+              <span className="text-danger">{summary.cancelledCount} цуцлагдсан мөр</span>
             )}
           </div>
         </Card>
       )}
 
-      {orders.length === 0 ? (
-        <Empty>Энэ гаргалтыг хэн ч аваагүй байна.</Empty>
-      ) : (
-        <>
-          <div className="mb-2 text-[15px] font-medium">
-            Худалдан авагчид
-            <span className="ml-2 text-[13px] text-muted">{live.length} захиалга</span>
-          </div>
-
-          {/* Desktop — хүснэгт */}
-          <div className="hidden md:block">
-            <Table>
-              <thead>
-                <tr>
-                  <Th>Хэрэглэгч</Th>
-                  <Th>Код</Th>
-                  <Th>Сонголт</Th>
-                  <Th>Тоо</Th>
-                  <Th>Дүн</Th>
-                  <Th>Төлбөр</Th>
-                  <Th>Статус</Th>
-                  <Th>Огноо</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...live, ...cancelled].map((o) => (
-                  <tr key={o.orderId + o.code} className={o.cancelled ? "opacity-50" : ""}>
-                    <Td>
-                      <div className={o.cancelled ? "line-through" : ""}>
-                        {o.customer.name ?? "Нэргүй"}
-                      </div>
-                      <div className="tnum text-[13px] text-muted">
-                        {phoneLabel(o.customer.phone)}
-                      </div>
-                    </Td>
-                    <Td className="whitespace-nowrap">
-                      {onOpenOrder ? (
-                        <button
-                          type="button"
-                          onClick={() => onOpenOrder(o.orderId)}
-                          className="tnum cursor-pointer border-0 bg-transparent p-0 text-ink underline"
-                        >
-                          {o.code}
-                        </button>
-                      ) : (
-                        <span className="tnum">{o.code}</span>
-                      )}
-                    </Td>
-                    <Td className="text-[13px]">
-                      {formatSelections(o.selections, o.size, o.color) || "—"}
-                    </Td>
-                    <Td className="tnum">{o.qty} ш</Td>
-                    <Td className="tnum whitespace-nowrap">{money(o.total)}</Td>
-                    <Td>
-                      <Badge tone={PAYMENT_TONE[o.paymentState]}>
-                        {PAYMENT_LABEL_SHORT[o.paymentState]}
-                      </Badge>
-                      {o.paymentClaimedAt && o.dueAmount > 0 && (
-                        <div className="mt-1 text-[12px] text-info">Шилжүүлсэн гэсэн</div>
-                      )}
-                    </Td>
-                    <Td>
-                      {o.cancelled ? (
-                        <Badge tone="danger">Цуцлагдсан</Badge>
-                      ) : (
-                        <OrderBadge status={o.status} />
-                      )}
-                    </Td>
-                    <Td className="tnum whitespace-nowrap text-[13px] text-ink-2">
-                      {dayLabel(o.createdAt)}
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </Table>
-          </div>
-
-          {/* Утас — карт */}
-          <div className="flex flex-col gap-3 md:hidden">
-            {[...live, ...cancelled].map((o) => (
-              <Card key={o.orderId + o.code} className={`p-4 ${o.cancelled ? "opacity-50" : ""}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-[15px]">{o.customer.name ?? "Нэргүй"}</div>
-                    <div className="tnum text-[13px] text-muted">
-                      {phoneLabel(o.customer.phone)}
-                    </div>
-                  </div>
-                  {o.cancelled ? (
-                    <Badge tone="danger">Цуцлагдсан</Badge>
-                  ) : (
-                    <OrderBadge status={o.status} />
-                  )}
-                </div>
-                <div className="mt-2 flex items-baseline justify-between gap-2 text-[13px]">
-                  <span className="text-muted">
-                    {formatSelections(o.selections, o.size, o.color) || "Сонголтгүй"} · {o.qty} ш
-                  </span>
-                  <span className="tnum">{money(o.total)}</span>
-                </div>
-                <div className="mt-2 flex items-center justify-between gap-2">
-                  {onOpenOrder ? (
-                    <button
-                      type="button"
-                      onClick={() => onOpenOrder(o.orderId)}
-                      className="tnum cursor-pointer border-0 bg-transparent p-0 text-[14px] text-ink underline"
-                    >
-                      {o.code}
-                    </button>
-                  ) : (
-                    <span className="tnum text-[14px]">{o.code}</span>
-                  )}
-                  <Badge tone={PAYMENT_TONE[o.paymentState]}>
-                    {PAYMENT_LABEL_SHORT[o.paymentState]}
-                  </Badge>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </>
-      )}
+      <RoundBuyerList key={roundId} orders={orders} onOpenOrder={onOpenOrder} />
     </div>
   );
 }

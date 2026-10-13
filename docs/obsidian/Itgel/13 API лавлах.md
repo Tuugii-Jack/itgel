@@ -111,11 +111,11 @@
 | GET | `/api/admin/returns` | `backend/src/routes/admin/returns.ts:62` |
 | GET | `/api/admin/returns/calendar` | `backend/src/routes/admin/returns.ts:31` |
 | POST | `/api/admin/returns/payouts` | `backend/src/routes/admin/returns.ts:46` |
-| DELETE | `/api/admin/rounds/:id` | `backend/src/routes/admin/rounds.ts:342` |
-| GET | `/api/admin/rounds/:id` | `backend/src/routes/admin/rounds.ts:44` |
-| PATCH | `/api/admin/rounds/:id` | `backend/src/routes/admin/rounds.ts:186` |
-| GET | `/api/admin/rounds/:id/orders` | `backend/src/routes/admin/rounds.ts:65` |
-| POST | `/api/admin/rounds/bulk-status` | `backend/src/routes/admin/rounds.ts:289` |
+| DELETE | `/api/admin/rounds/:id` | `backend/src/routes/admin/rounds.ts:343` |
+| GET | `/api/admin/rounds/:id` | `backend/src/routes/admin/rounds.ts:45` |
+| PATCH | `/api/admin/rounds/:id` | `backend/src/routes/admin/rounds.ts:187` |
+| GET | `/api/admin/rounds/:id/orders` | `backend/src/routes/admin/rounds.ts:66` |
+| POST | `/api/admin/rounds/bulk-status` | `backend/src/routes/admin/rounds.ts:290` |
 | GET | `/api/admin/settings` | `backend/src/routes/admin/settings.ts:17` |
 | PATCH | `/api/admin/settings` | `backend/src/routes/admin/settings.ts:47` |
 | GET | `/api/admin/settings/audit` | `backend/src/routes/admin/settings.ts:105` |
