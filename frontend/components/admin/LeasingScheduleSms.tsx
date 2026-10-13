@@ -110,6 +110,7 @@ export function LeasingScheduleSms({
     sender: string | null;
     recipients: { orderId: string; code: string; name: string | null; phone: string; text: string; chars: number; segments: number }[];
     previewToken: string;
+    sendKey: string;
   } | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [overrides, setOverrides] = useState<Record<string, string>>({});
@@ -223,6 +224,7 @@ export function LeasingScheduleSms({
         sender: draft.sender,
         recipients: draft.recipients,
         previewToken: draft.previewToken,
+        sendKey: crypto.randomUUID(),
       });
       setConfirming(true);
     } catch (e) {
@@ -240,7 +242,7 @@ export function LeasingScheduleSms({
     setBusy(true);
     setError(null);
     try {
-      const sendKey = crypto.randomUUID();
+      const sendKey = confirmDraft.sendKey;
       const batches = await sendSmsChunks(confirmDraft.recipients, async (chunk) => {
         const chunkIds = chunk.map((row) => row.orderId);
         return leasingApi.sendScheduleSms(

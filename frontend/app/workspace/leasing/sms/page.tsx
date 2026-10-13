@@ -53,6 +53,7 @@ export default function LeasingSmsPage() {
     segments: number;
     phones: string[];
     previewToken: string;
+    sendKey: string;
   } | null>(null);
 
   const parsed = useMemo(() => parsePhones(rawPhones), [rawPhones]);
@@ -86,6 +87,7 @@ export default function LeasingSmsPage() {
         segments: data.segments,
         phones: data.phones,
         previewToken: data.previewToken,
+        sendKey: crypto.randomUUID(),
       });
     } catch (e) {
       const message = e instanceof ApiError ? e.message : "Урьдчилан харж чадсангүй.";
@@ -102,7 +104,7 @@ export default function LeasingSmsPage() {
     setBusy(true);
     setError(null);
     try {
-      const sendKey = crypto.randomUUID();
+      const sendKey = draft.sendKey;
       const batches = await sendSmsChunks(draft.phones, async (chunk) => leasingApi.sendSms(
         chunk, draft.text, await smsSubsetToken(chunk.map((phone) => ({ id: phone, text: draft.text })), "leasing"), sendKey,
       ), (completed, total) => setSendProgress({ completed, total }));

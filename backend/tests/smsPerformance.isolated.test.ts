@@ -55,6 +55,11 @@ describe('SMS performance and reliability', () => {
     const retry = await fetch(`${server.url}/api/leasing/sms`, { method: 'POST', headers: admin.headers, body });
     expect(retry.status).toBe(200);
     expect(state.calls).toBe(40);
+    await prisma.smsDispatch.updateMany({ where: { idempotencyKey: { startsWith: `confirm:leasing_custom:${sendKey}:` } }, data: { status: 'delivered', deliveredAt: new Date(), nextCheckAt: null } });
+    const deliveredRetry = await fetch(`${server.url}/api/leasing/sms`, { method: 'POST', headers: admin.headers, body });
+    expect(deliveredRetry.status).toBe(200);
+    expect(await deliveredRetry.json()).toMatchObject({ data: { sent: 40, delivered: 40 } });
+    expect(state.calls).toBe(40);
     console.info(`[performance] SMS 40 recipients: sequential=${sequentialMs}ms concurrent=${concurrentMs}ms maxWorkers=${state.max}; actual SMS=0`);
   }, 20_000);
 
